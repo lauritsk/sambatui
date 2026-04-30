@@ -36,8 +36,20 @@ DEFAULT_LDAP_ATTRIBUTES = (
     "description",
     "mail",
     "memberOf",
+    "member",
     "objectClass",
     "distinguishedName",
+    "userAccountControl",
+    "lastLogonTimestamp",
+    "lastLogon",
+    "whenCreated",
+    "whenChanged",
+    "pwdLastSet",
+    "accountExpires",
+    "primaryGroupID",
+    "dNSHostName",
+    "servicePrincipalName",
+    "proxyAddresses",
 )
 
 _KIND_FILTERS: Mapping[str, str] = {
