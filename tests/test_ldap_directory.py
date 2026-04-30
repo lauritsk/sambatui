@@ -1,6 +1,9 @@
+import pytest
 from ldap3 import GSSAPI, SASL
+from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
 from sambatui.ldap_directory import (
+    LdapDirectoryClient,
     LdapSearchConfig,
     build_directory_filter,
     domain_to_base_dn,
@@ -110,6 +113,40 @@ def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
     assert kwargs["sasl_mechanism"] == GSSAPI
     assert "password" not in kwargs
     assert kwargs["cred_store"] == {"ccache": "FILE:/tmp/krb5cc_test"}
+
+
+def test_search_wraps_ldap_session_termination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConnection:
+        result = None
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def bind(self) -> bool:
+            raise LDAPSessionTerminatedByServerError("session terminated by server")
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="LDAP bind failed: session terminated by server",
+    ):
+        client.search("users")
 
 
 def test_gssapi_cred_store_keeps_explicit_cache_type() -> None:
