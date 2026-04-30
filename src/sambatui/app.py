@@ -10,7 +10,15 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.widgets import Button, DataTable, Input, Label, Static
+from textual.widgets import (
+    Button,
+    DataTable,
+    Input,
+    Label,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
@@ -105,6 +113,8 @@ class SambatuiApp(App):
         margin-right: 1;
     }
 
+    #side_tabs { height: 1fr; }
+
     #results {
         width: 1fr;
         height: 1fr;
@@ -115,8 +125,7 @@ class SambatuiApp(App):
         padding: 0 1;
     }
 
-    #zones_panel { height: 1fr; }
-    #zone_actions { height: auto; margin-bottom: 1; }
+    #dns_panel, #ldap_panel { height: 1fr; }
 
     .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
     .hint { color: $text-muted; margin-bottom: 1; }
@@ -126,6 +135,7 @@ class SambatuiApp(App):
     Button { width: 1fr; }
 
     #zones { height: 1fr; margin-bottom: 1; }
+    #ldap_hint { height: 1fr; }
     #records { height: 1fr; }
     #status { height: 3; color: $text-muted; }
     """
@@ -189,17 +199,24 @@ class SambatuiApp(App):
             yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
 
         with Horizontal(id="main"):
-            with Vertical(id="sidebar"):
-                with Vertical(id="zones_panel", classes="panel"):
-                    yield Static("Zones", classes="section-title")
-                    yield Static("Connection: not checked", id="connection_summary")
-                    with Horizontal(id="zone_actions"):
-                        yield Button("Load zones", id="load_zones", variant="primary")
-                        yield Button("Connection…", id="open_connection")
-                    zones = DataTable(id="zones", cursor_type="row")
-                    zones.add_columns("DNS zones")
-                    yield zones
-                    yield Static("Ready", id="status")
+            with Vertical(id="sidebar", classes="panel"):
+                yield Static("Connection: not checked", id="connection_summary")
+                with TabbedContent(id="side_tabs"):
+                    with TabPane("DNS", id="dns_tab"):
+                        with Vertical(id="dns_panel"):
+                            yield Static("DNS zones", classes="section-title")
+                            zones = DataTable(id="zones", cursor_type="row")
+                            zones.add_columns("DNS zones")
+                            yield zones
+                    with TabPane("LDAP", id="ldap_tab"):
+                        with Vertical(id="ldap_panel"):
+                            yield Static("LDAP directory", classes="section-title")
+                            yield Static(
+                                "Press L to search AD directory. Results open in the main table.",
+                                id="ldap_hint",
+                                classes="hint",
+                            )
+                yield Static("Ready", id="status")
 
             with Vertical(id="results", classes="panel"):
                 yield Label("Records", id="records_title", classes="section-title")
@@ -241,7 +258,10 @@ class SambatuiApp(App):
         else:
             self.set_status("Enter password, load password file, or use kerberos auth")
 
-        self.call_after_refresh(self.action_connection)
+        if self.connection_needs_setup():
+            self.call_after_refresh(self.action_connection)
+        else:
+            self.call_after_refresh(self.load_zones)
 
     def val(self, widget_id: str) -> str:
         return self.query_one(f"#{widget_id}", Input).value.strip()
@@ -258,6 +278,15 @@ class SambatuiApp(App):
         zone = self.val("zone") or "no zone"
         auth = self.val("auth") or DEFAULT_AUTH
         return f"{server} · {zone} · {auth} auth"
+
+    def connection_needs_setup(self) -> bool:
+        if not self.val("server") or not self.val("zone"):
+            return True
+        if (self.val("auth") or DEFAULT_AUTH).casefold() != "password":
+            return False
+        if not self.val("user"):
+            return True
+        return not (self.val("password") or read_password_file(self.password_file()))
 
     def refresh_connection_summary(self) -> None:
         with suppress(Exception):
@@ -455,7 +484,7 @@ class SambatuiApp(App):
     async def action_connection(self) -> None:
         values = await self.form(
             "Connection settings",
-            "These values feed samba-tool. Press Apply to close this setup screen; reopen with Ctrl+O.",
+            "These values feed samba-tool and LDAP. Press Apply to close; reopen with Ctrl+O or ? help.",
             self.connection_fields(),
             "Apply",
         )
@@ -472,6 +501,8 @@ class SambatuiApp(App):
                 self.set_val("password", password)
         self.refresh_connection_summary()
         self.set_status("Connection settings updated")
+        if not self.connection_needs_setup():
+            await self.load_zones()
 
     async def run_command(
         self, client: SambaToolClient, cmd: list[str]
@@ -1350,8 +1381,6 @@ class SambatuiApp(App):
                 await self.load_zones()
             case "discover_ad":
                 self.action_discover_ad()
-            case "open_connection":
-                self.action_connection()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "zones":

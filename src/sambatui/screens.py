@@ -93,10 +93,14 @@ class HelpScreen(ModalScreen[None]):
     """
 
     HELP_TEXT = """Connection
-  Ctrl+O    Open connection settings
+  Ctrl+O    Open/edit connection settings (also via sidebar Connection…)
   p/P       Load/save password file
   c         Discover AD domain controllers
-  L         Search AD directory over LDAP
+
+Main tabs
+  DNS       Load zones, select a zone, manage records
+  LDAP      Search AD directory over LDAP (read-only)
+  L         Search LDAP from anywhere
   z         Load DNS zones
 
 Navigation
