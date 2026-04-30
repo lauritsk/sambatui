@@ -168,6 +168,19 @@ SMART_VIEW_BY_ID = {view.view_id: view for view in SMART_VIEWS}
 SMART_VIEW_BY_SHORTCUT = {view.shortcut: view for view in SMART_VIEWS}
 SMART_VIEW_LABELS = {view.view_id: view.label for view in SMART_VIEWS}
 
+DNS_EMPTY_STATE = (
+    "No DNS records shown",
+    "Press z to load zones, select zone, then q to query; a adds record.",
+)
+LDAP_EMPTY_STATE = (
+    "No LDAP entries shown",
+    "Press L to search directory; check Base DN, text, max rows.",
+)
+SMART_EMPTY_STATE = (
+    "No smart-view findings shown",
+    "Press S to pick view or 1-7 quick run; / filters findings.",
+)
+
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
     "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
@@ -207,7 +220,59 @@ __all__ = [
     "read_password_file",
     "valid_dns_name",
     "validate_record",
+    "actionable_error",
 ]
+
+
+def actionable_error(message: str) -> str:
+    base = " ".join(message.strip().split())
+    lower = base.casefold()
+    if not base or " action: " in lower:
+        return base
+
+    action = ""
+    if "samba-tool not found" in lower:
+        action = "install Samba tools or run on a Samba admin host"
+    elif "enter username" in lower:
+        action = "press Ctrl+O and set User, or switch auth to kerberos"
+    elif "enter password" in lower or "needs a password" in lower:
+        action = "press p to load password, Ctrl+O to edit, or use kerberos"
+    elif "no password found" in lower:
+        action = "press P to save password file or Ctrl+O to enter password"
+    elif "auth must" in lower:
+        action = "press Ctrl+O and set auth to password or kerberos"
+    elif "kerberos must" in lower:
+        action = "press Ctrl+O and set Kerberos to off, desired, or required"
+    elif "kerberos" in lower or "kdc" in lower or "krb5" in lower:
+        action = "run kinit, set krb5 ccache, or switch auth to password"
+    elif "ldap encryption" in lower or "starttls" in lower or "ldaps" in lower:
+        action = "use ldaps/starttls, or set LDAP compatibility on for legacy DCs"
+    elif "ldap base dn" in lower:
+        action = "set Base DN like DC=example,DC=com"
+    elif "ldap bind failed" in lower:
+        action = "check credentials, domain format, encryption, or Kerberos ticket"
+    elif "ldap search failed" in lower:
+        action = "check Base DN, rights, filter text, and network reachability"
+    elif "no ad srv records found" in lower:
+        action = "check AD DNS domain or set DC manually with Ctrl+O"
+    elif "load zones before dns smart views" in lower:
+        action = "press z to load zones, or Ctrl+O to fix server/auth"
+    elif any(
+        term in lower
+        for term in (
+            "timed out",
+            "timeout",
+            "connection refused",
+            "no route to host",
+            "host unreachable",
+            "name or service not known",
+            "could not resolve",
+            "nt_status_host_unreachable",
+        )
+    ):
+        action = "check DC/server, DNS, VPN/firewall; Ctrl+O edits connection"
+
+    return f"{base} Action: {action}." if action else base
 
 
 class SambatuiApp(App):
@@ -389,15 +454,15 @@ class SambatuiApp(App):
 
         self.refresh_key_hints()
 
+        self.render_records([])
+
         if not shutil.which("samba-tool"):
-            self.set_status("samba-tool not found in PATH")
-            self.notify("samba-tool not found in PATH", severity="error")
+            self.report_error("samba-tool not found in PATH")
             return
 
         warning = password_file_warning(self.password_file())
         if warning:
-            self.set_status(warning)
-            self.notify(warning, severity="error")
+            self.report_error(warning)
         elif self.val("password"):
             self.set_status(f"Password loaded from env or {DEFAULT_PASSWORD_FILE}")
         else:
@@ -414,6 +479,11 @@ class SambatuiApp(App):
     def set_status(self, message: str) -> None:
         with suppress(Exception):
             self.query_one("#status", Static).update(message)
+
+    def report_error(self, message: str) -> None:
+        text = actionable_error(message)
+        self.notify(text[:200], severity="error")
+        self.set_status(text[:180])
 
     def set_val(self, widget_id: str, value: str) -> None:
         self.query_one(f"#{widget_id}", Input).value = value
@@ -577,12 +647,11 @@ class SambatuiApp(App):
         path = self.password_file()
         warning = password_file_warning(path)
         if warning:
-            self.notify(warning, severity="error")
-            self.set_status(warning)
+            self.report_error(warning)
             return
         password = read_password_file(path)
         if not password:
-            self.notify(f"No password found in {path}", severity="error")
+            self.report_error(f"No password found in {path}")
             return
         self.query_one("#password", Input).value = password
         self.set_status(f"Loaded password from {path}")
@@ -669,8 +738,7 @@ class SambatuiApp(App):
     ) -> tuple[int, str]:
         error = client.authentication_error()
         if error:
-            self.notify(error, severity="error")
-            self.set_status(error)
+            self.report_error(error)
             return 2, error
 
         self.set_status(f"Running: {client.status_command(cmd)}")
@@ -688,8 +756,7 @@ class SambatuiApp(App):
             first_line = next(
                 (line for line in output.splitlines() if line.strip()), f"exit {code}"
             )
-            self.set_status(first_line[:120])
-            self.notify(first_line[:200], severity="error")
+            self.report_error(first_line)
         return code, output
 
     async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
@@ -764,6 +831,9 @@ class SambatuiApp(App):
     def populate_zones(self, zones: list[str]) -> None:
         table = self.query_one("#zones", DataTable)
         table.clear()
+        if not zones:
+            table.add_row("No zones loaded — press z to load zones")
+            return
         for zone in zones:
             table.add_row(zone)
 
@@ -810,6 +880,10 @@ class SambatuiApp(App):
         self.visual_selecting = False
         table = self.query_one("#records", DataTable)
         table.clear()
+        if not rows:
+            title, hint = self.empty_state_text("dns")
+            table.add_row("", title, "-", hint, "", "", "")
+            return
         for row in rows:
             table.add_row(
                 "", row.name, row.rtype, row.value, row.ttl, row.records, row.children
@@ -821,6 +895,10 @@ class SambatuiApp(App):
         self.visual_selecting = False
         table = self.query_one("#records", DataTable)
         table.clear()
+        if not rows:
+            title, hint = self.empty_state_text("directory")
+            table.add_row("", title, "-", hint, "", "", "")
+            return
         for row in rows:
             table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
 
@@ -830,6 +908,10 @@ class SambatuiApp(App):
         self.visual_selecting = False
         table = self.query_one("#records", DataTable)
         table.clear()
+        if not rows:
+            title, hint = self.empty_state_text("smart")
+            table.add_row("", title, "-", hint, "", "", "")
+            return
         for row in rows:
             table.add_row(
                 "",
@@ -840,6 +922,22 @@ class SambatuiApp(App):
                 row.suggested_action,
                 row.source,
             )
+
+    def empty_state_text(self, view_mode: str) -> tuple[str, str]:
+        if self.search_text:
+            return (
+                "No matches",
+                f"Esc clears /{self.search_text}/; / changes search text.",
+            )
+        if view_mode == "directory":
+            return LDAP_EMPTY_STATE
+        if view_mode == "smart":
+            return SMART_EMPTY_STATE
+        return DNS_EMPTY_STATE
+
+    def empty_state_status(self, view_mode: str) -> str:
+        title, hint = self.empty_state_text(view_mode)
+        return f"{title}. {hint}"
 
     def visible_records(self) -> list[DnsRow]:
         rows = self.record_rows
@@ -888,25 +986,34 @@ class SambatuiApp(App):
         rows = self.visible_records()
         self.render_records(rows)
         extra = f" matching /{self.search_text}/" if self.search_text else ""
-        self.set_status(
-            f"Showing {len(rows)} of {len(self.record_rows)} records{extra}"
-        )
+        if rows:
+            self.set_status(
+                f"Showing {len(rows)} of {len(self.record_rows)} records{extra}"
+            )
+        else:
+            self.set_status(self.empty_state_status("dns"))
 
     def refresh_directory_view(self) -> None:
         rows = self.visible_directory()
         self.render_directory(rows)
         extra = f" matching /{self.search_text}/" if self.search_text else ""
-        self.set_status(
-            f"Showing {len(rows)} of {len(self.directory_rows)} LDAP entries{extra}"
-        )
+        if rows:
+            self.set_status(
+                f"Showing {len(rows)} of {len(self.directory_rows)} LDAP entries{extra}"
+            )
+        else:
+            self.set_status(self.empty_state_status("directory"))
 
     def refresh_smart_view(self) -> None:
         rows = self.visible_smart_view()
         self.render_smart_view(rows)
         extra = f" matching /{self.search_text}/" if self.search_text else ""
-        self.set_status(
-            f"Showing {len(rows)} of {len(self.smart_view_rows)} smart-view findings{extra}"
-        )
+        if rows:
+            self.set_status(
+                f"Showing {len(rows)} of {len(self.smart_view_rows)} smart-view findings{extra}"
+            )
+        else:
+            self.set_status(self.empty_state_status("smart"))
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         key_map = {
@@ -1021,15 +1128,11 @@ class SambatuiApp(App):
             try:
                 services = await asyncio.to_thread(discover_ad_services, domain)
             except ValueError as exc:
-                message = str(exc)
-                self.notify(message, severity="error")
-                self.set_status(message)
+                self.report_error(str(exc))
                 return False
             controller = preferred_domain_controller(services)
             if controller is None:
-                message = f"No AD SRV records found for {domain}"
-                self.notify(message, severity="error")
-                self.set_status(message)
+                self.report_error(f"No AD SRV records found for {domain}")
                 return False
             self.set_val("server", controller.target)
             if not self.val("zone"):
@@ -1094,8 +1197,7 @@ class SambatuiApp(App):
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
-            self.notify(error, severity="error")
-            self.set_status(error)
+            self.report_error(error)
             return
         self.set_busy(True)
         try:
@@ -1104,9 +1206,7 @@ class SambatuiApp(App):
                     client.search, values["kind"] or "users", values["text"]
                 )
             except ValueError as exc:
-                message = str(exc)
-                self.notify(message, severity="error")
-                self.set_status(message)
+                self.report_error(str(exc))
                 return
             self.search_text = ""
             self.populate_directory(rows[:max_rows])
@@ -1154,7 +1254,7 @@ class SambatuiApp(App):
         if not self.zones:
             await self.load_zones()
         if not self.zones:
-            self.notify("Load zones before DNS smart views.", severity="error")
+            self.report_error("Load zones before DNS smart views.")
             return None
 
         records_by_zone: dict[str, list[DnsRow]] = {}
@@ -1242,8 +1342,7 @@ class SambatuiApp(App):
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
-            self.notify(error, severity="error")
-            self.set_status(error)
+            self.report_error(error)
             return
 
         kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
@@ -1252,9 +1351,7 @@ class SambatuiApp(App):
             try:
                 directory_rows = await asyncio.to_thread(client.search, kind, "")
             except ValueError as exc:
-                message = str(exc)
-                self.notify(message, severity="error")
-                self.set_status(message)
+                self.report_error(str(exc))
                 return
         finally:
             self.set_busy(False)
@@ -1324,8 +1421,7 @@ class SambatuiApp(App):
         ttl = values["ttl"]
         error = validate_record(name, rtype, value)
         if error:
-            self.notify(error, severity="error")
-            self.set_status(error)
+            self.report_error(error)
             return
         args = [name, rtype, value]
         if ttl:
@@ -1403,8 +1499,7 @@ class SambatuiApp(App):
             name, old_rtype, "", require_value=False
         ) or validate_record(name, rtype, value)
         if error:
-            self.notify(error, severity="error")
-            self.set_status(error)
+            self.report_error(error)
             return
 
         if old_rtype != rtype:
@@ -1843,6 +1938,9 @@ class SambatuiApp(App):
         if not row:
             return
         zone = str(row[0])
+        if zone not in self.zones:
+            self.set_status(DNS_EMPTY_STATE[1])
+            return
         self.query_one("#zone", Input).value = zone
         self.refresh_connection_summary()
         self.set_status(f"Selected {zone}; refreshing records")

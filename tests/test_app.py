@@ -3,11 +3,12 @@ import asyncio
 from sambatui.app import (
     DnsRow,
     SambatuiApp,
+    actionable_error,
     parse_records,
     parse_zones,
     validate_record,
 )
-from textual.widgets import Input
+from textual.widgets import DataTable, Input
 
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
 from sambatui.screens import ConfirmScreen, FormScreen, SmartViewPickerScreen
@@ -19,6 +20,37 @@ def test_key_hints_change_by_side_tab() -> None:
     assert app.keys_hint_for_tab("dns_tab").startswith("DNS:")
     assert app.keys_hint_for_tab("ldap_tab").startswith("LDAP:")
     assert app.keys_hint_for_tab("smart_tab").startswith("Smart:")
+
+
+def test_actionable_error_adds_concise_remediation() -> None:
+    assert actionable_error("LDAP bind failed: invalidCredentials").endswith(
+        "Action: check credentials, domain format, encryption, or Kerberos ticket."
+    )
+    assert "run kinit" in actionable_error("Kerberos ticket expired")
+    assert actionable_error("") == ""
+
+
+def test_empty_states_explain_next_actions() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            records = app.query_one("#records", DataTable)
+            assert str(records.get_row_at(0)[1]) == "No DNS records shown"
+            assert "select zone" in str(records.get_row_at(0)[3])
+
+            zones = app.query_one("#zones", DataTable)
+            app.populate_zones([])
+            assert "press z" in str(zones.get_row_at(0)[0])
+
+            app.populate_directory([])
+            assert str(records.get_row_at(0)[1]) == "No LDAP entries shown"
+            assert "Press L" in str(records.get_row_at(0)[3])
+
+            app.populate_smart_view("DNS duplicates/conflicts", [])
+            assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
+            assert "Press S" in str(records.get_row_at(0)[3])
+
+    asyncio.run(run_app())
 
 
 def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
