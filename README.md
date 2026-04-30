@@ -1,10 +1,14 @@
 # Sambatui
 
-Textual terminal UI for managing Samba services. Current functionality focuses on DNS records on Samba Active Directory domain controllers, wrapping `samba-tool dns` with a table UI for zones, records, search, sorting, bulk delete, and optional A-record PTR creation.
+Textual terminal UI for managing Samba services.
+
+Current functionality focuses on DNS records on Samba Active Directory domain
+controllers. It wraps `samba-tool dns` with a table UI for zones, records,
+search, sorting, bulk delete, and optional A-record PTR creation.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.14+
 - `samba-tool` available in `PATH`
 - Network and credentials with permission to manage Samba AD DNS
 
@@ -13,7 +17,7 @@ Textual terminal UI for managing Samba services. Current functionality focuses o
 From this checkout:
 
 ```sh
-mise run run
+mise run sambatui
 # or
 uv run sambatui
 ```
@@ -29,7 +33,8 @@ sambatui
 
 ## Configure
 
-No organisation-specific defaults are embedded. Enter connection values in the UI or set environment variables:
+No organisation-specific defaults are embedded. Enter connection values in the UI
+or set environment variables:
 
 ```sh
 SAMBATUI_SERVER=dc01.example.com \
@@ -47,7 +52,7 @@ Optional variables:
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
 | `SAMBATUI_USER` | Samba username, often `DOMAIN\\user` | empty |
 | `SAMBATUI_KERBEROS` | Passed to `--use-kerberos` | `off` |
-| `SAMBATUI_AUTO_PTR` | Add PTR for new A records when possible (`on`/`off`) | `off` |
+| `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 
@@ -71,7 +76,8 @@ Destructive actions require confirmation.
 
 ## Passwords
 
-The app cannot safely drive the interactive `samba-tool` password prompt. Provide a password by:
+The app cannot safely drive the interactive `samba-tool` password prompt.
+Provide a password by:
 
 1. Typing it into the password field.
 2. Setting `SAMBATUI_PASSWORD` for the current process.
@@ -83,11 +89,17 @@ The app cannot safely drive the interactive `samba-tool` password prompt. Provid
    chmod 600 ~/.config/sambatui/password
    ```
 
-You can also use **Save password** / **Load password** in the app. Do not commit password files or `.env` files.
+You can also use **Save password** / **Load password** in the app. Do not commit
+password files or `.env` files.
 
 ## Development
 
+This project uses `mise` for tools/tasks and `uv` for Python dependencies.
+
 ```sh
+mise trust
+mise run install
+mise run fix
 mise run lint
 mise run test
 mise run build
@@ -96,4 +108,6 @@ mise run check
 
 ## Privacy
 
-This repository should contain only generic examples (`example.com`, `192.0.2.0/24`) and no real hostnames, domains, usernames, passwords, network ranges, or internal notes.
+This repository should contain only generic examples (`example.com`,
+`192.0.2.0/24`) and no real hostnames, domains, usernames, passwords, network
+ranges, or internal notes.
