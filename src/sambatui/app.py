@@ -8,7 +8,7 @@ import shutil
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, cast
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -22,7 +22,9 @@ DEFAULT_ZONE = os.getenv("SAMBATUI_ZONE", "")
 DEFAULT_USER = os.getenv("SAMBATUI_USER", "")
 DEFAULT_KERBEROS = os.getenv("SAMBATUI_KERBEROS", "off")
 DEFAULT_AUTO_PTR = os.getenv("SAMBATUI_AUTO_PTR", "off")
-DEFAULT_PASSWORD_FILE = Path(os.getenv("SAMBATUI_PASSWORD_FILE", "~/.config/sambatui/password")).expanduser()
+DEFAULT_PASSWORD_FILE = Path(
+    os.getenv("SAMBATUI_PASSWORD_FILE", "~/.config/sambatui/password")
+).expanduser()
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,7 @@ REC_RE = re.compile(r"^\s+([A-Z0-9_]+):\s*(.*?)(?:\s+\(flags=.*?ttl=(\d+)\))?\s*
 def read_password_file(path: Path = DEFAULT_PASSWORD_FILE) -> str:
     try:
         return path.read_text(encoding="utf-8").splitlines()[0].strip()
-    except (FileNotFoundError, IndexError, OSError):
+    except FileNotFoundError, IndexError, OSError:
         return ""
 
 
@@ -60,7 +62,11 @@ def parse_records(output: str) -> list[DnsRow]:
             display_name = name_match.group(1) or "@"
             current = display_name, name_match.group(2), name_match.group(3)
             if current[1] == "0":
-                rows.append(DnsRow(current[0], current[1], current[2], "-", "", "", line.strip()))
+                rows.append(
+                    DnsRow(
+                        current[0], current[1], current[2], "-", "", "", line.strip()
+                    )
+                )
             continue
 
         rec_match = REC_RE.match(line)
@@ -107,7 +113,9 @@ def valid_dns_name(value: str, *, allow_at: bool = False) -> bool:
     return all(label_re.fullmatch(label) for label in labels)
 
 
-def validate_record(name: str, rtype: str, value: str, *, require_value: bool = True) -> str | None:
+def validate_record(
+    name: str, rtype: str, value: str, *, require_value: bool = True
+) -> str | None:
     rtype = rtype.upper()
     if not valid_dns_name(name, allow_at=True):
         return "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
@@ -135,7 +143,11 @@ def validate_record(name: str, rtype: str, value: str, *, require_value: bool = 
                         pass
             case "SRV":
                 parts = value.split()
-                if len(parts) != 4 or not all(part.isdigit() for part in parts[:3]) or not valid_dns_name(parts[3]):
+                if (
+                    len(parts) != 4
+                    or not all(part.isdigit() for part in parts[:3])
+                    or not valid_dns_name(parts[3])
+                ):
                     return "SRV value must be: priority weight port target.example.com."
             case "MX":
                 parts = value.split()
@@ -179,6 +191,9 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(event.button.id == "confirm")
 
 
+FormField: TypeAlias = tuple[str, str, str, str]
+
+
 class FormScreen(ModalScreen[dict[str, str] | None]):
     CSS = """
     FormScreen { align: center middle; }
@@ -201,26 +216,22 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
         self,
         title: str,
         hint: str,
-        fields: list[tuple[str, ...]],
+        fields: list[FormField],
         submit_label: str = "Continue",
     ) -> None:
         super().__init__()
-        self.title = title
+        self.form_title = title
         self.hint = hint
         self.fields = fields
         self.submit_label = submit_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form_dialog"):
-            yield Static(self.title, id="form_title")
+            yield Static(self.form_title, id="form_title")
             if self.hint:
                 yield Static(self.hint, id="form_hint")
-            for field in self.fields:
-                if len(field) == 4:
-                    label, field_id, placeholder, value = field
-                    yield Static(label, classes="hint")
-                else:
-                    field_id, placeholder, value = field
+            for label, field_id, placeholder, value in self.fields:
+                yield Static(label, classes="hint")
                 with Horizontal(classes="form_row"):
                     yield Input(value=value, placeholder=placeholder, id=field_id)
             with Horizontal(id="form_buttons"):
@@ -232,8 +243,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             self.dismiss(None)
             return
         values = {}
-        for field in self.fields:
-            field_id = field[1] if len(field) == 4 else field[0]
+        for _, field_id, _, _ in self.fields:
             values[field_id] = self.query_one(f"#{field_id}", Input).value.strip()
         self.dismiss(values)
 
@@ -318,13 +328,25 @@ class SambatuiApp(App):
                     with Horizontal(classes="row"):
                         yield Input(DEFAULT_USER, placeholder="DOMAIN\\user", id="user")
                     with Horizontal(classes="row"):
-                        yield Input(DEFAULT_PASSWORD, placeholder="password", password=True, id="password")
+                        yield Input(
+                            DEFAULT_PASSWORD,
+                            placeholder="password",
+                            password=True,
+                            id="password",
+                        )
                         yield Input(DEFAULT_KERBEROS, placeholder="krb", id="kerberos")
-                        yield Input(DEFAULT_AUTO_PTR, placeholder="ptr on/off", id="auto_ptr")
+                        yield Input(
+                            DEFAULT_AUTO_PTR, placeholder="ptr on/off", id="auto_ptr"
+                        )
                     with Horizontal(classes="row"):
                         yield Button("Load password", id="load_password")
                         yield Button("Save password", id="save_password")
-                    yield Input(str(DEFAULT_PASSWORD_FILE), placeholder="password file", id="password_file", classes="hidden")
+                    yield Input(
+                        str(DEFAULT_PASSWORD_FILE),
+                        placeholder="password file",
+                        id="password_file",
+                        classes="hidden",
+                    )
 
                 with Vertical(classes="panel"):
                     yield Static("Zones", classes="section-title")
@@ -337,9 +359,14 @@ class SambatuiApp(App):
             with Vertical(id="results"):
                 yield Label("Records", classes="section-title")
                 table = DataTable(id="records", cursor_type="row")
-                table.add_columns("✓", "Name", "Type", "Value", "TTL", "Records", "Children")
+                table.add_columns(
+                    "✓", "Name", "Type", "Value", "TTL", "Records", "Children"
+                )
                 yield table
-        yield Static("z zones  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select  v visual  n/t/e or click header to sort", id="keys")
+        yield Static(
+            "z zones  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select  v visual  n/t/e or click header to sort",
+            id="keys",
+        )
 
     def on_mount(self) -> None:
         if not shutil.which("samba-tool"):
@@ -375,7 +402,11 @@ class SambatuiApp(App):
         return f"{user}%{password}" if password else user
 
     def auth_args(self) -> list[str]:
-        return ["-U", self.user_arg(), f"--use-kerberos={self.val('kerberos') or 'off'}"]
+        return [
+            "-U",
+            self.user_arg(),
+            f"--use-kerberos={self.val('kerberos') or 'off'}",
+        ]
 
     def load_password(self) -> None:
         path = self.password_file()
@@ -394,7 +425,9 @@ class SambatuiApp(App):
         if not password:
             self.notify("Password field empty; nothing saved", severity="error")
             return
-        if not await self.confirm(f"Save password to {path}?\n\nThis writes a secret to disk with chmod 600."):
+        if not await self.confirm(
+            f"Save password to {path}?\n\nThis writes a secret to disk with chmod 600."
+        ):
             self.notify("Save cancelled")
             return
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -410,10 +443,12 @@ class SambatuiApp(App):
         self,
         title: str,
         hint: str,
-        fields: list[tuple[str, ...]],
+        fields: list[FormField],
         submit_label: str = "Continue",
     ) -> dict[str, str] | None:
-        return await self.push_screen_wait(FormScreen(title, hint, fields, submit_label))
+        return await self.push_screen_wait(
+            FormScreen(title, hint, fields, submit_label)
+        )
 
     def base_cmd_for_zone(self, action: str, zone: str) -> list[str]:
         return ["samba-tool", "dns", action, self.val("server"), zone]
@@ -440,7 +475,9 @@ class SambatuiApp(App):
         if code == 0:
             self.set_status("OK")
         else:
-            first_line = next((line for line in output.splitlines() if line.strip()), f"exit {code}")
+            first_line = next(
+                (line for line in output.splitlines() if line.strip()), f"exit {code}"
+            )
             self.set_status(first_line[:120])
             self.notify(first_line[:200], severity="error")
         return code, output
@@ -448,17 +485,25 @@ class SambatuiApp(App):
     async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
         return await self.run_command(self.base_cmd(action) + args + self.auth_args())
 
-    async def run_samba_zone(self, action: str, zone: str, args: list[str]) -> tuple[int, str]:
-        return await self.run_command(self.base_cmd_for_zone(action, zone) + args + self.auth_args())
+    async def run_samba_zone(
+        self, action: str, zone: str, args: list[str]
+    ) -> tuple[int, str]:
+        return await self.run_command(
+            self.base_cmd_for_zone(action, zone) + args + self.auth_args()
+        )
 
     async def run_zonelist(self) -> tuple[int, str]:
-        return await self.run_command(["samba-tool", "dns", "zonelist", self.val("server")] + self.auth_args())
+        return await self.run_command(
+            ["samba-tool", "dns", "zonelist", self.val("server")] + self.auth_args()
+        )
 
     def set_busy(self, busy: bool) -> None:
         for button in self.query(Button):
             button.disabled = busy
 
-    async def do_command(self, action: str, args: list[str], update_table: bool = False) -> int:
+    async def do_command(
+        self, action: str, args: list[str], update_table: bool = False
+    ) -> int:
         self.set_busy(True)
         try:
             code, output = await self.run_samba(action, args)
@@ -490,8 +535,9 @@ class SambatuiApp(App):
         parts = str(ip).split(".")
         fqdn = ".".join(reversed(parts)) + ".in-addr.arpa"
         reverse_zones = [zone for zone in self.zones if zone.endswith(".in-addr.arpa")]
-        best_zone = max((zone for zone in reverse_zones if fqdn.endswith(zone)), key=len, default="")
-        if best_zone:
+        matching_zones = [zone for zone in reverse_zones if fqdn.endswith(zone)]
+        if matching_zones:
+            best_zone = cast("str", max(matching_zones, key=len))
             ptr_name = fqdn[: -(len(best_zone) + 1)]
             return best_zone, ptr_name
         return ".".join(reversed(parts[:3])) + ".in-addr.arpa", parts[3]
@@ -502,7 +548,9 @@ class SambatuiApp(App):
             return 0
         ptr_zone, ptr_name = reverse
         ptr_target = self.ptr_target_for_name(name)
-        code, _ = await self.run_samba_zone("add", ptr_zone, [ptr_name, "PTR", ptr_target])
+        code, _ = await self.run_samba_zone(
+            "add", ptr_zone, [ptr_name, "PTR", ptr_target]
+        )
         if code == 0:
             self.notify(f"Added PTR {ptr_name} -> {ptr_target}")
         return code
@@ -530,7 +578,9 @@ class SambatuiApp(App):
     def populate_records(self, rows: list[DnsRow]) -> None:
         self.record_rows = self.sorted_records(rows)
         self.refresh_record_view()
-        self.set_status(f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.sort_field}")
+        self.set_status(
+            f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.sort_field}"
+        )
 
     def render_records(self, rows: list[DnsRow]) -> None:
         self.selected_record_rows.clear()
@@ -539,7 +589,9 @@ class SambatuiApp(App):
         table = self.query_one("#records", DataTable)
         table.clear()
         for row in rows:
-            table.add_row("", row.name, row.rtype, row.value, row.ttl, row.records, row.children)
+            table.add_row(
+                "", row.name, row.rtype, row.value, row.ttl, row.records, row.children
+            )
 
     def visible_records(self) -> list[DnsRow]:
         rows = self.record_rows
@@ -558,7 +610,9 @@ class SambatuiApp(App):
         rows = self.visible_records()
         self.render_records(rows)
         extra = f" matching /{self.search_text}/" if self.search_text else ""
-        self.set_status(f"Showing {len(rows)} of {len(self.record_rows)} records{extra}")
+        self.set_status(
+            f"Showing {len(rows)} of {len(self.record_rows)} records{extra}"
+        )
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         key_map = {
@@ -652,7 +706,10 @@ class SambatuiApp(App):
         values = await self.form(
             "Query DNS",
             "Query one name/type in the currently selected zone.",
-            [("Record name", "name", "name, @ = zone root", "@"), ("Record type", "rtype", "type, e.g. A or ALL", "ALL")],
+            [
+                ("Record name", "name", "name, @ = zone root", "@"),
+                ("Record type", "rtype", "type, e.g. A or ALL", "ALL"),
+            ],
             "Query",
         )
         if not values:
@@ -668,7 +725,12 @@ class SambatuiApp(App):
             f"Zone: {self.val('zone')}. Examples: A=192.0.2.10, CNAME=target.example.com., PTR=host.example.com.",
             [
                 ("Record name", "name", "name, @ for zone root", ""),
-                ("Record type", "rtype", "A / AAAA / CNAME / PTR / TXT / MX / SRV", "A"),
+                (
+                    "Record type",
+                    "rtype",
+                    "A / AAAA / CNAME / PTR / TXT / MX / SRV",
+                    "A",
+                ),
                 ("DNS value", "value", "value for selected type", ""),
                 ("TTL", "ttl", "optional", ""),
             ],
@@ -694,7 +756,9 @@ class SambatuiApp(App):
             if reverse:
                 ptr_zone, ptr_name = reverse
                 ptr_text = f"\nAuto PTR: {ptr_zone} / {ptr_name} PTR {self.ptr_target_for_name(name)}"
-        if not await self.confirm(f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}{ptr_text}"):
+        if not await self.confirm(
+            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}{ptr_text}"
+        ):
             self.notify("Add cancelled")
             return
         if await self.do_command("add", args) == 0:
@@ -706,20 +770,40 @@ class SambatuiApp(App):
     async def action_update(self) -> None:
         records = self.selected_records()
         if len(records) > 1:
-            self.notify("Update works on one record only. Select one row.", severity="error")
+            self.notify(
+                "Update works on one record only. Select one row.", severity="error"
+            )
             return
         selected = records[0] if records else None
         if not selected:
-            self.notify("Select a real record row first. Rows with type '-' are empty/folder nodes.", severity="error")
+            self.notify(
+                "Select a real record row first. Rows with type '-' are empty/folder nodes.",
+                severity="error",
+            )
             return
         values = await self.form(
             "Update selected DNS record",
             "To change record type (example A -> CNAME), set New type. That will DELETE the old record, then ADD the new one.",
             [
                 ("Record name", "name", "name, @ for zone root", selected["name"]),
-                ("Current type (used to find/delete old record)", "old_rtype", "current type", selected["rtype"]),
-                ("New type", "rtype", "A / AAAA / CNAME / PTR / TXT / MX / SRV", selected["rtype"]),
-                ("Old/current DNS value (exact match required)", "old_value", "old/current value", selected["value"]),
+                (
+                    "Current type (used to find/delete old record)",
+                    "old_rtype",
+                    "current type",
+                    selected["rtype"],
+                ),
+                (
+                    "New type",
+                    "rtype",
+                    "A / AAAA / CNAME / PTR / TXT / MX / SRV",
+                    selected["rtype"],
+                ),
+                (
+                    "Old/current DNS value (exact match required)",
+                    "old_value",
+                    "old/current value",
+                    selected["value"],
+                ),
                 ("New DNS value", "value", "new value", selected["value"]),
             ],
             "Update",
@@ -731,7 +815,9 @@ class SambatuiApp(App):
         rtype = (values["rtype"] or old_rtype).upper()
         old_value = values["old_value"]
         value = values["value"]
-        error = validate_record(name, old_rtype, "", require_value=False) or validate_record(name, rtype, value)
+        error = validate_record(
+            name, old_rtype, "", require_value=False
+        ) or validate_record(name, rtype, value)
         if error:
             self.notify(error, severity="error")
             self.set_status(error)
@@ -748,13 +834,16 @@ class SambatuiApp(App):
             if not await self.confirm(message):
                 self.notify("Type change cancelled")
                 return
-            if await self.do_command("delete", [name, old_rtype, old_value]) == 0 and await self.do_command(
-                "add", [name, rtype, value]
-            ) == 0:
+            if (
+                await self.do_command("delete", [name, old_rtype, old_value]) == 0
+                and await self.do_command("add", [name, rtype, value]) == 0
+            ):
                 await self.refresh_current_zone()
             return
 
-        if not await self.confirm(f"Update DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype}\nOld: {old_value}\nNew: {value}"):
+        if not await self.confirm(
+            f"Update DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype}\nOld: {old_value}\nNew: {value}"
+        ):
             self.notify("Update cancelled")
             return
         if await self.do_command("update", [name, rtype, old_value, value]) == 0:
@@ -764,17 +853,27 @@ class SambatuiApp(App):
     async def action_delete(self) -> None:
         records = self.selected_records()
         if not records:
-            self.notify("Select one or more real record rows first. Rows with type '-' are empty/folder nodes.", severity="error")
+            self.notify(
+                "Select one or more real record rows first. Rows with type '-' are empty/folder nodes.",
+                severity="error",
+            )
             return
-        preview = "\n".join(f"{record['name']} {record['rtype']} {record['value']}" for record in records[:12])
+        preview = "\n".join(
+            f"{record['name']} {record['rtype']} {record['value']}"
+            for record in records[:12]
+        )
         if len(records) > 12:
             preview += f"\n... and {len(records) - 12} more"
-        if not await self.confirm(f"DELETE {len(records)} selected DNS record(s)?\n\nZone: {self.val('zone')}\n{preview}\n\nThis cannot be undone from this app."):
+        if not await self.confirm(
+            f"DELETE {len(records)} selected DNS record(s)?\n\nZone: {self.val('zone')}\n{preview}\n\nThis cannot be undone from this app."
+        ):
             self.notify("Delete cancelled")
             return
         failed = 0
         for record in records:
-            code = await self.do_command("delete", [record["name"], record["rtype"], record["value"]])
+            code = await self.do_command(
+                "delete", [record["name"], record["rtype"], record["value"]]
+            )
             if code != 0:
                 failed += 1
         if failed:
@@ -846,7 +945,9 @@ class SambatuiApp(App):
         if table.id != "records" or not table.row_count:
             return
         row_index = table.cursor_row
-        self.selection_anchor = row_index if self.selection_anchor is None else self.selection_anchor
+        self.selection_anchor = (
+            row_index if self.selection_anchor is None else self.selection_anchor
+        )
         self.set_record_selected(row_index, row_index not in self.selected_record_rows)
         self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
 
@@ -857,7 +958,9 @@ class SambatuiApp(App):
             return
         if self.visual_selecting:
             self.visual_selecting = False
-            self.set_status(f"Visual selection off; selected {len(self.selected_record_rows)} record(s)")
+            self.set_status(
+                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
+            )
             return
         self.visual_selecting = True
         self.selection_anchor = table.cursor_row
