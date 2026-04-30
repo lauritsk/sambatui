@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import shutil
 import socket
@@ -131,6 +132,48 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "name": lambda row: row.name.casefold(),
     "type": lambda row: row.rtype.casefold(),
     "value": lambda row: row.value.casefold(),
+}
+KEY_ACTION_NAMES: dict[str, str] = {
+    "ctrl+o": "action_connection",
+    "escape": "action_clear_navigation_state",
+    "tab": "action_next_table",
+    "shift+tab": "action_previous_table",
+    "space": "action_toggle_select",
+    "ctrl+space": "action_toggle_select",
+    "shift+up": "action_extend_up",
+    "shift+down": "action_extend_down",
+    "ctrl+d": "action_cursor_half_page_down",
+    "ctrl+u": "action_cursor_half_page_up",
+    "pagedown": "action_cursor_page_down",
+    "pageup": "action_cursor_page_up",
+    "home": "action_cursor_top",
+    "end": "action_cursor_bottom",
+    "slash": "action_search",
+    "enter": "action_activate_row",
+}
+CHAR_ACTION_NAMES: dict[str, str] = {
+    "?": "action_help",
+    "p": "load_password",
+    "]": "action_next_side_tab",
+    "[": "action_previous_side_tab",
+    " ": "action_toggle_select",
+    "z": "action_load_zones",
+    "c": "action_discover_ad",
+    "r": "action_refresh",
+    "q": "action_query",
+    "a": "action_add",
+    "u": "action_update",
+    "d": "action_delete",
+    "f": "action_fix_smart",
+    "v": "action_visual_select",
+    "j": "action_cursor_down",
+    "k": "action_cursor_up",
+    "h": "action_focus_zones",
+    "l": "action_focus_records",
+    "/": "action_search",
+    "n": "action_sort_name",
+    "t": "action_sort_type",
+    "e": "action_sort_value",
 }
 
 __all__ = [
@@ -1786,115 +1829,74 @@ class SambatuiApp(App):
                 await self.activate_zone(str(row[0]))
 
     async def on_key(self, event: Any) -> None:
-        if isinstance(self.focused, Input):
+        if self.should_ignore_key_event(event):
             return
-        key = event.key
-        char = getattr(event, "character", None)
-        if isinstance(self.focused, Button) and key in {"enter", "space"}:
-            return
-
-        handled = True
-        char_lower = char.casefold() if char else ""
-        if char_lower != "g":
-            self.pending_g = False
-        match key, char_lower:
-            case "ctrl+o", _:
-                self.action_connection()
-            case _, "?":
-                self.action_help()
-            case _, "p" if char == "P":
-                self.save_password()
-            case _, "p":
-                self.load_password()
-            case "escape", _:
-                self.action_clear_navigation_state()
-            case "tab", _:
-                self.action_next_table()
-            case "shift+tab", _:
-                self.action_previous_table()
-            case _, "]":
-                self.action_next_side_tab()
-            case _, "[":
-                self.action_previous_side_tab()
-            case "space" | "ctrl+space", _:
-                self.action_toggle_select()
-            case _, " ":
-                self.action_toggle_select()
-            case _, "z":
-                await self.action_load_zones()
-            case _, "c":
-                self.action_discover_ad()
-            case _, "l" if char == "L":
-                self.action_ldap_search()
-            case _, "s" if char == "S":
-                self.action_smart_view()
-            case _, shortcut if shortcut in SMART_VIEW_BY_SHORTCUT:
-                self.action_smart_view_shortcut(shortcut)
-            case _, "r":
-                await self.action_refresh()
-            case _, "q":
-                self.action_query()
-            case _, "a":
-                self.action_add()
-            case _, "u":
-                self.action_update()
-            case _, "d":
-                self.action_delete()
-            case _, "f":
-                self.action_fix_smart()
-            case _, "v" if char == "V":
-                self.action_select_range()
-            case _, "v":
-                self.action_visual_select()
-            case "shift+up", _:
-                self.action_extend_up()
-            case "shift+down", _:
-                self.action_extend_down()
-            case _, "j":
-                self.action_cursor_down()
-            case _, "k":
-                self.action_cursor_up()
-            case _, "h":
-                self.action_focus_zones()
-            case _, "l":
-                self.action_focus_records()
-            case "ctrl+d", _:
-                self.action_cursor_half_page_down()
-            case "ctrl+u", _:
-                self.action_cursor_half_page_up()
-            case "pagedown", _:
-                self.action_cursor_page_down()
-            case "pageup", _:
-                self.action_cursor_page_up()
-            case "home", _:
-                self.action_cursor_top()
-            case "end", _:
-                self.action_cursor_bottom()
-            case _, "g" if char == "G":
-                self.action_cursor_bottom()
-            case _, "g" if self.pending_g:
-                self.action_cursor_top()
-            case _, "g":
-                self.pending_g = True
-                self.set_status("g pressed: press g again for top; G goes bottom")
-            case "slash", _:
-                self.action_search()
-            case _, "/":
-                self.action_search()
-            case _, "n":
-                self.action_sort_name()
-            case _, "t":
-                self.action_sort_type()
-            case _, "e":
-                self.action_sort_value()
-            case "enter", _:
-                await self.action_activate_row()
-            case _:
-                handled = False
-                self.pending_g = False
+        handled = await self.handle_key(event.key, getattr(event, "character", None))
         if handled:
             event.prevent_default()
             event.stop()
+
+    def should_ignore_key_event(self, event: Any) -> bool:
+        if isinstance(self.focused, Input):
+            return True
+        return isinstance(self.focused, Button) and event.key in {"enter", "space"}
+
+    async def handle_key(self, key: str, char: str | None) -> bool:
+        char_lower = char.casefold() if char else ""
+        if char_lower != "g":
+            self.pending_g = False
+        if self.handle_case_sensitive_key(char, char_lower):
+            return True
+        if self.handle_smart_view_shortcut(char_lower):
+            return True
+        if self.handle_g_key(char, char_lower):
+            return True
+        if await self.handle_mapped_key(key, char_lower):
+            return True
+        self.pending_g = False
+        return False
+
+    def handle_case_sensitive_key(self, char: str | None, char_lower: str) -> bool:
+        if char == "P" and char_lower == "p":
+            self.save_password()
+            return True
+        if char == "L" and char_lower == "l":
+            self.action_ldap_search()
+            return True
+        if char == "S" and char_lower == "s":
+            self.action_smart_view()
+            return True
+        if char == "V" and char_lower == "v":
+            self.action_select_range()
+            return True
+        return False
+
+    def handle_smart_view_shortcut(self, char_lower: str) -> bool:
+        if char_lower not in SMART_VIEW_BY_SHORTCUT:
+            return False
+        self.action_smart_view_shortcut(char_lower)
+        return True
+
+    def handle_g_key(self, char: str | None, char_lower: str) -> bool:
+        if char_lower != "g":
+            return False
+        if char == "G":
+            self.action_cursor_bottom()
+        elif self.pending_g:
+            self.action_cursor_top()
+        else:
+            self.pending_g = True
+            self.set_status("g pressed: press g again for top; G goes bottom")
+        return True
+
+    async def handle_mapped_key(self, key: str, char_lower: str) -> bool:
+        action_name = KEY_ACTION_NAMES.get(key) or CHAR_ACTION_NAMES.get(char_lower)
+        if action_name is None:
+            return False
+        result = getattr(self, action_name)()
+        if inspect.isawaitable(result):
+            await result
+        return True
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         match event.button.id:

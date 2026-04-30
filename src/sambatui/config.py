@@ -31,11 +31,13 @@ def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError, OSError, tomllib.TOMLDecodeError:
         return {}
-    return {
-        key: _preference_value(value)
-        for key, value in data.items()
-        if key in USER_CONFIG_KEYS and _preference_value(value)
-    }
+
+    values: dict[str, str] = {}
+    for key, value in data.items():
+        normalized = _preference_value(value)
+        if key in USER_CONFIG_KEYS and normalized:
+            values[key] = normalized
+    return values
 
 
 def _preference_value(value: Any) -> str:
@@ -56,11 +58,7 @@ def _toml_string(value: str) -> str:
 def save_user_config(
     values: dict[str, str], path: Path = USER_CONFIG_PATH
 ) -> dict[str, str]:
-    safe_values = {
-        key: str(value).strip()
-        for key, value in values.items()
-        if key in USER_CONFIG_KEYS and str(value).strip()
-    }
+    safe_values = _safe_user_config_values(values)
     parent_exists = path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not parent_exists:
@@ -71,6 +69,15 @@ def save_user_config(
     tmp_path = path.with_name(f".{path.name}.tmp")
     tmp_path.write_text(content, encoding="utf-8")
     tmp_path.replace(path)
+    return safe_values
+
+
+def _safe_user_config_values(values: dict[str, str]) -> dict[str, str]:
+    safe_values: dict[str, str] = {}
+    for key, value in values.items():
+        normalized = str(value).strip()
+        if key in USER_CONFIG_KEYS and normalized:
+            safe_values[key] = normalized
     return safe_values
 
 

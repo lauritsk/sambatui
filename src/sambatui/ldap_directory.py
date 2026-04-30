@@ -103,25 +103,16 @@ class LdapSearchConfig:
         encryption = self.normalized_encryption
         compatibility = self.normalized_compatibility
 
-        if not self.server:
-            return "Enter LDAP server/DC."
-        if auth_mode not in LDAP_AUTH_MODES:
-            return "LDAP auth mode must be password or kerberos."
-        if encryption not in LDAP_ENCRYPTION_MODES:
-            return "LDAP encryption must be off, ldaps, or starttls."
-        if compatibility not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF:
-            return "LDAP compatibility must be on or off."
-        scheme = ldap_server_scheme(self.server)
-        if scheme == "ldap" and encryption == "ldaps":
-            return "ldap:// server URLs require LDAP encryption starttls or off."
-        if scheme == "ldaps" and encryption != "ldaps":
-            return "ldaps:// server URLs require LDAP encryption ldaps."
-        if auth_mode == "password" and encryption == "off":
-            return "LDAP password bind requires ldaps or starttls."
-        if auth_mode == "password" and not self.user:
-            return "LDAP search needs a username."
-        if auth_mode == "password" and not self.password:
-            return "LDAP search needs a password or auth mode kerberos."
+        error = _ldap_mode_error(auth_mode, encryption, compatibility)
+        if error:
+            return error
+        error = _ldap_server_error(self.server, encryption)
+        if error:
+            return error
+        if auth_mode == "password":
+            error = _ldap_password_auth_error(self.user, self.password, encryption)
+            if error:
+                return error
         if not self.base_dn:
             return "Enter LDAP base DN, e.g. DC=example,DC=com."
         return None
@@ -141,6 +132,37 @@ class DirectoryRow:
     name: str
     summary: str
     attributes: Mapping[str, Sequence[str]]
+
+
+def _ldap_mode_error(auth_mode: str, encryption: str, compatibility: str) -> str | None:
+    if auth_mode not in LDAP_AUTH_MODES:
+        return "LDAP auth mode must be password or kerberos."
+    if encryption not in LDAP_ENCRYPTION_MODES:
+        return "LDAP encryption must be off, ldaps, or starttls."
+    if compatibility not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF:
+        return "LDAP compatibility must be on or off."
+    return None
+
+
+def _ldap_server_error(server: str, encryption: str) -> str | None:
+    if not server:
+        return "Enter LDAP server/DC."
+    scheme = ldap_server_scheme(server)
+    if scheme == "ldap" and encryption == "ldaps":
+        return "ldap:// server URLs require LDAP encryption starttls or off."
+    if scheme == "ldaps" and encryption != "ldaps":
+        return "ldaps:// server URLs require LDAP encryption ldaps."
+    return None
+
+
+def _ldap_password_auth_error(user: str, password: str, encryption: str) -> str | None:
+    if encryption == "off":
+        return "LDAP password bind requires ldaps or starttls."
+    if not user:
+        return "LDAP search needs a username."
+    if not password:
+        return "LDAP search needs a password or auth mode kerberos."
+    return None
 
 
 def domain_to_base_dn(domain: str) -> str:
