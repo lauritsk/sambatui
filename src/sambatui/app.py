@@ -10,7 +10,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.widgets import Button, DataTable, Header, Input, Label, Static
+from textual.widgets import Button, DataTable, Input, Label, Static
 
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
@@ -40,7 +40,7 @@ from .dns import (
     validate_record,
 )
 from .models import DnsRow
-from .screens import ConfirmScreen, FormField, FormScreen
+from .screens import ConfirmScreen, FormField, FormScreen, HelpScreen
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -60,6 +60,7 @@ __all__ = [
     "DnsRow",
     "FormField",
     "FormScreen",
+    "HelpScreen",
     "SambaToolClient",
     "SambaToolConfig",
     "SambatuiApp",
@@ -78,13 +79,16 @@ class SambatuiApp(App):
     CSS = """
     Screen { layout: vertical; }
 
+    #connection_state { display: none; }
+
     #main {
         height: 1fr;
         margin: 0 1;
     }
 
     #sidebar {
-        width: 54;
+        width: 42;
+        min-width: 34;
         height: 1fr;
         margin-right: 1;
     }
@@ -95,28 +99,30 @@ class SambatuiApp(App):
     }
 
     .panel {
-        height: auto;
         border: tall $surface;
         padding: 0 1;
-        margin-bottom: 1;
     }
 
-    .row { height: auto; margin-bottom: 1; }
+    #zones_panel { height: 1fr; }
+    #zone_actions { height: auto; margin-bottom: 1; }
+
     .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
     .hint { color: $text-muted; margin-bottom: 1; }
-    .hidden { display: none; }
+    #connection_summary { color: $text-muted; margin-bottom: 1; }
     #keys { height: 1; margin: 0 1; color: $text-muted; }
 
-    Input { width: 1fr; margin-right: 1; }
-    Button { width: 1fr; margin-right: 1; }
+    Button { width: 1fr; }
 
-    #auth, #kerberos, #auto_ptr { width: 10; }
     #zones { height: 1fr; margin-bottom: 1; }
     #records { height: 1fr; }
-    #status { height: auto; margin-top: 1; color: $text-muted; }
+    #status { height: 3; color: $text-muted; }
     """
 
     BINDINGS = [
+        ("question_mark", "help", "Help"),
+        ("ctrl+o", "connection", "Connection"),
+        ("p", "load_password_file", "Load password"),
+        ("P", "save_password_file", "Save password"),
         ("z", "load_zones", "Zones"),
         ("c", "discover_ad", "Discover DC"),
         ("r", "refresh", "Refresh"),
@@ -153,65 +159,33 @@ class SambatuiApp(App):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        with Vertical(id="connection_state"):
+            yield Input(DEFAULT_SERVER, id="server")
+            yield Input(DEFAULT_ZONE, id="zone")
+            yield Input(DEFAULT_USER, id="user")
+            yield Input(DEFAULT_PASSWORD, password=True, id="password")
+            yield Input(DEFAULT_AUTH, id="auth")
+            yield Input(DEFAULT_KERBEROS, id="kerberos")
+            yield Input(DEFAULT_AUTO_PTR, id="auto_ptr")
+            yield Input(DEFAULT_KRB5_CCACHE, id="krb5_ccache")
+            yield Input(DEFAULT_CONFIGFILE, id="configfile")
+            yield Input(DEFAULT_OPTIONS, id="options")
+            yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
+
         with Horizontal(id="main"):
             with Vertical(id="sidebar"):
-                with Vertical(classes="panel"):
-                    yield Static("Connection", classes="section-title")
-                    with Horizontal(classes="row"):
-                        yield Input(DEFAULT_SERVER, placeholder="server", id="server")
-                        yield Input(DEFAULT_ZONE, placeholder="zone", id="zone")
-                    with Horizontal(classes="row"):
-                        yield Input(DEFAULT_USER, placeholder="DOMAIN\\user", id="user")
-                    with Horizontal(classes="row"):
-                        yield Input(
-                            DEFAULT_PASSWORD,
-                            placeholder="password",
-                            password=True,
-                            id="password",
-                        )
-                        yield Input(DEFAULT_AUTH, placeholder="auth", id="auth")
-                        yield Input(DEFAULT_KERBEROS, placeholder="krb", id="kerberos")
-                        yield Input(
-                            DEFAULT_AUTO_PTR, placeholder="ptr on/off", id="auto_ptr"
-                        )
-                    with Horizontal(classes="row"):
-                        yield Input(
-                            DEFAULT_KRB5_CCACHE,
-                            placeholder="krb5 ccache",
-                            id="krb5_ccache",
-                        )
-                        yield Input(
-                            DEFAULT_CONFIGFILE,
-                            placeholder="smb.conf",
-                            id="configfile",
-                        )
-                    with Horizontal(classes="row"):
-                        yield Button("Load password", id="load_password")
-                        yield Button("Save password", id="save_password")
-                        yield Button("Discover DCs", id="discover_ad")
-                    yield Input(
-                        DEFAULT_OPTIONS,
-                        placeholder="smb options separated by ;",
-                        id="options",
-                        classes="hidden",
-                    )
-                    yield Input(
-                        str(DEFAULT_PASSWORD_FILE),
-                        placeholder="password file",
-                        id="password_file",
-                        classes="hidden",
-                    )
-
-                with Vertical(classes="panel"):
+                with Vertical(id="zones_panel", classes="panel"):
                     yield Static("Zones", classes="section-title")
-                    yield Button("Load DNS zones", id="load_zones", variant="primary")
+                    yield Static("Connection: not checked", id="connection_summary")
+                    with Horizontal(id="zone_actions"):
+                        yield Button("Load zones", id="load_zones", variant="primary")
+                        yield Button("Connection…", id="open_connection")
                     zones = DataTable(id="zones", cursor_type="row")
                     zones.add_columns("DNS zones")
                     yield zones
                     yield Static("Ready", id="status")
 
-            with Vertical(id="results"):
+            with Vertical(id="results", classes="panel"):
                 yield Label("Records", classes="section-title")
                 table = DataTable(id="records", cursor_type="row")
                 table.add_columns(
@@ -219,7 +193,7 @@ class SambatuiApp(App):
                 )
                 yield table
         yield Static(
-            "z zones  c discover  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  gg/G top/bottom  Ctrl+d/u page  Space select  v visual  y/n confirm",
+            "? help  Ctrl+O connection  z zones  c discover  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
             id="keys",
         )
 
@@ -233,6 +207,7 @@ class SambatuiApp(App):
         self.search_text = ""
         self.zones: list[str] = []
         self.pending_g = False
+        self.refresh_connection_summary()
 
         if not shutil.which("samba-tool"):
             self.set_status("samba-tool not found in PATH")
@@ -248,12 +223,99 @@ class SambatuiApp(App):
         else:
             self.set_status("Enter password, load password file, or use kerberos auth")
 
+        self.call_after_refresh(self.action_connection)
+
     def val(self, widget_id: str) -> str:
         return self.query_one(f"#{widget_id}", Input).value.strip()
 
     def set_status(self, message: str) -> None:
         with suppress(Exception):
             self.query_one("#status", Static).update(message)
+
+    def set_val(self, widget_id: str, value: str) -> None:
+        self.query_one(f"#{widget_id}", Input).value = value
+
+    def connection_summary(self) -> str:
+        server = self.val("server") or "no server"
+        zone = self.val("zone") or "no zone"
+        auth = self.val("auth") or DEFAULT_AUTH
+        return f"{server} · {zone} · {auth} auth"
+
+    def refresh_connection_summary(self) -> None:
+        with suppress(Exception):
+            self.query_one("#connection_summary", Static).update(
+                f"Connection: {self.connection_summary()}"
+            )
+
+    def connection_fields(self) -> list[FormField]:
+        return [
+            (
+                "Server — AD domain controller hostname or IP used by samba-tool -H.",
+                "server",
+                "dc01.example.com or 192.0.2.10",
+                self.val("server"),
+            ),
+            (
+                "DNS zone — zone to query and edit after you select/load zones.",
+                "zone",
+                "example.com",
+                self.val("zone"),
+            ),
+            (
+                "User — DOMAIN\\user or user accepted by Samba.",
+                "user",
+                "EXAMPLE\\admin",
+                self.val("user"),
+            ),
+            (
+                "Password — hidden. Leave empty for Kerberos or password file/env loading.",
+                "password",
+                "password",
+                self.val("password"),
+            ),
+            (
+                "Auth mode — password or kerberos.",
+                "auth",
+                "password | kerberos",
+                self.val("auth"),
+            ),
+            (
+                "Kerberos option — value passed to --use-kerberos.",
+                "kerberos",
+                "desired | required | off",
+                self.val("kerberos"),
+            ),
+            (
+                "Auto PTR — on adds matching reverse PTR when adding A records.",
+                "auto_ptr",
+                "on | off",
+                self.val("auto_ptr"),
+            ),
+            (
+                "Kerberos credential cache — optional --use-krb5-ccache path.",
+                "krb5_ccache",
+                "/tmp/krb5cc_1000",
+                self.val("krb5_ccache"),
+            ),
+            (
+                "smb.conf — optional --configfile path for Samba settings.",
+                "configfile",
+                "/etc/samba/smb.conf",
+                self.val("configfile"),
+            ),
+            (
+                "Extra samba-tool options — separate multiple options with semicolons.",
+                "options",
+                "--option=name=value; --debuglevel=1",
+                self.val("options"),
+            ),
+            (
+                "Password file — used at startup and by password load/save commands.",
+                "password_file",
+                "~/.config/sambatui/password",
+                self.val("password_file"),
+            ),
+        ]
 
     def password_file(self) -> Path:
         return Path(self.val("password_file")).expanduser()
@@ -326,6 +388,37 @@ class SambatuiApp(App):
         return await self.push_screen_wait(
             FormScreen(title, hint, fields, submit_label)
         )
+
+    def action_help(self) -> None:
+        self.push_screen(HelpScreen())
+
+    def action_load_password_file(self) -> None:
+        self.load_password()
+
+    def action_save_password_file(self) -> None:
+        self.save_password()
+
+    @work
+    async def action_connection(self) -> None:
+        values = await self.form(
+            "Connection settings",
+            "These values feed samba-tool. Press Apply to close this setup screen; reopen with Ctrl+O.",
+            self.connection_fields(),
+            "Apply",
+        )
+        if values is None:
+            self.refresh_connection_summary()
+            return
+        for widget_id, value in values.items():
+            self.set_val(widget_id, value)
+        if (self.val("auth") or DEFAULT_AUTH).casefold() == "password" and not self.val(
+            "password"
+        ):
+            password = read_password_file(self.password_file())
+            if password:
+                self.set_val("password", password)
+        self.refresh_connection_summary()
+        self.set_status("Connection settings updated")
 
     async def run_command(
         self, client: SambaToolClient, cmd: list[str]
@@ -585,6 +678,7 @@ class SambatuiApp(App):
             self.query_one("#server", Input).value = controller.target
             if not self.val("zone"):
                 self.query_one("#zone", Input).value = controller.domain
+            self.refresh_connection_summary()
             message = (
                 f"Discovered {len(services)} AD SRV record(s); "
                 f"selected {controller.target}:{controller.port}"
@@ -977,6 +1071,7 @@ class SambatuiApp(App):
                 return
             if row:
                 self.query_one("#zone", Input).value = str(row[0])
+                self.refresh_connection_summary()
                 self.set_status(f"Selected {row[0]}; refreshing records")
                 await self.refresh_current_zone()
 
@@ -993,6 +1088,14 @@ class SambatuiApp(App):
         if char_lower != "g":
             self.pending_g = False
         match key, char_lower:
+            case "ctrl+o", _:
+                self.action_connection()
+            case _, "?":
+                self.action_help()
+            case _, "p" if char == "P":
+                self.save_password()
+            case _, "p":
+                self.load_password()
             case "escape", _:
                 self.action_clear_navigation_state()
             case "tab", _:
@@ -1081,6 +1184,8 @@ class SambatuiApp(App):
                 await self.load_zones()
             case "discover_ad":
                 self.action_discover_ad()
+            case "open_connection":
+                self.action_connection()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "zones":
@@ -1090,6 +1195,7 @@ class SambatuiApp(App):
             return
         zone = str(row[0])
         self.query_one("#zone", Input).value = zone
+        self.refresh_connection_summary()
         self.set_status(f"Selected {zone}; refreshing records")
         await self.refresh_current_zone()
 

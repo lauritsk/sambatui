@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, TypeAlias
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
@@ -74,18 +74,84 @@ class ConfirmScreen(ModalScreen[bool]):
 FormField: TypeAlias = tuple[str, str, str, str]
 
 
+class HelpScreen(ModalScreen[None]):
+    CSS = """
+    HelpScreen { align: center middle; }
+    #help_dialog {
+        width: 82;
+        height: auto;
+        max-height: 90%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #help_title { text-style: bold; color: $accent; margin-bottom: 1; }
+    #help_body { color: $text; margin-bottom: 1; }
+    #help_hint { color: $text-muted; margin-bottom: 1; }
+    #help_buttons { height: auto; align-horizontal: right; }
+    #help_buttons Button { width: 14; margin-left: 1; }
+    """
+
+    HELP_TEXT = """Connection
+  Ctrl+O    Open connection settings
+  p/P       Load/save password file
+  c         Discover AD domain controllers
+  z         Load DNS zones
+
+Navigation
+  Tab       Switch zones/records table
+  h/l       Focus zones/records
+  j/k       Move cursor
+  gg/G      Top/bottom
+  Ctrl+d/u  Half-page down/up
+
+Records
+  Enter     Select zone or toggle record select
+  q         Query records
+  a/u/d     Add, update, delete records
+  /         Search records
+  n/t/e     Sort by name/type/value
+  Space     Toggle record selection
+  v/V       Visual/range select
+  Esc       Clear visual/select/search state
+
+App
+  ?         Show this help
+  Ctrl+Q    Quit"""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help_dialog"):
+            yield Static("Help", id="help_title")
+            yield Static(self.HELP_TEXT, id="help_body")
+            yield Static("Press Esc, Enter, or Close to return.", id="help_hint")
+            with Horizontal(id="help_buttons"):
+                yield Button("Close", id="close", variant="primary")
+
+    def on_key(self, event: Any) -> None:
+        if event.key in {"escape", "enter"}:
+            event.prevent_default()
+            event.stop()
+            self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+
 class FormScreen(ModalScreen[dict[str, str] | None]):
     CSS = """
     FormScreen { align: center middle; }
     #form_dialog {
-        width: 78;
+        width: 88;
         height: auto;
+        max-height: 92%;
         border: round $accent;
         background: $surface;
         padding: 1 2;
     }
     #form_title { text-style: bold; color: $accent; margin-bottom: 1; }
     #form_hint { color: $text-muted; margin-bottom: 1; }
+    #form_fields { height: auto; max-height: 72%; margin-bottom: 1; }
+    .hint { color: $text-muted; margin-bottom: 0; }
     .form_row { height: auto; margin-bottom: 1; }
     .form_row Input { width: 1fr; margin-right: 1; }
     #form_buttons { height: auto; align-horizontal: right; }
@@ -110,10 +176,16 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             yield Static(self.form_title, id="form_title")
             if self.hint:
                 yield Static(self.hint, id="form_hint")
-            for label, field_id, placeholder, value in self.fields:
-                yield Static(label, classes="hint")
-                with Horizontal(classes="form_row"):
-                    yield Input(value=value, placeholder=placeholder, id=field_id)
+            with VerticalScroll(id="form_fields"):
+                for label, field_id, placeholder, value in self.fields:
+                    yield Static(label, classes="hint")
+                    with Horizontal(classes="form_row"):
+                        yield Input(
+                            value=value,
+                            placeholder=placeholder,
+                            password=field_id == "password",
+                            id=field_id,
+                        )
             with Horizontal(id="form_buttons"):
                 yield Button("Cancel", id="cancel")
                 yield Button(self.submit_label, id="submit", variant="primary")
