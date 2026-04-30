@@ -8,7 +8,9 @@ from urllib.parse import urlparse
 from ldap3.utils.conv import escape_filter_chars
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
-LDAP_ENCRYPTION_MODES = frozenset({"ldaps", "starttls"})
+LdapAuthMode = Literal["password", "kerberos"]
+LDAP_AUTH_MODES = frozenset({"password", "kerberos"})
+LDAP_ENCRYPTION_MODES = frozenset({"off", "ldaps", "starttls"})
 LDAP_SEARCH_KINDS: tuple[DirectorySearchKind, ...] = (
     "users",
     "groups",
@@ -53,6 +55,8 @@ class LdapSearchConfig:
     password: str = ""
     base_dn: str = ""
     encryption: str = "ldaps"
+    auth_mode: str = "password"
+    krb5_ccache: str = ""
     page_size: int = 200
     timeout: int = 10
 
@@ -60,20 +64,31 @@ class LdapSearchConfig:
     def normalized_encryption(self) -> str:
         return (self.encryption or "ldaps").casefold()
 
+    @property
+    def normalized_auth_mode(self) -> str:
+        return (self.auth_mode or "password").casefold()
+
     def validation_error(self) -> str | None:
         if not self.server:
             return "Enter LDAP server/DC."
+        if self.normalized_auth_mode not in LDAP_AUTH_MODES:
+            return "LDAP auth mode must be password or kerberos."
         if self.normalized_encryption not in LDAP_ENCRYPTION_MODES:
-            return "LDAP encryption must be ldaps or starttls."
+            return "LDAP encryption must be off, ldaps, or starttls."
         scheme = ldap_server_scheme(self.server)
-        if scheme == "ldap" and self.normalized_encryption != "starttls":
-            return "ldap:// server URLs require LDAP encryption starttls."
+        if scheme == "ldap" and self.normalized_encryption == "ldaps":
+            return "ldap:// server URLs require LDAP encryption starttls or off."
         if scheme == "ldaps" and self.normalized_encryption != "ldaps":
             return "ldaps:// server URLs require LDAP encryption ldaps."
-        if not self.user:
+        if (
+            self.normalized_auth_mode == "password"
+            and self.normalized_encryption == "off"
+        ):
+            return "LDAP password bind requires ldaps or starttls."
+        if self.normalized_auth_mode == "password" and not self.user:
             return "LDAP search needs a username."
-        if not self.password:
-            return "LDAP search needs a password. Kerberos LDAP bind is not implemented yet."
+        if self.normalized_auth_mode == "password" and not self.password:
+            return "LDAP search needs a password or auth mode kerberos."
         if not self.base_dn:
             return "Enter LDAP base DN, e.g. DC=example,DC=com."
         return None
@@ -125,6 +140,39 @@ def parse_ldap_server(server: str, encryption: str = "ldaps") -> LdapServerSetti
     )
 
 
+def gssapi_cred_store(krb5_ccache: str) -> dict[str, str] | None:
+    if not krb5_ccache:
+        return None
+    ccache = krb5_ccache if ":" in krb5_ccache else f"FILE:{krb5_ccache}"
+    return {"ccache": ccache}
+
+
+def ldap_connection_kwargs(config: LdapSearchConfig) -> dict[str, Any]:
+    from ldap3 import GSSAPI, NTLM, SASL, SIMPLE
+
+    common: dict[str, Any] = {
+        "receive_timeout": config.timeout,
+        "auto_bind": False,
+        "read_only": True,
+    }
+    if config.normalized_auth_mode == "kerberos":
+        common.update(
+            authentication=SASL,
+            sasl_mechanism=GSSAPI,
+            user=config.user or None,
+            sasl_credentials=(False,),
+            cred_store=gssapi_cred_store(config.krb5_ccache),
+        )
+        return common
+
+    common.update(
+        user=config.user,
+        password=config.password,
+        authentication=NTLM if "\\" in config.user else SIMPLE,
+    )
+    return common
+
+
 def build_directory_filter(kind: str, text: str = "") -> str:
     normalized_kind = kind.casefold() or "users"
     base_filter = _KIND_FILTERS.get(normalized_kind)
@@ -155,7 +203,8 @@ class LdapDirectoryClient:
         if error:
             raise ValueError(error)
 
-        from ldap3 import ALL, NTLM, SIMPLE, SUBTREE, Connection, Server
+        from ldap3 import ALL, SUBTREE, Connection, Server
+        from ldap3.core.exceptions import LDAPPackageUnavailableError
 
         settings = parse_ldap_server(
             self.config.server, self.config.normalized_encryption
@@ -167,22 +216,21 @@ class LdapDirectoryClient:
             get_info=ALL,
             connect_timeout=self.config.timeout,
         )
-        authentication = NTLM if "\\" in self.config.user else SIMPLE
-        connection = Connection(
-            server,
-            user=self.config.user,
-            password=self.config.password,
-            authentication=authentication,
-            receive_timeout=self.config.timeout,
-            auto_bind=False,
-        )
+        connection = Connection(server, **ldap_connection_kwargs(self.config))
         try:
             if self.config.normalized_encryption == "starttls" and not settings.use_ssl:
                 if not connection.start_tls():
                     raise ValueError(
                         _ldap_result_message(connection.result, "LDAP StartTLS failed")
                     )
-            if not connection.bind():
+            try:
+                bound = connection.bind()
+            except LDAPPackageUnavailableError as exc:
+                raise ValueError(
+                    "LDAP Kerberos bind needs optional package. "
+                    "Install sambatui[kerberos]."
+                ) from exc
+            if not bound:
                 raise ValueError(
                     _ldap_result_message(connection.result, "LDAP bind failed")
                 )

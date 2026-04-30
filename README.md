@@ -53,6 +53,9 @@ uvx sambatui
 # or
 pipx install sambatui
 sambatui
+
+# Include optional Kerberos/GSSAPI support for LDAP search:
+pipx install 'sambatui[kerberos]'
 ```
 
 ## Docker
@@ -123,12 +126,12 @@ Optional variables:
 | `SAMBATUI_USER` | Samba username, often `DOMAIN\\user` | empty |
 | `SAMBATUI_AUTH` | `password` or `kerberos` | `password` |
 | `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
-| `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache` | empty |
+| `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
 | `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
 | `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
 | `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
-| `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport for password bind: `ldaps` or `starttls` | `ldaps` |
+| `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 
@@ -198,14 +201,25 @@ Discovery remains DNS-only: no LDAP bind and no direct AD writes.
 
 ## LDAP directory search
 
-`L` opens read-only AD directory search powered by Python `ldap3`. It uses the
-configured server, username, and password, then searches a base DN such as
-`DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI proposes a base DN
-from the current DNS zone.
+`L` opens read-only AD directory search powered by Python `ldap3`. It searches a
+base DN such as `DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI
+proposes a base DN from the current DNS zone.
 
-LDAP password bind is allowed only with `ldaps` or `starttls`. Cleartext simple
-bind is intentionally unsupported. Kerberos/GSSAPI LDAP bind is not implemented
-yet; use existing `samba-tool` Kerberos mode for DNS operations.
+With `SAMBATUI_AUTH=password`, LDAP uses the configured username/password and
+requires `ldaps` or `starttls`. Cleartext simple bind is intentionally
+unsupported.
+
+With `SAMBATUI_AUTH=kerberos`, LDAP uses SASL GSSAPI and the current Kerberos
+ticket cache. Install the optional extra first:
+
+```sh
+pipx install 'sambatui[kerberos]'
+kinit administrator@EXAMPLE.COM
+SAMBATUI_AUTH=kerberos sambatui
+```
+
+Set `SAMBATUI_KRB5_CCACHE` to point GSSAPI at a non-default cache. For Kerberos
+LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
 
 ## Development
 

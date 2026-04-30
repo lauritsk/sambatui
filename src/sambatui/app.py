@@ -331,9 +331,9 @@ class SambatuiApp(App):
                 self.val("ldap_base") or domain_to_base_dn(self.val("zone")),
             ),
             (
-                "LDAP encryption — password bind requires ldaps or starttls.",
+                "LDAP encryption — password bind requires ldaps or starttls; kerberos also supports off.",
                 "ldap_encryption",
-                "ldaps | starttls",
+                "off | ldaps | starttls",
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
@@ -371,6 +371,8 @@ class SambatuiApp(App):
             or self.val("ldap_base")
             or domain_to_base_dn(self.val("zone")),
             encryption=self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            auth_mode=self.val("auth") or DEFAULT_AUTH,
+            krb5_ccache=self.val("krb5_ccache"),
         )
 
     def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
@@ -776,7 +778,7 @@ class SambatuiApp(App):
         base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
         values = await self.form(
             "Search AD directory",
-            "Read-only LDAP via ldap3. Password bind requires LDAPS or StartTLS.",
+            "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; kerberos uses current ticket.",
             [
                 (
                     "Search type",
@@ -789,7 +791,7 @@ class SambatuiApp(App):
                 (
                     "LDAP encryption",
                     "ldap_encryption",
-                    "ldaps | starttls",
+                    "off | ldaps | starttls",
                     self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
                 ),
                 ("Max rows", "max_rows", "200", "200"),

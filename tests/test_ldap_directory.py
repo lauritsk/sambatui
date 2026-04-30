@@ -1,8 +1,12 @@
+from ldap3 import GSSAPI, SASL
+
 from sambatui.ldap_directory import (
     LdapSearchConfig,
     build_directory_filter,
     domain_to_base_dn,
     entry_to_directory_row,
+    gssapi_cred_store,
+    ldap_connection_kwargs,
     parse_ldap_server,
 )
 
@@ -49,6 +53,18 @@ def test_build_directory_filter_escapes_user_text() -> None:
     assert r"alice\2a" in ldap_filter
 
 
+def test_search_config_accepts_kerberos_without_password() -> None:
+    assert (
+        LdapSearchConfig(
+            server="ldap://dc01.example.com",
+            base_dn="DC=example,DC=com",
+            encryption="off",
+            auth_mode="kerberos",
+        ).validation_error()
+        is None
+    )
+
+
 def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
     assert (
         LdapSearchConfig(
@@ -58,7 +74,7 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
             base_dn="DC=example,DC=com",
             encryption="plain",
         ).validation_error()
-        == "LDAP encryption must be ldaps or starttls."
+        == "LDAP encryption must be off, ldaps, or starttls."
     )
     assert (
         LdapSearchConfig(
@@ -66,7 +82,7 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
             user="EXAMPLE\\admin",
             base_dn="DC=example,DC=com",
         ).validation_error()
-        == "LDAP search needs a password. Kerberos LDAP bind is not implemented yet."
+        == "LDAP search needs a password or auth mode kerberos."
     )
     assert (
         LdapSearchConfig(
@@ -76,8 +92,28 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
             base_dn="DC=example,DC=com",
             encryption="ldaps",
         ).validation_error()
-        == "ldap:// server URLs require LDAP encryption starttls."
+        == "ldap:// server URLs require LDAP encryption starttls or off."
     )
+
+
+def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
+    kwargs = ldap_connection_kwargs(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            base_dn="DC=example,DC=com",
+            auth_mode="kerberos",
+            krb5_ccache="/tmp/krb5cc_test",
+        )
+    )
+
+    assert kwargs["authentication"] == SASL
+    assert kwargs["sasl_mechanism"] == GSSAPI
+    assert "password" not in kwargs
+    assert kwargs["cred_store"] == {"ccache": "FILE:/tmp/krb5cc_test"}
+
+
+def test_gssapi_cred_store_keeps_explicit_cache_type() -> None:
+    assert gssapi_cred_store("DIR:/tmp/krb5cc_dir") == {"ccache": "DIR:/tmp/krb5cc_dir"}
 
 
 def test_entry_to_directory_row_summarizes_common_ad_attributes() -> None:
