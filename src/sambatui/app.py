@@ -182,6 +182,21 @@ SMART_EMPTY_STATE = (
     "Press S to pick view or 1-7 quick run; / filters findings.",
 )
 
+LDAP_DETAIL_ATTRIBUTES = (
+    "sAMAccountName",
+    "userPrincipalName",
+    "mail",
+    "description",
+    "memberOf",
+    "member",
+    "userAccountControl",
+    "lastLogonTimestamp",
+    "whenCreated",
+    "whenChanged",
+    "dNSHostName",
+    "servicePrincipalName",
+)
+
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
     "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
@@ -333,6 +348,14 @@ class SambatuiApp(App):
     #zones { height: 1fr; margin-bottom: 1; }
     #ldap_hint { height: 1fr; }
     #records { height: 1fr; }
+    #record_details {
+        height: 10;
+        margin-top: 1;
+        border: tall $surface;
+        padding: 0 1;
+        overflow-y: auto;
+        color: $text;
+    }
     #status { height: 3; color: $text-muted; }
     """
 
@@ -449,6 +472,12 @@ class SambatuiApp(App):
                 table = DataTable(id="records", cursor_type="row")
                 table.add_columns(*DNS_COLUMNS)
                 yield table
+                yield Static(
+                    "Details\nNo row selected.",
+                    id="record_details",
+                    classes="hint",
+                    markup=False,
+                )
         yield Static(self.keys_hint_for_tab("dns_tab"), id="keys")
 
     def on_mount(self) -> None:
@@ -902,11 +931,15 @@ class SambatuiApp(App):
         if not rows:
             title, hint = self.empty_state_text("dns")
             table.add_row("", title, "-", hint, "", "", "")
+            table.move_cursor(row=0)
+            self.update_details_pane()
             return
         for row in rows:
             table.add_row(
                 "", row.name, row.rtype, row.value, row.ttl, row.records, row.children
             )
+        table.move_cursor(row=0)
+        self.update_details_pane()
 
     def render_directory(self, rows: list[DirectoryRow]) -> None:
         self.reset_render_state()
@@ -915,9 +948,13 @@ class SambatuiApp(App):
         if not rows:
             title, hint = self.empty_state_text("directory")
             table.add_row("", title, "-", hint, "", "", "")
+            table.move_cursor(row=0)
+            self.update_details_pane()
             return
         for row in rows:
             table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
+        table.move_cursor(row=0)
+        self.update_details_pane()
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
         self.reset_render_state()
@@ -926,6 +963,8 @@ class SambatuiApp(App):
         if not rows:
             title, hint = self.empty_state_text("smart")
             table.add_row("", title, "-", hint, "", "", "")
+            table.move_cursor(row=0)
+            self.update_details_pane()
             return
         for row in rows:
             table.add_row(
@@ -936,6 +975,111 @@ class SambatuiApp(App):
                 row.evidence,
                 row.suggested_action,
                 row.source,
+            )
+        table.move_cursor(row=0)
+        self.update_details_pane()
+
+    def detail_text(self, title: str, fields: Iterable[tuple[str, str]]) -> str:
+        lines = [title]
+        for label, value in fields:
+            lines.append(f"{label}: {value.strip() or '—'}")
+        return "\n".join(lines)
+
+    def details_empty_text(self) -> str:
+        title, hint = self.empty_state_text(self.view_mode)
+        return self.detail_text("Details", (("Status", title), ("Next", hint)))
+
+    def dns_ptr_status(self, row: DnsRow) -> str:
+        rtype = row.rtype.upper()
+        if rtype == "A":
+            reverse = self.reverse_record_for_ipv4(row.value)
+            if reverse is None:
+                return "unknown for this value"
+            ptr_zone, ptr_name = reverse
+            target = self.ptr_target_for_name(row.name)
+            status = f"expected {ptr_name}.{ptr_zone} PTR {target}"
+            if ptr_zone in self.zones:
+                return f"{status}; query reverse zone to verify"
+            return f"{status}; reverse zone not loaded"
+        if rtype == "PTR":
+            return f"points to {row.value}" if row.value else "PTR target unavailable"
+        return "not applicable"
+
+    def dns_details_text(self, row_index: int) -> str:
+        rows = self.visible_records()
+        if row_index < 0 or row_index >= len(rows):
+            return self.details_empty_text()
+        row = rows[row_index]
+        return self.detail_text(
+            "DNS details",
+            (
+                ("Name", row.name),
+                ("Type", row.rtype),
+                ("Value", row.value),
+                ("Zone", self.val("zone")),
+                ("TTL", row.ttl),
+                ("PTR status", self.dns_ptr_status(row)),
+                ("Records", row.records),
+                ("Children", row.children),
+            ),
+        )
+
+    def attribute_detail_value(self, values: Iterable[str]) -> str:
+        items = [value for value in values if value]
+        if not items:
+            return ""
+        shown = "; ".join(items[:3])
+        remaining = len(items) - 3
+        return f"{shown}; … (+{remaining} more)" if remaining > 0 else shown
+
+    def directory_details_text(self, row_index: int) -> str:
+        rows = self.visible_directory()
+        if row_index < 0 or row_index >= len(rows):
+            return self.details_empty_text()
+        row = rows[row_index]
+        fields = [
+            ("Name", row.name),
+            ("Kind", row.kind),
+            ("Summary", row.summary),
+            ("DN", row.dn),
+        ]
+        for attribute in LDAP_DETAIL_ATTRIBUTES:
+            value = self.attribute_detail_value(row.attributes.get(attribute, ()))
+            if value:
+                fields.append((attribute, value))
+        return self.detail_text("LDAP details", fields)
+
+    def smart_details_text(self, row_index: int) -> str:
+        rows = self.visible_smart_view()
+        if row_index < 0 or row_index >= len(rows):
+            return self.details_empty_text()
+        row = rows[row_index]
+        return self.detail_text(
+            "Smart-view details",
+            (
+                ("Severity", row.severity),
+                ("Object", row.object),
+                ("Finding", row.finding),
+                ("Evidence", row.evidence),
+                ("Suggested action", row.suggested_action),
+                ("Source", row.source),
+            ),
+        )
+
+    def current_details_text(self) -> str:
+        row_index = 0
+        with suppress(Exception):
+            row_index = self.query_one("#records", DataTable).cursor_row
+        if self.view_mode == "directory":
+            return self.directory_details_text(row_index)
+        if self.view_mode == "smart":
+            return self.smart_details_text(row_index)
+        return self.dns_details_text(row_index)
+
+    def update_details_pane(self) -> None:
+        with suppress(Exception):
+            self.query_one("#record_details", Static).update(
+                self.current_details_text()
             )
 
     def empty_state_text(self, view_mode: str) -> tuple[str, str]:
@@ -1651,6 +1795,7 @@ class SambatuiApp(App):
         row = max(0, min(table.cursor_row + delta, table.row_count - 1))
         table.move_cursor(row=row)
         self.update_visual_selection()
+        self.update_details_pane()
 
     def action_cursor_down(self) -> None:
         self.pending_g = False
@@ -1685,6 +1830,7 @@ class SambatuiApp(App):
         table = self.active_table()
         table.move_cursor(row=0)
         self.update_visual_selection()
+        self.update_details_pane()
 
     def action_cursor_bottom(self) -> None:
         self.pending_g = False
@@ -1692,6 +1838,7 @@ class SambatuiApp(App):
         if table.row_count:
             table.move_cursor(row=table.row_count - 1)
             self.update_visual_selection()
+            self.update_details_pane()
 
     def action_toggle_select(self) -> None:
         self.pending_g = False
@@ -1920,6 +2067,10 @@ class SambatuiApp(App):
                 await self.load_zones()
             case "discover_ad":
                 self.action_discover_ad()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if event.data_table.id == "records":
+            self.update_details_pane()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "zones":

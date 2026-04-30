@@ -8,10 +8,12 @@ from sambatui.app import (
     parse_zones,
     validate_record,
 )
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, Static
 
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
+from sambatui.ldap_directory import DirectoryRow
 from sambatui.screens import ConfirmScreen, FormScreen, SmartViewPickerScreen
+from sambatui.smart_views import SmartViewRow
 
 
 def test_key_hints_change_by_side_tab() -> None:
@@ -35,8 +37,10 @@ def test_empty_states_explain_next_actions() -> None:
         app = SambatuiApp()
         async with app.run_test():
             records = app.query_one("#records", DataTable)
+            details = app.query_one("#record_details", Static)
             assert str(records.get_row_at(0)[1]) == "No DNS records shown"
             assert "select zone" in str(records.get_row_at(0)[3])
+            assert "No DNS records shown" in str(details.render())
 
             zones = app.query_one("#zones", DataTable)
             app.populate_zones([])
@@ -45,10 +49,72 @@ def test_empty_states_explain_next_actions() -> None:
             app.populate_directory([])
             assert str(records.get_row_at(0)[1]) == "No LDAP entries shown"
             assert "Press L" in str(records.get_row_at(0)[3])
+            assert "No LDAP entries shown" in str(details.render())
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
             assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
             assert "Press S" in str(records.get_row_at(0)[3])
+            assert "No smart-view findings shown" in str(details.render())
+
+    asyncio.run(run_app())
+
+
+def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.query_one("#zone", Input).value = "example.com"
+            app.zones = ["example.com", "2.0.192.in-addr.arpa"]
+            app.populate_records(
+                [
+                    DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw"),
+                    DnsRow("alias", "1", "0", "CNAME", "www.example.com.", "", "raw"),
+                ]
+            )
+            details = app.query_one("#record_details", Static)
+            assert "DNS details" in str(details.render())
+            assert "Name: alias" in str(details.render())
+            assert "PTR status: not applicable" in str(details.render())
+
+            app.query_one("#records", DataTable).focus()
+            await pilot.press("j")
+            assert "Name: www" in str(details.render())
+            assert "PTR status: expected 10.2.0.192.in-addr.arpa" in str(
+                details.render()
+            )
+
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,CN=Users,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={
+                            "sAMAccountName": ("alice",),
+                            "memberOf": ("CN=Staff,DC=example,DC=com",),
+                        },
+                    )
+                ]
+            )
+            assert "LDAP details" in str(details.render())
+            assert "sAMAccountName: alice" in str(details.render())
+
+            app.populate_smart_view(
+                "DNS duplicates/conflicts",
+                [
+                    SmartViewRow(
+                        severity="high",
+                        object="example.com:www",
+                        finding="Duplicate DNS record",
+                        evidence="2 identical records",
+                        suggested_action="Remove duplicate copies.",
+                        source="dns",
+                    )
+                ],
+            )
+            assert "Smart-view details" in str(details.render())
+            assert "Suggested action: Remove duplicate copies." in str(details.render())
 
     asyncio.run(run_app())
 
