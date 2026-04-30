@@ -21,7 +21,7 @@ uv = "0.11.8"
 postinstall = "hk install --mise"
 
 [tasks.sambatui]
-description = "Run Sambatui"
+description = "Run sambatui"
 run = "uv run sambatui"
 
 [tasks.install]
