@@ -119,6 +119,80 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
     asyncio.run(run_app())
 
 
+def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
+    class FixApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.commands: list[tuple[str, str, list[str]]] = []
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            assert "ADD DNS record" in message
+            assert "Zone: 2.0.192.in-addr.arpa" in message
+            assert "10 PTR host.example.com" in message
+            return True
+
+        async def run_samba_zone(
+            self, action: str, zone: str, args: list[str]
+        ) -> tuple[int, str]:
+            self.commands.append((action, zone, args))
+            if action == "add":
+                return 0, "OK"
+            if zone == "example.com":
+                return (
+                    0,
+                    """
+  Name=host, Records=1, Children=0
+    A: 192.0.2.10 (flags=f0, serial=1, ttl=900)
+""",
+                )
+            return (
+                0,
+                """
+  Name=10, Records=1, Children=0
+    PTR: host.example.com (flags=f0, serial=1, ttl=900)
+""",
+            )
+
+    async def run_app() -> None:
+        app = FixApp()
+        async with app.run_test():
+            app.zones = ["example.com", "2.0.192.in-addr.arpa"]
+            app.current_smart_view_id = "dns_a_without_ptr"
+            app.current_smart_max_rows = 500
+            row = SmartViewRow(
+                severity="medium",
+                object="host.example.com A 192.0.2.10",
+                finding="A record missing PTR",
+                evidence="Expected 10.2.0.192.in-addr.arpa PTR host.example.com.",
+                suggested_action="Add PTR or confirm host should not have reverse DNS.",
+                source="dns",
+                fix_action="dns_add_ptr",
+                fix_label="add PTR 10.2.0.192.in-addr.arpa -> host.example.com",
+                fix_zone="2.0.192.in-addr.arpa",
+                fix_name="10",
+                fix_rtype="PTR",
+                fix_value="host.example.com",
+            )
+            app.populate_smart_view("DNS A records without matching PTR", [row])
+
+            await app.apply_smart_fix(row)
+
+            assert app.commands[0] == (
+                "add",
+                "2.0.192.in-addr.arpa",
+                ["10", "PTR", "host.example.com"],
+            )
+            assert ("query", "example.com", ["@", "ALL"]) in app.commands
+            assert (
+                "query",
+                "2.0.192.in-addr.arpa",
+                ["@", "ALL"],
+            ) in app.commands
+            assert app.smart_view_rows == []
+
+    asyncio.run(run_app())
+
+
 def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
     async def run_app() -> None:
         app = SambatuiApp()

@@ -25,6 +25,12 @@ class SmartViewRow:
     evidence: str
     suggested_action: str
     source: str
+    fix_action: str = ""
+    fix_label: str = ""
+    fix_zone: str = ""
+    fix_name: str = ""
+    fix_rtype: str = ""
+    fix_value: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,6 +154,12 @@ def dns_a_without_ptr(
                     evidence=f"Expected {ptr_name}.{ptr_zone} PTR {record.fqdn}.",
                     suggested_action="Add PTR or confirm host should not have reverse DNS.",
                     source="dns",
+                    fix_action="dns_add_ptr",
+                    fix_label=f"add PTR {ptr_name}.{ptr_zone} -> {record.fqdn}",
+                    fix_zone=ptr_zone,
+                    fix_name=ptr_name,
+                    fix_rtype="PTR",
+                    fix_value=record.fqdn,
                 )
             )
         elif expected_target not in actual_targets:
