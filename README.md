@@ -132,6 +132,7 @@ Optional variables:
 | `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
 | `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
+| `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in legacy LDAP mode (`on`/`off`) for old Samba/EL6-era servers | `off` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 
@@ -220,6 +221,11 @@ SAMBATUI_AUTH=kerberos sambatui
 
 Set `SAMBATUI_KRB5_CCACHE` to point GSSAPI at a non-default cache. For Kerberos
 LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
+
+For old Samba/EL6-era LDAP servers that only negotiate legacy TLS or fail schema
+probing, set `SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field
+in the UI. This mode is off by default because it relaxes TLS protocol/cipher
+policy for LDAP/StartTLS and skips LDAP schema probing.
 
 ## Development
 

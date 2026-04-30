@@ -1,5 +1,7 @@
+import ssl
+
 import pytest
-from ldap3 import GSSAPI, SASL
+from ldap3 import GSSAPI, NONE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
 from sambatui.ldap_directory import (
@@ -10,6 +12,8 @@ from sambatui.ldap_directory import (
     entry_to_directory_row,
     gssapi_cred_store,
     ldap_connection_kwargs,
+    ldap_server_get_info,
+    ldap_server_tls,
     parse_ldap_server,
 )
 
@@ -68,6 +72,23 @@ def test_search_config_accepts_kerberos_without_password() -> None:
     )
 
 
+def test_search_config_accepts_legacy_compatibility_mode() -> None:
+    config = LdapSearchConfig(
+        server="dc01.example.com",
+        user="EXAMPLE\\admin",
+        password="secret",
+        base_dn="DC=example,DC=com",
+        compatibility="legacy",
+    )
+
+    assert config.validation_error() is None
+    assert config.legacy_compatibility_enabled
+    assert ldap_server_get_info(config) == NONE
+    tls = ldap_server_tls(config)
+    assert tls is not None
+    assert tls.validate == ssl.CERT_NONE
+
+
 def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
     assert (
         LdapSearchConfig(
@@ -97,6 +118,16 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
         ).validation_error()
         == "ldap:// server URLs require LDAP encryption starttls or off."
     )
+    assert (
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+            compatibility="maybe",
+        ).validation_error()
+        == "LDAP compatibility must be on or off."
+    )
 
 
 def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
@@ -113,6 +144,47 @@ def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
     assert kwargs["sasl_mechanism"] == GSSAPI
     assert "password" not in kwargs
     assert kwargs["cred_store"] == {"ccache": "FILE:/tmp/krb5cc_test"}
+
+
+def test_search_passes_legacy_tls_to_ldap_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeConnection:
+        result = {"description": "invalidCredentials", "message": "nope"}
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def bind(self) -> bool:
+            return False
+
+        def unbind(self) -> bool:
+            return True
+
+    def fake_server(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", fake_server)
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+            compatibility="on",
+        )
+    )
+
+    with pytest.raises(ValueError, match="LDAP bind failed"):
+        client.search("users")
+
+    assert captured["get_info"] == NONE
+    assert captured["tls"] is not None
 
 
 def test_search_wraps_ldap_session_termination(
