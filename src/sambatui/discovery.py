@@ -99,7 +99,8 @@ def sort_discovered_services(
 def preferred_domain_controller(
     services: Iterable[DiscoveredService],
 ) -> DiscoveredService | None:
-    for service in sort_discovered_services(services):
+    sorted_services = sort_discovered_services(services)
+    for service in sorted_services:
         if service.service == "ldap":
             return service
-    return next(iter(sort_discovered_services(services)), None)
+    return sorted_services[0] if sorted_services else None
