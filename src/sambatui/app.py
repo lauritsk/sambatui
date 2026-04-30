@@ -4,9 +4,8 @@ import asyncio
 import os
 import shutil
 import socket
-from collections.abc import Callable, Iterable
-from contextlib import suppress
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -77,6 +76,14 @@ from .screens import (
     infer_domain_from_server,
 )
 from .settings import ConnectionSettings
+from .smart_view_catalog import (
+    SMART_VIEW_BY_ID,
+    SMART_VIEW_BY_SHORTCUT,
+    SMART_VIEW_LABELS,
+    SMART_VIEWS,
+    SmartViewDefinition,
+    SmartViewOptions,
+)
 from .smart_views import (
     SmartViewRow,
     dns_a_without_ptr,
@@ -113,99 +120,6 @@ from .ui.tables import (
 
 TableRow = TypeVar("TableRow")
 
-
-@dataclass(frozen=True)
-class SmartViewDefinition:
-    view_id: str
-    shortcut: str
-    source: str
-    label: str
-    description: str
-    needs_days: bool = False
-    needs_disabled_days: bool = False
-    needs_never_logged_days: bool = False
-
-    @property
-    def needs_ldap(self) -> bool:
-        return self.source == "LDAP"
-
-
-@dataclass(frozen=True)
-class SmartViewOptions:
-    days: int
-    disabled_days: int
-    never_logged_days: int
-    max_rows: int
-
-    @classmethod
-    def from_values(cls, values: dict[str, str]) -> SmartViewOptions:
-        return cls(
-            days=bounded_int(values.get("days"), 90),
-            disabled_days=bounded_int(values.get("disabled_days"), 180),
-            never_logged_days=bounded_int(values.get("never_logged_days"), 30),
-            max_rows=bounded_int(values.get("max_rows"), 500, maximum=5000),
-        )
-
-
-SMART_VIEWS = (
-    SmartViewDefinition(
-        "dns_duplicates",
-        "1",
-        "DNS",
-        "DNS duplicates/conflicts",
-        "Identical DNS records and CNAME names that also have other record types.",
-    ),
-    SmartViewDefinition(
-        "dns_a_without_ptr",
-        "2",
-        "DNS",
-        "DNS A records without matching PTR",
-        "Forward IPv4 A records missing reverse DNS, or pointing at the wrong PTR.",
-    ),
-    SmartViewDefinition(
-        "dns_ptr_without_a",
-        "3",
-        "DNS",
-        "DNS PTR records without matching A",
-        "Reverse PTR records with no forward A record, or mismatched forward IPs.",
-    ),
-    SmartViewDefinition(
-        "ldap_inactive_users",
-        "4",
-        "LDAP",
-        "LDAP inactive enabled users",
-        "Enabled users whose last logon is older than the inactivity threshold.",
-        needs_days=True,
-    ),
-    SmartViewDefinition(
-        "ldap_delete_candidates",
-        "5",
-        "LDAP",
-        "LDAP user cleanup candidates",
-        "Disabled users past retention, plus enabled users that never logged in.",
-        needs_disabled_days=True,
-        needs_never_logged_days=True,
-    ),
-    SmartViewDefinition(
-        "ldap_stale_computers",
-        "6",
-        "LDAP",
-        "LDAP stale computer accounts",
-        "Computer accounts with old or missing last-logon data.",
-        needs_days=True,
-    ),
-    SmartViewDefinition(
-        "ldap_users_without_groups",
-        "7",
-        "LDAP",
-        "LDAP users with no secondary groups",
-        "Enabled users whose memberOf list is empty except for their primary group.",
-    ),
-)
-
-SMART_VIEW_BY_ID = {view.view_id: view for view in SMART_VIEWS}
-SMART_VIEW_BY_SHORTCUT = {view.shortcut: view for view in SMART_VIEWS}
-SMART_VIEW_LABELS = {view.view_id: view.label for view in SMART_VIEWS}
 
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
@@ -248,6 +162,7 @@ __all__ = [
     "SmartViewPickerScreen",
     "SambaToolClient",
     "SambaToolConfig",
+    "SMART_VIEW_LABELS",
     "SambatuiApp",
     "main",
     "parse_records",
@@ -662,19 +577,24 @@ class SambatuiApp(App):
         for button in self.query(Button):
             button.disabled = busy
 
+    @asynccontextmanager
+    async def busy(self) -> AsyncIterator[None]:
+        self.set_busy(True)
+        try:
+            yield
+        finally:
+            self.set_busy(False)
+
     async def do_command(
         self, action: str, args: list[str], update_table: bool = False
     ) -> int:
-        self.set_busy(True)
-        try:
+        async with self.busy():
             code, output = await self.run_samba(action, args)
             if update_table and code == 0:
                 self.populate_records(parse_records(output))
             if code == 0:
                 self.notify("OK")
             return code
-        finally:
-            self.set_busy(False)
 
     def ptr_target_for_name(self, name: str) -> str:
         return dns_ptr_target_for_name(name, self.val("zone"))
@@ -696,8 +616,7 @@ class SambatuiApp(App):
         return code
 
     async def load_zones(self, *, restore_active_zone: bool = True) -> None:
-        self.set_busy(True)
-        try:
+        async with self.busy():
             code, output = await self.run_zonelist()
             if code != 0:
                 return
@@ -719,8 +638,6 @@ class SambatuiApp(App):
                 self.set_status(
                     f"Loaded {len(zones)} zones; select a zone and press Enter"
                 )
-        finally:
-            self.set_busy(False)
 
     def populate_zones(self, zones: list[str]) -> None:
         table = self.query_one("#zones", DataTable)
@@ -1054,8 +971,7 @@ class SambatuiApp(App):
         if not values:
             return False
         domain = values["domain"] or self.val("zone")
-        self.set_busy(True)
-        try:
+        async with self.busy():
             try:
                 services = await asyncio.to_thread(discover_ad_services, domain)
             except ValueError as exc:
@@ -1079,8 +995,6 @@ class SambatuiApp(App):
             self.set_status(message)
             self.notify(message)
             return True
-        finally:
-            self.set_busy(False)
 
     @work
     async def action_discover_ad(self) -> None:
@@ -1136,15 +1050,12 @@ class SambatuiApp(App):
     async def directory_search_rows(
         self, client: LdapDirectoryClient, kind: str, text: str
     ) -> list[DirectoryRow] | None:
-        self.set_busy(True)
-        try:
+        async with self.busy():
             try:
                 return await asyncio.to_thread(client.search, kind, text)
             except ValueError as exc:
                 self.report_error(str(exc))
                 return None
-        finally:
-            self.set_busy(False)
 
     @work
     async def action_ldap_search(self) -> None:
@@ -1228,16 +1139,13 @@ class SambatuiApp(App):
 
         records_by_zone: dict[str, list[DnsRow]] = {}
         failed = 0
-        self.set_busy(True)
-        try:
+        async with self.busy():
             for zone in self.zones:
                 code, output = await self.run_samba_zone("query", zone, ["@", "ALL"])
                 if code != 0:
                     failed += 1
                     continue
                 records_by_zone[zone] = parse_records(output)
-        finally:
-            self.set_busy(False)
         if failed:
             self.notify(f"Skipped {failed} zone(s) with query errors", severity="error")
         return records_by_zone
@@ -1397,13 +1305,10 @@ class SambatuiApp(App):
         ):
             self.notify("Fix cancelled")
             return
-        self.set_busy(True)
-        try:
+        async with self.busy():
             code, _ = await self.run_samba_zone(
                 "add", row.fix_zone, [row.fix_name, row.fix_rtype, row.fix_value]
             )
-        finally:
-            self.set_busy(False)
         if code != 0:
             return
         self.notify(f"Applied fix: {row.fix_label}")
