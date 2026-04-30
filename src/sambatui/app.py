@@ -128,6 +128,22 @@ KEY_HINTS = {
     "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
+DNS_ACTION_BUTTONS = (
+    ("load_zones", "Load zones"),
+    ("refresh_zone", "Refresh zone"),
+    ("query_record", "Query"),
+    ("add_record", "Add record"),
+    ("delete_records", "Delete selected"),
+)
+LDAP_ACTION_BUTTONS = (
+    ("ldap_search_users", "Search users"),
+    ("ldap_search_groups", "Search groups"),
+    ("ldap_search_computers", "Search computers"),
+)
+SMART_ACTION_BUTTONS = (
+    ("smart_dns_health", "DNS duplicate check"),
+    ("smart_ldap_cleanup", "LDAP cleanup check"),
+)
 RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "name": lambda row: row.name.casefold(),
     "type": lambda row: row.rtype.casefold(),
@@ -315,20 +331,29 @@ class SambatuiApp(App):
                     with TabPane("DNS", id="dns_tab"):
                         with Vertical(id="dns_panel"):
                             yield Static("DNS zones", classes="section-title")
+                            with Vertical(id="dns_actions", classes="action-buttons"):
+                                for button_id, label in DNS_ACTION_BUTTONS:
+                                    yield Button(label, id=button_id)
                             zones = DataTable(id="zones", cursor_type="row")
                             zones.add_columns("DNS zones")
                             yield zones
                     with TabPane("LDAP", id="ldap_tab"):
                         with Vertical(id="ldap_panel"):
                             yield Static("LDAP directory", classes="section-title")
+                            with Vertical(id="ldap_actions", classes="action-buttons"):
+                                for button_id, label in LDAP_ACTION_BUTTONS:
+                                    yield Button(label, id=button_id)
                             yield Static(
-                                "Press L to search AD directory. Results open in the main table.",
+                                "Search AD directory. Results open in the main table.",
                                 id="ldap_hint",
                                 classes="hint",
                             )
                     with TabPane("Smart", id="smart_tab"):
                         with Vertical(id="smart_panel"):
                             yield Static("Smart views", classes="section-title")
+                            with Vertical(id="smart_actions", classes="action-buttons"):
+                                for button_id, label in SMART_ACTION_BUTTONS:
+                                    yield Button(label, id=button_id)
                             yield Static(
                                 self.smart_view_hint_text(),
                                 id="smart_hint",
@@ -1071,13 +1096,13 @@ class SambatuiApp(App):
             self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
         )
 
-    def ldap_search_fields(self) -> list[FormField]:
+    def ldap_search_fields(self, default_kind: str = "users") -> list[FormField]:
         return [
             (
                 "Search type",
                 "kind",
                 "users | groups | computers | ous | all",
-                "users",
+                default_kind,
             ),
             ("Search text", "text", "name, login, mail, DN fragment", ""),
             *self.ldap_connection_fields(self.ldap_base_default()),
@@ -1100,12 +1125,11 @@ class SambatuiApp(App):
                 self.report_error(str(exc))
                 return None
 
-    @work
-    async def action_ldap_search(self) -> None:
+    async def open_ldap_search(self, default_kind: str = "users") -> None:
         values = await self.form(
             "Search AD directory",
             "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; kerberos uses current ticket.",
-            self.ldap_search_fields(),
+            self.ldap_search_fields(default_kind),
             "Search",
         )
         if not values:
@@ -1120,13 +1144,21 @@ class SambatuiApp(App):
             return
 
         rows = await self.directory_search_rows(
-            client, values["kind"] or "users", values["text"]
+            client, values["kind"] or default_kind, values["text"]
         )
         if rows is None:
             return
         self.search_text = ""
         self.populate_directory(rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
+
+    @work
+    async def action_ldap_search(self) -> None:
+        await self.open_ldap_search()
+
+    @work
+    async def action_ldap_search_kind(self, kind: str) -> None:
+        await self.open_ldap_search(kind)
 
     def smart_view_choices(self) -> list[SmartViewChoice]:
         return [
@@ -1898,16 +1930,40 @@ class SambatuiApp(App):
             await result
         return True
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        match event.button.id:
+    async def run_sidebar_button_action(self, button_id: str | None) -> bool:
+        match button_id:
             case "load_password":
                 self.load_password()
             case "save_password":
                 self.save_password()
             case "load_zones":
-                await self.load_zones()
+                await self.action_load_zones()
+            case "refresh_zone":
+                await self.action_refresh()
+            case "query_record":
+                self.action_query()
+            case "add_record":
+                self.action_add()
+            case "delete_records":
+                self.action_delete()
             case "discover_ad":
                 self.action_discover_ad()
+            case "ldap_search_users":
+                self.action_ldap_search_kind("users")
+            case "ldap_search_groups":
+                self.action_ldap_search_kind("groups")
+            case "ldap_search_computers":
+                self.action_ldap_search_kind("computers")
+            case "smart_dns_health":
+                self.action_smart_view_shortcut("1")
+            case "smart_ldap_cleanup":
+                self.action_smart_view_shortcut("5")
+            case _:
+                return False
+        return True
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        await self.run_sidebar_button_action(event.button.id)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "records":
