@@ -218,6 +218,8 @@ class SambatuiApp(App):
         ("shift+down", "extend_down", "Extend down"),
         ("tab", "next_table", "Next table"),
         ("shift+tab", "previous_table", "Previous table"),
+        ("]", "next_side_tab", "Next DNS/LDAP tab"),
+        ("[", "previous_side_tab", "Previous DNS/LDAP tab"),
         ("h", "focus_zones", "Focus zones"),
         ("l", "focus_records", "Focus records"),
         ("j", "cursor_down", "Down"),
@@ -299,6 +301,7 @@ class SambatuiApp(App):
         self.zones: list[str] = []
         self.pending_g = False
         self.refresh_connection_summary()
+        self.action_focus_records()
 
         if not shutil.which("samba-tool"):
             self.set_status("samba-tool not found in PATH")
@@ -1370,6 +1373,22 @@ class SambatuiApp(App):
         else:
             self.action_focus_records()
 
+    def action_next_side_tab(self) -> None:
+        self.switch_side_tab(1)
+
+    def action_previous_side_tab(self) -> None:
+        self.switch_side_tab(-1)
+
+    def switch_side_tab(self, delta: int) -> None:
+        tabs = self.query_one("#side_tabs", TabbedContent)
+        tab_ids = ["dns_tab", "ldap_tab"]
+        current = tabs.active if tabs.active in tab_ids else "dns_tab"
+        tabs.active = tab_ids[(tab_ids.index(current) + delta) % len(tab_ids)]
+        if tabs.active == "dns_tab":
+            self.action_focus_zones()
+        else:
+            self.action_focus_records()
+
     def action_sort_name(self) -> None:
         self.sort_records("name")
 
@@ -1582,6 +1601,10 @@ class SambatuiApp(App):
                 self.action_next_table()
             case "shift+tab", _:
                 self.action_previous_table()
+            case _, "]":
+                self.action_next_side_tab()
+            case _, "[":
+                self.action_previous_side_tab()
             case "space" | "ctrl+space", _:
                 self.action_toggle_select()
             case _, " ":
