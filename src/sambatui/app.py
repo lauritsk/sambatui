@@ -19,6 +19,8 @@ from .config import (
     DEFAULT_CONFIGFILE,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
+    DEFAULT_LDAP_BASE,
+    DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_OPTIONS,
     DEFAULT_PASSWORD,
     DEFAULT_PASSWORD_FILE,
@@ -39,6 +41,12 @@ from .dns import (
     valid_dns_name,
     validate_record,
 )
+from .ldap_directory import (
+    DirectoryRow,
+    LdapDirectoryClient,
+    LdapSearchConfig,
+    domain_to_base_dn,
+)
 from .models import DnsRow
 from .screens import ConfirmScreen, FormField, FormScreen, HelpScreen
 
@@ -48,6 +56,8 @@ __all__ = [
     "DEFAULT_CONFIGFILE",
     "DEFAULT_KERBEROS",
     "DEFAULT_KRB5_CCACHE",
+    "DEFAULT_LDAP_BASE",
+    "DEFAULT_LDAP_ENCRYPTION",
     "DEFAULT_OPTIONS",
     "DEFAULT_PASSWORD",
     "DEFAULT_PASSWORD_FILE",
@@ -125,6 +135,7 @@ class SambatuiApp(App):
         ("P", "save_password_file", "Save password"),
         ("z", "load_zones", "Zones"),
         ("c", "discover_ad", "Discover DC"),
+        ("L", "ldap_search", "LDAP"),
         ("r", "refresh", "Refresh"),
         ("q", "query", "Query"),
         ("a", "add", "Add"),
@@ -170,6 +181,8 @@ class SambatuiApp(App):
             yield Input(DEFAULT_KRB5_CCACHE, id="krb5_ccache")
             yield Input(DEFAULT_CONFIGFILE, id="configfile")
             yield Input(DEFAULT_OPTIONS, id="options")
+            yield Input(DEFAULT_LDAP_BASE, id="ldap_base")
+            yield Input(DEFAULT_LDAP_ENCRYPTION, id="ldap_encryption")
             yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
 
         with Horizontal(id="main"):
@@ -186,14 +199,14 @@ class SambatuiApp(App):
                     yield Static("Ready", id="status")
 
             with Vertical(id="results", classes="panel"):
-                yield Label("Records", classes="section-title")
+                yield Label("Records", id="records_title", classes="section-title")
                 table = DataTable(id="records", cursor_type="row")
                 table.add_columns(
                     "✓", "Name", "Type", "Value", "TTL", "Records", "Children"
                 )
                 yield table
         yield Static(
-            "? help  Ctrl+O connection  z zones  c discover  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
+            "? help  Ctrl+O connection  z zones  c discover  L ldap  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
             id="keys",
         )
 
@@ -202,6 +215,8 @@ class SambatuiApp(App):
         self.selection_anchor: int | None = None
         self.visual_selecting = False
         self.record_rows: list[DnsRow] = []
+        self.directory_rows: list[DirectoryRow] = []
+        self.view_mode = "dns"
         self.sort_field = "name"
         self.sort_reverse = False
         self.search_text = ""
@@ -310,6 +325,18 @@ class SambatuiApp(App):
                 self.val("options"),
             ),
             (
+                "LDAP base DN — used by read-only directory search.",
+                "ldap_base",
+                "DC=example,DC=com",
+                self.val("ldap_base") or domain_to_base_dn(self.val("zone")),
+            ),
+            (
+                "LDAP encryption — password bind requires ldaps or starttls.",
+                "ldap_encryption",
+                "ldaps | starttls",
+                self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            ),
+            (
                 "Password file — used at startup and by password load/save commands.",
                 "password_file",
                 "~/.config/sambatui/password",
@@ -334,6 +361,20 @@ class SambatuiApp(App):
 
     def samba_client(self) -> SambaToolClient:
         return SambaToolClient(self.samba_config())
+
+    def ldap_config(self, base_dn: str = "") -> LdapSearchConfig:
+        return LdapSearchConfig(
+            server=self.val("server"),
+            user=self.val("user"),
+            password=self.val("password"),
+            base_dn=base_dn
+            or self.val("ldap_base")
+            or domain_to_base_dn(self.val("zone")),
+            encryption=self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+        )
+
+    def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
+        return LdapDirectoryClient(self.ldap_config(base_dn))
 
     def load_password(self) -> None:
         path = self.password_file()
@@ -527,11 +568,20 @@ class SambatuiApp(App):
             table.add_row(zone)
 
     def populate_records(self, rows: list[DnsRow]) -> None:
+        self.view_mode = "dns"
+        self.query_one("#records_title", Label).update("Records")
         self.record_rows = self.sorted_records(rows)
         self.refresh_record_view()
         self.set_status(
             f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.sort_field}"
         )
+
+    def populate_directory(self, rows: list[DirectoryRow]) -> None:
+        self.view_mode = "directory"
+        self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
+        self.directory_rows = rows
+        self.refresh_directory_view()
+        self.set_status(f"Loaded {len(rows)} LDAP entries")
 
     def render_records(self, rows: list[DnsRow]) -> None:
         self.selected_record_rows.clear()
@@ -543,6 +593,15 @@ class SambatuiApp(App):
             table.add_row(
                 "", row.name, row.rtype, row.value, row.ttl, row.records, row.children
             )
+
+    def render_directory(self, rows: list[DirectoryRow]) -> None:
+        self.selected_record_rows.clear()
+        self.selection_anchor = None
+        self.visual_selecting = False
+        table = self.query_one("#records", DataTable)
+        table.clear()
+        for row in rows:
+            table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
 
     def visible_records(self) -> list[DnsRow]:
         rows = self.record_rows
@@ -557,12 +616,34 @@ class SambatuiApp(App):
             ]
         return rows
 
+    def visible_directory(self) -> list[DirectoryRow]:
+        rows = self.directory_rows
+        if self.search_text:
+            needle = self.search_text.casefold()
+            rows = [
+                row
+                for row in rows
+                if needle in row.name.casefold()
+                or needle in row.kind.casefold()
+                or needle in row.summary.casefold()
+                or needle in row.dn.casefold()
+            ]
+        return rows
+
     def refresh_record_view(self) -> None:
         rows = self.visible_records()
         self.render_records(rows)
         extra = f" matching /{self.search_text}/" if self.search_text else ""
         self.set_status(
             f"Showing {len(rows)} of {len(self.record_rows)} records{extra}"
+        )
+
+    def refresh_directory_view(self) -> None:
+        rows = self.visible_directory()
+        self.render_directory(rows)
+        extra = f" matching /{self.search_text}/" if self.search_text else ""
+        self.set_status(
+            f"Showing {len(rows)} of {len(self.directory_rows)} LDAP entries{extra}"
         )
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
@@ -615,6 +696,8 @@ class SambatuiApp(App):
         self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
 
     def row_to_record(self, row_index: int) -> dict[str, str] | None:
+        if self.view_mode != "dns":
+            return None
         table = self.query_one("#records", DataTable)
         try:
             row = table.get_row_at(row_index)
@@ -685,6 +768,62 @@ class SambatuiApp(App):
             )
             self.set_status(message)
             self.notify(message)
+        finally:
+            self.set_busy(False)
+
+    @work
+    async def action_ldap_search(self) -> None:
+        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+        values = await self.form(
+            "Search AD directory",
+            "Read-only LDAP via ldap3. Password bind requires LDAPS or StartTLS.",
+            [
+                (
+                    "Search type",
+                    "kind",
+                    "users | groups | computers | ous | all",
+                    "users",
+                ),
+                ("Search text", "text", "name, login, mail, DN fragment", ""),
+                ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
+                (
+                    "LDAP encryption",
+                    "ldap_encryption",
+                    "ldaps | starttls",
+                    self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+                ),
+                ("Max rows", "max_rows", "200", "200"),
+            ],
+            "Search",
+        )
+        if not values:
+            return
+        self.set_val("ldap_base", values["base_dn"])
+        self.set_val("ldap_encryption", values["ldap_encryption"])
+        try:
+            max_rows = max(1, min(int(values["max_rows"] or "200"), 1000))
+        except ValueError:
+            max_rows = 200
+        client = self.ldap_client(values["base_dn"])
+        error = client.validation_error()
+        if error:
+            self.notify(error, severity="error")
+            self.set_status(error)
+            return
+        self.set_busy(True)
+        try:
+            try:
+                rows = await asyncio.to_thread(
+                    client.search, values["kind"] or "users", values["text"]
+                )
+            except ValueError as exc:
+                message = str(exc)
+                self.notify(message, severity="error")
+                self.set_status(message)
+                return
+            self.search_text = ""
+            self.populate_directory(rows[:max_rows])
+            self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
         finally:
             self.set_busy(False)
 
@@ -882,7 +1021,10 @@ class SambatuiApp(App):
         if values is None:
             return
         self.search_text = values["search"]
-        self.refresh_record_view()
+        if self.view_mode == "directory":
+            self.refresh_directory_view()
+        else:
+            self.refresh_record_view()
 
     def focused_table(self) -> DataTable | None:
         focused = self.focused
@@ -986,6 +1128,9 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.focused_table() or self.query_one("#records", DataTable)
         if table.id != "records" or not table.row_count:
+            return
+        if self.view_mode != "dns":
+            self.set_status("LDAP directory rows are read-only.")
             return
         row_index = table.cursor_row
         self.selection_anchor = (
@@ -1110,6 +1255,8 @@ class SambatuiApp(App):
                 await self.action_load_zones()
             case _, "c":
                 self.action_discover_ad()
+            case _, "l" if char == "L":
+                self.action_ldap_search()
             case _, "r":
                 await self.action_refresh()
             case _, "q":
