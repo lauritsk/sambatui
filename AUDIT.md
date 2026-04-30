@@ -2,7 +2,7 @@
 
 ## Scope
 
-Whole-repository security review of Sambatui.
+Whole-repository security review of sambatui.
 
 ## Summary
 

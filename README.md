@@ -1,4 +1,4 @@
-# Sambatui
+# sambatui
 
 Textual terminal UI for managing Samba services.
 
@@ -89,7 +89,7 @@ deletes, and secret writes.
 ## Authentication and passwords
 
 Prefer Kerberos where possible. With an existing ticket (`kinit` or system login),
-set `SAMBATUI_AUTH=kerberos`; Sambatui then omits the password from
+set `SAMBATUI_AUTH=kerberos`; sambatui then omits the password from
 `samba-tool` arguments and uses `--use-kerberos=required` unless overridden.
 
 Password mode remains available for environments without Kerberos tickets. The
@@ -107,7 +107,7 @@ password by:
    ```
 
 You can also use **Save password** / **Load password** in the app. Password
-files must be readable only by the owner (`chmod 600`) or Sambatui will refuse to
+files must be readable only by the owner (`chmod 600`) or sambatui will refuse to
 load them. Do not commit password files or `.env` files.
 
 Password mode still passes credentials to `samba-tool` non-interactively. Prefer

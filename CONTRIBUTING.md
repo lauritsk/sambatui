@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving Sambatui. This project uses `mise` for tooling and task
+Thanks for improving sambatui. This project uses `mise` for tooling and task
 orchestration.
 
 ## Setup
@@ -58,7 +58,7 @@ Docker Hardened Images from `dhi.io`.
 
 When filing bugs, include:
 
-- Sambatui version or commit SHA.
+- sambatui version or commit SHA.
 - Operating system and shell.
 - Command you ran.
 - Expected behavior.
