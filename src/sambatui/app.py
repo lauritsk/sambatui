@@ -1199,6 +1199,7 @@ class SambatuiApp(App):
             return
         await self.run_smart_view(view_id)
 
+    @work
     async def action_smart_view_shortcut(self, shortcut: str) -> None:
         view = SMART_VIEW_BY_SHORTCUT.get(shortcut)
         if view is None:
@@ -1773,7 +1774,7 @@ class SambatuiApp(App):
             case _, "s" if char == "S":
                 self.action_smart_view()
             case _, shortcut if shortcut in SMART_VIEW_BY_SHORTCUT:
-                await self.action_smart_view_shortcut(shortcut)
+                self.action_smart_view_shortcut(shortcut)
             case _, "r":
                 await self.action_refresh()
             case _, "q":

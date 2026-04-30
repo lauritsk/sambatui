@@ -1,3 +1,5 @@
+import asyncio
+
 from sambatui.app import (
     DnsRow,
     SambatuiApp,
@@ -5,7 +7,10 @@ from sambatui.app import (
     parse_zones,
     validate_record,
 )
+from textual.widgets import Input
+
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
+from sambatui.screens import ConfirmScreen, FormScreen, SmartViewPickerScreen
 
 
 def test_key_hints_change_by_side_tab() -> None:
@@ -14,6 +19,45 @@ def test_key_hints_change_by_side_tab() -> None:
     assert app.keys_hint_for_tab("dns_tab").startswith("DNS:")
     assert app.keys_hint_for_tab("ldap_tab").startswith("LDAP:")
     assert app.keys_hint_for_tab("smart_tab").startswith("Smart:")
+
+
+def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            for key, screen_type in [
+                ("ctrl+o", FormScreen),
+                ("c", FormScreen),
+                ("L", FormScreen),
+                ("S", SmartViewPickerScreen),
+                ("1", FormScreen),
+                ("q", FormScreen),
+                ("a", FormScreen),
+                ("slash", FormScreen),
+            ]:
+                await pilot.press(key)
+                for _ in range(10):
+                    await pilot.pause()
+                    if isinstance(app.screen, screen_type):
+                        break
+                assert isinstance(app.screen, screen_type), key
+                await pilot.press("escape")
+                for _ in range(10):
+                    await pilot.pause()
+                    if not isinstance(app.screen, screen_type):
+                        break
+
+            app.query_one("#password", Input).value = "secret"
+            await pilot.press("P")
+            for _ in range(10):
+                await pilot.pause()
+                if isinstance(app.screen, ConfirmScreen):
+                    break
+            assert isinstance(app.screen, ConfirmScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+
+    asyncio.run(run_app())
 
 
 def test_parse_zones_deduplicates_zone_names() -> None:
