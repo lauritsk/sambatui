@@ -128,19 +128,28 @@ class SambatuiApp(App):
         ("ctrl+space", "toggle_select", "Toggle select"),
         ("v", "visual_select", "Visual select"),
         ("V", "select_range", "Select range"),
+        ("escape", "clear_navigation_state", "Clear"),
         ("shift+up", "extend_up", "Extend up"),
         ("shift+down", "extend_down", "Extend down"),
+        ("tab", "next_table", "Next table"),
+        ("shift+tab", "previous_table", "Previous table"),
         ("h", "focus_zones", "Focus zones"),
         ("l", "focus_records", "Focus records"),
         ("j", "cursor_down", "Down"),
         ("k", "cursor_up", "Up"),
-        ("g", "cursor_top", "Top"),
+        ("ctrl+d", "cursor_half_page_down", "Half page down"),
+        ("ctrl+u", "cursor_half_page_up", "Half page up"),
+        ("pagedown", "cursor_page_down", "Page down"),
+        ("pageup", "cursor_page_up", "Page up"),
+        ("home", "cursor_top", "Top"),
+        ("end", "cursor_bottom", "Bottom"),
         ("G", "cursor_bottom", "Bottom"),
-        ("enter", "activate_row", "Select"),
+        ("enter", "activate_row", "Activate"),
         ("slash", "search", "Search"),
         ("n", "sort_name", "Sort name"),
         ("t", "sort_type", "Sort type"),
         ("e", "sort_value", "Sort value"),
+        ("ctrl+q", "quit", "Quit"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -210,7 +219,7 @@ class SambatuiApp(App):
                 )
                 yield table
         yield Static(
-            "z zones  c discover DC  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select  v visual  n/t/e sort",
+            "z zones  c discover  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  gg/G top/bottom  Ctrl+d/u page  Space select  v visual  y/n confirm",
             id="keys",
         )
 
@@ -223,6 +232,7 @@ class SambatuiApp(App):
         self.sort_reverse = False
         self.search_text = ""
         self.zones: list[str] = []
+        self.pending_g = False
 
         if not shutil.which("samba-tool"):
             self.set_status("samba-tool not found in PATH")
@@ -299,8 +309,12 @@ class SambatuiApp(App):
         self.set_status(f"Saved password to {path}")
         self.notify("Password saved")
 
-    async def confirm(self, message: str) -> bool:
-        return bool(await self.push_screen_wait(ConfirmScreen(message)))
+    async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+        return bool(
+            await self.push_screen_wait(
+                ConfirmScreen(message, default_confirm=default_confirm)
+            )
+        )
 
     async def form(
         self,
@@ -639,7 +653,8 @@ class SambatuiApp(App):
                 ptr_zone, ptr_name = reverse
                 ptr_text = f"\nAuto PTR: {ptr_zone} / {ptr_name} PTR {self.ptr_target_for_name(name)}"
         if not await self.confirm(
-            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}{ptr_text}"
+            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}{ptr_text}",
+            default_confirm=True,
         ):
             self.notify("Add cancelled")
             return
@@ -780,10 +795,26 @@ class SambatuiApp(App):
         return focused if isinstance(focused, DataTable) else None
 
     def action_focus_zones(self) -> None:
+        self.pending_g = False
         self.query_one("#zones", DataTable).focus()
 
     def action_focus_records(self) -> None:
+        self.pending_g = False
         self.query_one("#records", DataTable).focus()
+
+    def action_next_table(self) -> None:
+        table = self.focused_table()
+        if table and table.id == "zones":
+            self.action_focus_records()
+        else:
+            self.action_focus_zones()
+
+    def action_previous_table(self) -> None:
+        table = self.focused_table()
+        if table and table.id == "records":
+            self.action_focus_zones()
+        else:
+            self.action_focus_records()
 
     def action_sort_name(self) -> None:
         self.sort_records("name")
@@ -801,28 +832,64 @@ class SambatuiApp(App):
         if self.focused_table() is table:
             self.select_record_range(self.selection_anchor, table.cursor_row)
 
-    def action_cursor_down(self) -> None:
-        table = self.focused_table() or self.query_one("#records", DataTable)
-        table.action_cursor_down()
+    def active_table(self) -> DataTable:
+        return self.focused_table() or self.query_one("#records", DataTable)
+
+    def page_rows(self, table: DataTable) -> int:
+        height = getattr(table.size, "height", 0)
+        return max(1, height - 3) if height else 10
+
+    def move_cursor_by(self, delta: int) -> None:
+        table = self.active_table()
+        if not table.row_count:
+            return
+        row = max(0, min(table.cursor_row + delta, table.row_count - 1))
+        table.move_cursor(row=row)
         self.update_visual_selection()
+
+    def action_cursor_down(self) -> None:
+        self.pending_g = False
+        self.move_cursor_by(1)
 
     def action_cursor_up(self) -> None:
-        table = self.focused_table() or self.query_one("#records", DataTable)
-        table.action_cursor_up()
-        self.update_visual_selection()
+        self.pending_g = False
+        self.move_cursor_by(-1)
+
+    def action_cursor_page_down(self) -> None:
+        self.pending_g = False
+        table = self.active_table()
+        self.move_cursor_by(self.page_rows(table))
+
+    def action_cursor_page_up(self) -> None:
+        self.pending_g = False
+        table = self.active_table()
+        self.move_cursor_by(-self.page_rows(table))
+
+    def action_cursor_half_page_down(self) -> None:
+        self.pending_g = False
+        table = self.active_table()
+        self.move_cursor_by(max(1, self.page_rows(table) // 2))
+
+    def action_cursor_half_page_up(self) -> None:
+        self.pending_g = False
+        table = self.active_table()
+        self.move_cursor_by(-max(1, self.page_rows(table) // 2))
 
     def action_cursor_top(self) -> None:
-        table = self.focused_table() or self.query_one("#records", DataTable)
+        self.pending_g = False
+        table = self.active_table()
         table.move_cursor(row=0)
         self.update_visual_selection()
 
     def action_cursor_bottom(self) -> None:
-        table = self.focused_table() or self.query_one("#records", DataTable)
+        self.pending_g = False
+        table = self.active_table()
         if table.row_count:
             table.move_cursor(row=table.row_count - 1)
             self.update_visual_selection()
 
     def action_toggle_select(self) -> None:
+        self.pending_g = False
         table = self.focused_table() or self.query_one("#records", DataTable)
         if table.id != "records" or not table.row_count:
             return
@@ -834,6 +901,7 @@ class SambatuiApp(App):
         self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
 
     def action_visual_select(self) -> None:
+        self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
         if not table.row_count:
@@ -850,6 +918,7 @@ class SambatuiApp(App):
         self.set_status("Visual selection on: use j/k, then d to delete selected")
 
     def action_select_range(self) -> None:
+        self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
         if not table.row_count:
@@ -859,23 +928,48 @@ class SambatuiApp(App):
         self.select_record_range(self.selection_anchor, table.cursor_row)
 
     def action_extend_up(self) -> None:
+        self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
-        table.action_cursor_up()
+        self.move_cursor_by(-1)
         self.select_record_range(self.selection_anchor, table.cursor_row)
 
     def action_extend_down(self) -> None:
+        self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
-        table.action_cursor_down()
+        self.move_cursor_by(1)
         self.select_record_range(self.selection_anchor, table.cursor_row)
 
+    def action_clear_navigation_state(self) -> None:
+        self.pending_g = False
+        if self.visual_selecting:
+            self.visual_selecting = False
+            self.set_status(
+                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
+            )
+            return
+        if self.selected_record_rows:
+            self.clear_record_selection()
+            self.set_status("Selection cleared")
+            return
+        if self.search_text:
+            self.search_text = ""
+            self.refresh_record_view()
+            self.set_status("Search cleared")
+            return
+        self.action_focus_records()
+
     async def action_activate_row(self) -> None:
+        self.pending_g = False
         table = self.focused_table()
+        if table and table.id == "records":
+            self.action_toggle_select()
+            return
         if table and table.id == "zones":
             try:
                 row = table.get_row_at(table.cursor_row)
@@ -891,22 +985,46 @@ class SambatuiApp(App):
             return
         key = event.key
         char = getattr(event, "character", None)
+        if isinstance(self.focused, Button) and key in {"enter", "space"}:
+            return
+
         handled = True
-        match key, char:
+        char_lower = char.casefold() if char else ""
+        if char_lower != "g":
+            self.pending_g = False
+        match key, char_lower:
+            case "escape", _:
+                self.action_clear_navigation_state()
+            case "tab", _:
+                self.action_next_table()
+            case "shift+tab", _:
+                self.action_previous_table()
             case "space" | "ctrl+space", _:
                 self.action_toggle_select()
             case _, " ":
                 self.action_toggle_select()
+            case _, "z":
+                await self.action_load_zones()
+            case _, "c":
+                self.action_discover_ad()
+            case _, "r":
+                await self.action_refresh()
+            case _, "q":
+                self.action_query()
+            case _, "a":
+                self.action_add()
+            case _, "u":
+                self.action_update()
+            case _, "d":
+                self.action_delete()
+            case _, "v" if char == "V":
+                self.action_select_range()
             case _, "v":
                 self.action_visual_select()
-            case _, "V":
-                self.action_select_range()
             case "shift+up", _:
                 self.action_extend_up()
             case "shift+down", _:
                 self.action_extend_down()
-            case _, "c":
-                self.action_discover_ad()
             case _, "j":
                 self.action_cursor_down()
             case _, "k":
@@ -915,10 +1033,25 @@ class SambatuiApp(App):
                 self.action_focus_zones()
             case _, "l":
                 self.action_focus_records()
-            case _, "g":
+            case "ctrl+d", _:
+                self.action_cursor_half_page_down()
+            case "ctrl+u", _:
+                self.action_cursor_half_page_up()
+            case "pagedown", _:
+                self.action_cursor_page_down()
+            case "pageup", _:
+                self.action_cursor_page_up()
+            case "home", _:
                 self.action_cursor_top()
-            case _, "G":
+            case "end", _:
                 self.action_cursor_bottom()
+            case _, "g" if char == "G":
+                self.action_cursor_bottom()
+            case _, "g" if self.pending_g:
+                self.action_cursor_top()
+            case _, "g":
+                self.pending_g = True
+                self.set_status("g pressed: press g again for top; G goes bottom")
             case "slash", _:
                 self.action_search()
             case _, "/":
@@ -933,6 +1066,7 @@ class SambatuiApp(App):
                 await self.action_activate_row()
             case _:
                 handled = False
+                self.pending_g = False
         if handled:
             event.prevent_default()
             event.stop()

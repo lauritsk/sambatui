@@ -74,12 +74,17 @@ Optional variables:
 - `d`: delete selected records.
 - `/`: search by name, type, or value.
 - `n` / `t` / `e`: sort by name/type/value.
-- `h` / `l`: focus zones/records.
-- `j` / `k`, `g` / `G`: move.
+- `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
+- `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`:
+  move.
+- `Enter`: activate the focused row (load a zone, or toggle a record selection).
 - `Space`: toggle selected record.
-- `v`, then `j`/`k`: visual range selection.
+- `v`, then `j`/`k`: visual range selection; `Esc` leaves visual mode, then
+  clears selection/search.
 
-Destructive actions require confirmation.
+Confirmations support `y` (yes), `n` or `Esc` (no). `Enter` uses the safe
+default: yes for low-risk add confirmations, no for destructive changes,
+deletes, and secret writes.
 
 ## Authentication and passwords
 
