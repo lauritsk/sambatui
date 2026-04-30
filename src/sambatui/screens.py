@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
 from typing import Any, TypeAlias
+from urllib.parse import urlparse
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
+
+from .ldap_directory import domain_to_base_dn
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -72,6 +76,28 @@ class ConfirmScreen(ModalScreen[bool]):
 
 
 FormField: TypeAlias = tuple[str, str, str, str]
+
+
+def infer_domain_from_server(server: str) -> str:
+    value = server.strip().rstrip(".")
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = (parsed.hostname or value).strip().rstrip(".")
+    if not host:
+        return ""
+    try:
+        ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return ""
+    labels = [label for label in host.split(".") if label]
+    if len(labels) < 3:
+        return ""
+    if any("_" in label for label in labels):
+        return ""
+    return ".".join(labels[1:])
 
 
 class HelpScreen(ModalScreen[None]):
@@ -177,6 +203,8 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
         self.hint = hint
         self.fields = fields
         self.submit_label = submit_label
+        self._autofilled: dict[str, str] = {}
+        self._suppress_autofill = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form_dialog"):
@@ -203,8 +231,50 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             values[field_id] = self.query_one(f"#{field_id}", Input).value.strip()
         return values
 
+    def maybe_autofill_connection_fields(self) -> None:
+        field_ids = {field_id for _, field_id, _, _ in self.fields}
+        if not {"server", "zone", "ldap_base"}.issubset(field_ids):
+            return
+
+        server = self.query_one("#server", Input).value.strip()
+        zone_input = self.query_one("#zone", Input)
+        ldap_base_input = self.query_one("#ldap_base", Input)
+        zone = zone_input.value.strip()
+
+        inferred_zone = infer_domain_from_server(server)
+        if inferred_zone and self.can_autofill("zone", zone):
+            self.autofill("zone", inferred_zone)
+            zone = inferred_zone
+
+        base_dn = domain_to_base_dn(zone)
+        if base_dn and self.can_autofill("ldap_base", ldap_base_input.value.strip()):
+            self.autofill("ldap_base", base_dn)
+
+    def can_autofill(self, field_id: str, current: str) -> bool:
+        return not current or self._autofilled.get(field_id) == current
+
+    def autofill(self, field_id: str, value: str) -> None:
+        self._suppress_autofill = True
+        try:
+            self.query_one(f"#{field_id}", Input).value = value
+        finally:
+            self._suppress_autofill = False
+        self._autofilled[field_id] = value
+
     def submit(self) -> None:
         self.dismiss(self.form_values())
+
+    def on_mount(self) -> None:
+        self.maybe_autofill_connection_fields()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._suppress_autofill:
+            return
+        field_id = str(event.input.id)
+        if self._autofilled.get(field_id) == event.input.value.strip():
+            return
+        self._autofilled.pop(field_id, None)
+        self.maybe_autofill_connection_fields()
 
     def on_key(self, event: Any) -> None:
         if isinstance(self.focused, Button) and event.key in {"enter", "space"}:
