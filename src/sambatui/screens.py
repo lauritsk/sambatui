@@ -215,17 +215,10 @@ class SmartViewPickerScreen(ModalScreen[str | None]):
 
     def selected_view_id(self) -> str | None:
         table = self.query_one("#smart_view_table", DataTable)
-        try:
-            row = table.get_row_at(table.cursor_row)
-        except Exception:
+        if table.cursor_row < 0 or table.cursor_row >= len(self.choices):
             return None
-        if not row:
-            return None
-        shortcut = str(row[0])
-        for choice_shortcut, view_id, *_ in self.choices:
-            if choice_shortcut == shortcut:
-                return view_id
-        return None
+        _, view_id, *_ = self.choices[table.cursor_row]
+        return view_id
 
     def dismiss_selected(self) -> None:
         self.dismiss(self.selected_view_id())
