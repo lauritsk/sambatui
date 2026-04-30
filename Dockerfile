@@ -1,6 +1,6 @@
 FROM dhi.io/uv:0.11.8-debian13@sha256:0d696ef68d115128547e50bb9862cc565319841a21541f956860830dc2ba74ae AS uv
 
-FROM dhi.io/python:3.14.4-debian13-dev@sha256:8d91cf3840e88d303f55fa61d67eb34c3c760c394edfb1d754d9b88b5f68cb2b AS builder
+FROM dhi.io/python:3.14.4-debian13-dev@sha256:eec5f7badfdcb6685d36f1316d543bf54be5f202511883cae8215f13600fb317 AS builder
 ARG TARGETPLATFORM
 COPY --from=uv /usr/local/bin/uv /usr/local/bin/
 WORKDIR /app
@@ -10,13 +10,22 @@ RUN python -m venv /app/.venv
 COPY ${TARGETPLATFORM}/*.whl /tmp/
 RUN uv pip install --python /app/.venv/bin/python /tmp/*.whl
 
-FROM dhi.io/python:3.14.4-debian13@sha256:0d5b16a6304ae84e58b163a0daf4b7dec6df8c829302d8f72948ab131593034e
-ENV PYTHONDONTWRITEBYTECODE=1 \
+FROM dhi.io/python:3.14.4-debian13-dev@sha256:eec5f7badfdcb6685d36f1316d543bf54be5f202511883cae8215f13600fb317
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    TERM=xterm-256color \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends samba-common-bin \
+    && apt-get install -y --no-install-recommends \
+        bind9-dnsutils \
+        ca-certificates \
+        krb5-user \
+        ldap-utils \
+        libsasl2-modules-gssapi-mit \
+        samba-common-bin \
+        smbclient \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

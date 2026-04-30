@@ -8,9 +8,31 @@ search, sorting, bulk delete, and optional A-record PTR creation.
 
 ## Requirements
 
+`sambatui` is a Python TUI that shells out to Samba's supported CLI. A regular
+host install needs:
+
 - Python 3.14+
 - `samba-tool` available in `PATH`
-- Network and credentials with permission to manage Samba AD DNS
+- network access to the AD DNS/DC endpoint
+- credentials allowed to manage Samba AD DNS
+- Kerberos client config/tickets when using Kerberos auth
+
+Useful system packages by distro:
+
+| Distro | Packages |
+| --- | --- |
+| Debian/Ubuntu | `sudo apt install samba-common-bin krb5-user bind9-dnsutils` |
+| Fedora/RHEL/CentOS | `sudo dnf install samba-common-tools krb5-workstation bind-utils` |
+| Arch Linux | `sudo pacman -S samba krb5 bind` |
+| openSUSE | `sudo zypper install samba krb5-client bind-utils` |
+| Alpine | `sudo apk add samba-dc krb5 bind-tools` |
+
+Package names vary by release. After installing, verify:
+
+```sh
+command -v samba-tool
+samba-tool --version
+```
 
 ## Install
 
@@ -29,6 +51,51 @@ uvx sambatui
 # or
 pipx install sambatui
 sambatui
+```
+
+## Docker
+
+The Docker image is the batteries-included option. It includes `sambatui`,
+`samba-tool`, Kerberos client tools, DNS lookup tools, LDAP CLI tools, and
+`smbclient`. You still provide network access, credentials, and any local AD
+configuration.
+
+Password mode example:
+
+```sh
+docker run --rm -it \
+  -e SAMBATUI_SERVER=dc01.example.com \
+  -e SAMBATUI_ZONE=example.com \
+  -e SAMBATUI_USER='EXAMPLE\administrator' \
+  -e SAMBATUI_PASSWORD='replace-with-your-password' \
+  sambatui
+```
+
+Kerberos mode example using host config and ticket cache:
+
+```sh
+kinit administrator@EXAMPLE.COM
+KRB5CCACHE_PATH=${KRB5CCNAME#FILE:}
+
+docker run --rm -it \
+  -e SAMBATUI_SERVER=dc01.example.com \
+  -e SAMBATUI_ZONE=example.com \
+  -e SAMBATUI_AUTH=kerberos \
+  -e SAMBATUI_KERBEROS=required \
+  -e KRB5CCNAME=/tmp/krb5cc \
+  -v /etc/krb5.conf:/etc/krb5.conf:ro \
+  -v "$KRB5CCACHE_PATH:/tmp/krb5cc:ro" \
+  sambatui
+```
+
+If your environment needs a custom Samba config, mount it and point sambatui at
+it:
+
+```sh
+docker run --rm -it \
+  -e SAMBATUI_CONFIGFILE=/workspace/smb.conf \
+  -v "$PWD/smb.conf:/workspace/smb.conf:ro" \
+  sambatui
 ```
 
 ## Configure
