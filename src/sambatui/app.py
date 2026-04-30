@@ -130,6 +130,23 @@ class SmartViewDefinition:
         return self.source == "LDAP"
 
 
+@dataclass(frozen=True)
+class SmartViewOptions:
+    days: int
+    disabled_days: int
+    never_logged_days: int
+    max_rows: int
+
+    @classmethod
+    def from_values(cls, values: dict[str, str]) -> SmartViewOptions:
+        return cls(
+            days=bounded_int(values.get("days"), 90),
+            disabled_days=bounded_int(values.get("disabled_days"), 180),
+            never_logged_days=bounded_int(values.get("never_logged_days"), 30),
+            max_rows=bounded_int(values.get("max_rows"), 500, maximum=5000),
+        )
+
+
 SMART_VIEWS = (
     SmartViewDefinition(
         "dns_duplicates",
@@ -1213,6 +1230,72 @@ class SambatuiApp(App):
             return
         await self.run_smart_view(view.view_id)
 
+    def apply_smart_view_options(
+        self, view: SmartViewDefinition, options: SmartViewOptions
+    ) -> None:
+        if view.needs_days:
+            self.set_val("smart_days", str(options.days))
+        if view.needs_disabled_days:
+            self.set_val("smart_disabled_days", str(options.disabled_days))
+        if view.needs_never_logged_days:
+            self.set_val("smart_never_logged_days", str(options.never_logged_days))
+        self.set_val("smart_max_rows", str(options.max_rows))
+        self.save_preferences()
+
+    def populate_smart_view_results(
+        self, label: str, rows: list[SmartViewRow], max_rows: int
+    ) -> None:
+        self.search_text = ""
+        self.populate_smart_view(label, rows[:max_rows])
+        self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
+
+    async def ldap_directory_for_smart_view(
+        self, view: SmartViewDefinition, values: dict[str, str]
+    ) -> list[DirectoryRow] | None:
+        self.set_val("ldap_base", values["base_dn"])
+        self.set_val("ldap_encryption", values["ldap_encryption"])
+        self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        self.save_preferences()
+
+        client = self.ldap_client(values["base_dn"])
+        error = client.validation_error()
+        if error:
+            self.report_error(error)
+            return None
+
+        kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
+        self.set_busy(True)
+        try:
+            try:
+                return await asyncio.to_thread(client.search, kind, "")
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return None
+        finally:
+            self.set_busy(False)
+
+    def ldap_smart_rows(
+        self,
+        view_id: str,
+        directory_rows: list[DirectoryRow],
+        options: SmartViewOptions,
+    ) -> list[SmartViewRow]:
+        match view_id:
+            case "ldap_inactive_users":
+                return ldap_inactive_users(directory_rows, days=options.days)
+            case "ldap_delete_candidates":
+                return ldap_delete_candidate_users(
+                    directory_rows,
+                    disabled_days=options.disabled_days,
+                    never_logged_days=options.never_logged_days,
+                )
+            case "ldap_stale_computers":
+                return ldap_stale_computers(directory_rows, days=options.days)
+            case "ldap_users_without_groups":
+                return ldap_users_without_groups(directory_rows)
+            case _:
+                return []
+
     async def run_smart_view(self, view_id: str) -> None:
         view = SMART_VIEW_BY_ID[view_id]
         values = await self.form(
@@ -1224,71 +1307,24 @@ class SambatuiApp(App):
         if not values:
             return
 
-        days = bounded_int(values.get("days"), 90)
-        disabled_days = bounded_int(values.get("disabled_days"), 180)
-        never_logged_days = bounded_int(values.get("never_logged_days"), 30)
-        max_rows = bounded_int(values.get("max_rows"), 500, maximum=5000)
-        if view.needs_days:
-            self.set_val("smart_days", str(days))
-        if view.needs_disabled_days:
-            self.set_val("smart_disabled_days", str(disabled_days))
-        if view.needs_never_logged_days:
-            self.set_val("smart_never_logged_days", str(never_logged_days))
-        self.set_val("smart_max_rows", str(max_rows))
-        self.save_preferences()
-
-        rows: list[SmartViewRow]
+        options = SmartViewOptions.from_values(values)
+        self.apply_smart_view_options(view, options)
         self.current_smart_view_id = view.view_id
-        self.current_smart_max_rows = max_rows
+        self.current_smart_max_rows = options.max_rows
+
         if view.source == "DNS":
             records_by_zone = await self.dns_records_for_smart_view()
             if records_by_zone is None:
                 return
             rows = self.dns_smart_rows(view.view_id, records_by_zone)
-            self.search_text = ""
-            self.populate_smart_view(view.label, rows[:max_rows])
-            self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
+            self.populate_smart_view_results(view.label, rows, options.max_rows)
             return
 
-        self.set_val("ldap_base", values["base_dn"])
-        self.set_val("ldap_encryption", values["ldap_encryption"])
-        self.set_val("ldap_compatibility", values["ldap_compatibility"])
-        self.save_preferences()
-        client = self.ldap_client(values["base_dn"])
-        error = client.validation_error()
-        if error:
-            self.report_error(error)
+        directory_rows = await self.ldap_directory_for_smart_view(view, values)
+        if directory_rows is None:
             return
-
-        kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
-        self.set_busy(True)
-        try:
-            try:
-                directory_rows = await asyncio.to_thread(client.search, kind, "")
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return
-        finally:
-            self.set_busy(False)
-
-        match view.view_id:
-            case "ldap_inactive_users":
-                rows = ldap_inactive_users(directory_rows, days=days)
-            case "ldap_delete_candidates":
-                rows = ldap_delete_candidate_users(
-                    directory_rows,
-                    disabled_days=disabled_days,
-                    never_logged_days=never_logged_days,
-                )
-            case "ldap_stale_computers":
-                rows = ldap_stale_computers(directory_rows, days=days)
-            case "ldap_users_without_groups":
-                rows = ldap_users_without_groups(directory_rows)
-            case _:
-                rows = []
-        self.search_text = ""
-        self.populate_smart_view(view.label, rows[:max_rows])
-        self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
+        rows = self.ldap_smart_rows(view.view_id, directory_rows, options)
+        self.populate_smart_view_results(view.label, rows, options.max_rows)
 
     async def apply_smart_fix(self, row: SmartViewRow) -> None:
         if row.source == "ldap":
