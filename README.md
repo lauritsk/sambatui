@@ -145,7 +145,11 @@ Optional variables:
 - Move through DNS, LDAP, or smart-view rows to update the details pane with
   wrapped context for the focused row.
 - Select a zone: refresh records for that zone.
-- `r`: refresh current zone (`dns query SERVER ZONE @ ALL`).
+- `r`: refresh current zone (`dns query SERVER ZONE @ ALL`) or rerun the
+  current smart view.
+- `f`: apply a guided smart-view fix when available. Currently this adds
+  previewed PTR records for A-without-PTR findings. LDAP findings remain
+  read-only/export-only.
 - `q`: query one name/type.
 - `a`: add record.
 - `u`: update selected record.
@@ -155,7 +159,8 @@ Optional variables:
 - `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
 - `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`:
   move.
-- `Enter`: activate the focused row (load a zone, or toggle a record selection).
+- `Enter`: activate the focused row (load a zone, toggle a record selection,
+  or run an available smart-view fix).
 - `Space`: toggle selected record.
 - `v`, then `j`/`k`: visual range selection; `Esc` leaves visual mode, then
   clears selection/search.

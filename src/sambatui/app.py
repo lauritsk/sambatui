@@ -203,7 +203,7 @@ LDAP_DETAIL_ATTRIBUTES = (
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
     "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  / filter findings  j/k move  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
 }
 
 __all__ = [
@@ -399,6 +399,7 @@ class SambatuiApp(App):
         ("end", "cursor_bottom", "Bottom"),
         ("G", "cursor_bottom", "Bottom"),
         ("enter", "activate_row", "Activate"),
+        ("f", "fix_smart", "Fix smart finding"),
         ("slash", "search", "Search"),
         ("n", "sort_name", "Sort name"),
         ("t", "sort_type", "Sort type"),
@@ -490,6 +491,8 @@ class SambatuiApp(App):
         self.record_rows: list[DnsRow] = []
         self.directory_rows: list[DirectoryRow] = []
         self.smart_view_rows: list[SmartViewRow] = []
+        self.current_smart_view_id = ""
+        self.current_smart_max_rows = 500
         self.records_columns = DNS_COLUMNS
         self.view_mode = "dns"
         self.sort_field = "name"
@@ -954,13 +957,21 @@ class SambatuiApp(App):
         return row.name, row.kind, row.summary, "", "", row.dn
 
     @staticmethod
+    def smart_fix_hint(row: SmartViewRow) -> str:
+        if row.fix_action:
+            return f"{row.suggested_action} Fix: press f to {row.fix_label}."
+        if row.source == "ldap":
+            return f"{row.suggested_action} LDAP findings are read-only/export-only."
+        return row.suggested_action
+
+    @staticmethod
     def smart_result_values(row: SmartViewRow) -> RowValues:
         return (
             row.severity,
             row.object,
             row.finding,
             row.evidence,
-            row.suggested_action,
+            SambatuiApp.smart_fix_hint(row),
             row.source,
         )
 
@@ -981,6 +992,7 @@ class SambatuiApp(App):
             row.evidence,
             row.suggested_action,
             row.source,
+            row.fix_label,
         )
 
     def render_records(self, rows: list[DnsRow]) -> None:
@@ -1067,6 +1079,11 @@ class SambatuiApp(App):
         if row_index < 0 or row_index >= len(rows):
             return self.details_empty_text()
         row = rows[row_index]
+        remediation = "Manual review only"
+        if row.fix_action:
+            remediation = f"Press f to {row.fix_label}"
+        elif row.source == "ldap":
+            remediation = "LDAP findings are read-only/export-only"
         return self.detail_text(
             "Smart-view details",
             (
@@ -1075,6 +1092,7 @@ class SambatuiApp(App):
                 ("Finding", row.finding),
                 ("Evidence", row.evidence),
                 ("Suggested action", row.suggested_action),
+                ("Remediation", remediation),
                 ("Source", row.source),
             ),
         )
@@ -1424,6 +1442,41 @@ class SambatuiApp(App):
             self.notify(f"Skipped {failed} zone(s) with query errors", severity="error")
         return records_by_zone
 
+    def dns_smart_rows(
+        self, view_id: str, records_by_zone: dict[str, list[DnsRow]]
+    ) -> list[SmartViewRow]:
+        match view_id:
+            case "dns_duplicates":
+                return dns_duplicate_records(records_by_zone)
+            case "dns_a_without_ptr":
+                return dns_a_without_ptr(records_by_zone)
+            case "dns_ptr_without_a":
+                return dns_ptr_without_a(records_by_zone)
+            case _:
+                return []
+
+    async def refresh_current_smart_view(self) -> None:
+        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        if view is None or view.source != "DNS":
+            self.refresh_smart_view()
+            return
+        records_by_zone = await self.dns_records_for_smart_view()
+        if records_by_zone is None:
+            return
+        rows = self.dns_smart_rows(view.view_id, records_by_zone)
+        self.populate_smart_view(view.label, rows[: self.current_smart_max_rows])
+        self.notify("Refreshed smart-view findings")
+
+    def selected_smart_row(self) -> SmartViewRow | None:
+        if self.view_mode != "smart":
+            return None
+        table = self.query_one("#records", DataTable)
+        rows = self.visible_smart_view()
+        row_index = table.cursor_row
+        if row_index < 0 or row_index >= len(rows):
+            return None
+        return rows[row_index]
+
     @work
     async def action_smart_view(self) -> None:
         view_id = await self.push_screen_wait(
@@ -1457,19 +1510,13 @@ class SambatuiApp(App):
         max_rows = bounded_int(values.get("max_rows"), 500, maximum=5000)
 
         rows: list[SmartViewRow]
+        self.current_smart_view_id = view.view_id
+        self.current_smart_max_rows = max_rows
         if view.source == "DNS":
             records_by_zone = await self.dns_records_for_smart_view()
             if records_by_zone is None:
                 return
-            match view.view_id:
-                case "dns_duplicates":
-                    rows = dns_duplicate_records(records_by_zone)
-                case "dns_a_without_ptr":
-                    rows = dns_a_without_ptr(records_by_zone)
-                case "dns_ptr_without_a":
-                    rows = dns_ptr_without_a(records_by_zone)
-                case _:
-                    rows = []
+            rows = self.dns_smart_rows(view.view_id, records_by_zone)
             self.search_text = ""
             self.populate_smart_view(view.label, rows[:max_rows])
             self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
@@ -1514,7 +1561,54 @@ class SambatuiApp(App):
         self.populate_smart_view(view.label, rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
+    async def apply_smart_fix(self, row: SmartViewRow) -> None:
+        if row.source == "ldap":
+            self.notify("LDAP findings are read-only/export-only.", severity="error")
+            return
+        if row.fix_action != "dns_add_ptr":
+            self.notify(
+                "No guided fix is available for this finding.", severity="error"
+            )
+            return
+        error = validate_record(row.fix_name, row.fix_rtype, row.fix_value)
+        if error:
+            self.report_error(error)
+            return
+        if not await self.confirm(
+            "Fix smart finding?\n\n"
+            "ADD DNS record\n"
+            f"Zone: {row.fix_zone}\n"
+            f"{row.fix_name} {row.fix_rtype} {row.fix_value}\n\n"
+            f"Finding: {row.finding}\n"
+            f"Evidence: {row.evidence}",
+            default_confirm=True,
+        ):
+            self.notify("Fix cancelled")
+            return
+        self.set_busy(True)
+        try:
+            code, _ = await self.run_samba_zone(
+                "add", row.fix_zone, [row.fix_name, row.fix_rtype, row.fix_value]
+            )
+        finally:
+            self.set_busy(False)
+        if code != 0:
+            return
+        self.notify(f"Applied fix: {row.fix_label}")
+        await self.refresh_current_smart_view()
+
+    @work
+    async def action_fix_smart(self) -> None:
+        row = self.selected_smart_row()
+        if row is None:
+            self.notify("Select a smart-view finding first.", severity="error")
+            return
+        await self.apply_smart_fix(row)
+
     async def action_refresh(self) -> None:
+        if self.view_mode == "smart":
+            await self.refresh_current_smart_view()
+            return
         await self.refresh_current_zone()
 
     @work
@@ -1930,7 +2024,10 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.focused_table()
         if table and table.id == "records":
-            self.action_toggle_select()
+            if self.view_mode == "smart":
+                self.action_fix_smart()
+            else:
+                self.action_toggle_select()
             return
         if table and table.id == "zones":
             try:
@@ -1998,6 +2095,8 @@ class SambatuiApp(App):
                 self.action_update()
             case _, "d":
                 self.action_delete()
+            case _, "f":
+                self.action_fix_smart()
             case _, "v" if char == "V":
                 self.action_select_range()
             case _, "v":

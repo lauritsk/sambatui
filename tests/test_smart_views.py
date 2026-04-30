@@ -84,6 +84,12 @@ def test_dns_a_without_ptr_flags_missing_and_wrong_ptr() -> None:
         "A record missing PTR",
         "A record PTR points elsewhere",
     ]
+    assert findings[0].fix_action == "dns_add_ptr"
+    assert findings[0].fix_zone == "2.0.192.in-addr.arpa"
+    assert findings[0].fix_name == "10"
+    assert findings[0].fix_rtype == "PTR"
+    assert findings[0].fix_value == "host.example.com"
+    assert findings[1].fix_action == ""
 
 
 def test_dns_ptr_without_a_flags_missing_and_mismatched_forward() -> None:
