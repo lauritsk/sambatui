@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
+import socket
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +60,15 @@ from .ldap_directory import (
     domain_to_base_dn,
 )
 from .models import DnsRow
-from .screens import ConfirmScreen, FormField, FormScreen, HelpScreen
+from .screens import (
+    ConfirmScreen,
+    FormField,
+    FormScreen,
+    HelpScreen,
+    SmartViewChoice,
+    SmartViewPickerScreen,
+    infer_domain_from_server,
+)
 from .smart_views import (
     SmartViewRow,
     dns_a_without_ptr,
@@ -81,37 +92,87 @@ SMART_COLUMNS = (
     "Source",
 )
 
-SMART_VIEW_ALIASES = {
-    "dns duplicates": "dns_duplicates",
-    "duplicates": "dns_duplicates",
-    "dns a without ptr": "dns_a_without_ptr",
-    "a without ptr": "dns_a_without_ptr",
-    "dns forward without ptr": "dns_a_without_ptr",
-    "forward without ptr": "dns_a_without_ptr",
-    "dns ptr without a": "dns_ptr_without_a",
-    "ptr without a": "dns_ptr_without_a",
-    "dns ptr without forward": "dns_ptr_without_a",
-    "ptr without forward": "dns_ptr_without_a",
-    "ldap inactive users": "ldap_inactive_users",
-    "inactive users": "ldap_inactive_users",
-    "ldap delete candidates": "ldap_delete_candidates",
-    "delete candidates": "ldap_delete_candidates",
-    "ldap stale computers": "ldap_stale_computers",
-    "stale computers": "ldap_stale_computers",
-    "ldap users no groups": "ldap_users_without_groups",
-    "users no groups": "ldap_users_without_groups",
-    "users without groups": "ldap_users_without_groups",
-    "ldap users without groups": "ldap_users_without_groups",
-}
 
-SMART_VIEW_LABELS = {
-    "dns_duplicates": "DNS duplicates/conflicts",
-    "dns_a_without_ptr": "DNS A records without matching PTR",
-    "dns_ptr_without_a": "DNS PTR records without matching A",
-    "ldap_inactive_users": "LDAP inactive enabled users",
-    "ldap_delete_candidates": "LDAP user cleanup candidates",
-    "ldap_stale_computers": "LDAP stale computer accounts",
-    "ldap_users_without_groups": "LDAP users with no secondary groups",
+@dataclass(frozen=True)
+class SmartViewDefinition:
+    view_id: str
+    shortcut: str
+    source: str
+    label: str
+    description: str
+    needs_days: bool = False
+    needs_disabled_days: bool = False
+    needs_never_logged_days: bool = False
+
+    @property
+    def needs_ldap(self) -> bool:
+        return self.source == "LDAP"
+
+
+SMART_VIEWS = (
+    SmartViewDefinition(
+        "dns_duplicates",
+        "1",
+        "DNS",
+        "DNS duplicates/conflicts",
+        "Identical DNS records and CNAME names that also have other record types.",
+    ),
+    SmartViewDefinition(
+        "dns_a_without_ptr",
+        "2",
+        "DNS",
+        "DNS A records without matching PTR",
+        "Forward IPv4 A records missing reverse DNS, or pointing at the wrong PTR.",
+    ),
+    SmartViewDefinition(
+        "dns_ptr_without_a",
+        "3",
+        "DNS",
+        "DNS PTR records without matching A",
+        "Reverse PTR records with no forward A record, or mismatched forward IPs.",
+    ),
+    SmartViewDefinition(
+        "ldap_inactive_users",
+        "4",
+        "LDAP",
+        "LDAP inactive enabled users",
+        "Enabled users whose last logon is older than the inactivity threshold.",
+        needs_days=True,
+    ),
+    SmartViewDefinition(
+        "ldap_delete_candidates",
+        "5",
+        "LDAP",
+        "LDAP user cleanup candidates",
+        "Disabled users past retention, plus enabled users that never logged in.",
+        needs_disabled_days=True,
+        needs_never_logged_days=True,
+    ),
+    SmartViewDefinition(
+        "ldap_stale_computers",
+        "6",
+        "LDAP",
+        "LDAP stale computer accounts",
+        "Computer accounts with old or missing last-logon data.",
+        needs_days=True,
+    ),
+    SmartViewDefinition(
+        "ldap_users_without_groups",
+        "7",
+        "LDAP",
+        "LDAP users with no secondary groups",
+        "Enabled users whose memberOf list is empty except for their primary group.",
+    ),
+)
+
+SMART_VIEW_BY_ID = {view.view_id: view for view in SMART_VIEWS}
+SMART_VIEW_BY_SHORTCUT = {view.shortcut: view for view in SMART_VIEWS}
+SMART_VIEW_LABELS = {view.view_id: view.label for view in SMART_VIEWS}
+
+KEY_HINTS = {
+    "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
+    "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  / filter findings  j/k move  r refresh",
 }
 
 __all__ = [
@@ -136,6 +197,7 @@ __all__ = [
     "FormField",
     "FormScreen",
     "HelpScreen",
+    "SmartViewPickerScreen",
     "SambaToolClient",
     "SambaToolConfig",
     "SambatuiApp",
@@ -239,6 +301,26 @@ class SambatuiApp(App):
         ("ctrl+q", "quit", "Quit"),
     ]
 
+    def smart_view_hint_text(self) -> str:
+        lines = ["Press S to pick a view, or press a number:"]
+        for view in SMART_VIEWS:
+            lines.append(f"  {view.shortcut}  {view.label}")
+        return "\n".join(lines)
+
+    def keys_hint_for_tab(self, tab_id: str | None) -> str:
+        return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
+
+    def active_side_tab_id(self) -> str:
+        with suppress(Exception):
+            return str(self.query_one("#side_tabs", TabbedContent).active or "dns_tab")
+        return "dns_tab"
+
+    def refresh_key_hints(self) -> None:
+        with suppress(Exception):
+            self.query_one("#keys", Static).update(
+                self.keys_hint_for_tab(self.active_side_tab_id())
+            )
+
     def compose(self) -> ComposeResult:
         with Vertical(id="connection_state"):
             yield Input(DEFAULT_SERVER, id="server")
@@ -274,6 +356,14 @@ class SambatuiApp(App):
                                 id="ldap_hint",
                                 classes="hint",
                             )
+                    with TabPane("Smart", id="smart_tab"):
+                        with Vertical(id="smart_panel"):
+                            yield Static("Smart views", classes="section-title")
+                            yield Static(
+                                self.smart_view_hint_text(),
+                                id="smart_hint",
+                                classes="hint",
+                            )
                 yield Static("Ready", id="status")
 
             with Vertical(id="results", classes="panel"):
@@ -281,10 +371,7 @@ class SambatuiApp(App):
                 table = DataTable(id="records", cursor_type="row")
                 table.add_columns(*DNS_COLUMNS)
                 yield table
-        yield Static(
-            "? help  Ctrl+O connection  z zones  c discover  L ldap  S smart  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
-            id="keys",
-        )
+        yield Static(self.keys_hint_for_tab("dns_tab"), id="keys")
 
     def on_mount(self) -> None:
         self.selected_record_rows: set[int] = set()
@@ -303,6 +390,8 @@ class SambatuiApp(App):
         self.refresh_connection_summary()
         self.action_focus_records()
 
+        self.refresh_key_hints()
+
         if not shutil.which("samba-tool"):
             self.set_status("samba-tool not found in PATH")
             self.notify("samba-tool not found in PATH", severity="error")
@@ -318,7 +407,7 @@ class SambatuiApp(App):
             self.set_status("Enter password, load password file, or use kerberos auth")
 
         if self.connection_needs_setup():
-            self.call_after_refresh(self.action_connection)
+            self.call_after_refresh(self.action_initial_setup)
         else:
             self.call_after_refresh(self.load_zones)
 
@@ -346,6 +435,23 @@ class SambatuiApp(App):
         if not self.val("user"):
             return True
         return not (self.val("password") or read_password_file(self.password_file()))
+
+    def discovery_domain_default(self) -> str:
+        candidates = [
+            self.val("zone"),
+            infer_domain_from_server(self.val("server")),
+            os.getenv("USERDNSDOMAIN", ""),
+            os.getenv("SAMBATUI_DOMAIN", ""),
+            infer_domain_from_server(socket.getfqdn()),
+        ]
+        return next(
+            (
+                candidate.strip().rstrip(".").lower()
+                for candidate in candidates
+                if candidate.strip()
+            ),
+            "",
+        )
 
     def refresh_connection_summary(self) -> None:
         with suppress(Exception):
@@ -539,8 +645,7 @@ class SambatuiApp(App):
     def action_save_password_file(self) -> None:
         self.save_password()
 
-    @work
-    async def action_connection(self) -> None:
+    async def open_connection_settings(self) -> bool:
         values = await self.form(
             "Connection settings",
             "These values feed samba-tool and LDAP. Press Apply to close; reopen with Ctrl+O or ? help.",
@@ -549,7 +654,7 @@ class SambatuiApp(App):
         )
         if values is None:
             self.refresh_connection_summary()
-            return
+            return False
         for widget_id, value in values.items():
             self.set_val(widget_id, value)
         if (self.val("auth") or DEFAULT_AUTH).casefold() == "password" and not self.val(
@@ -562,6 +667,16 @@ class SambatuiApp(App):
         self.set_status("Connection settings updated")
         if not self.connection_needs_setup():
             await self.load_zones()
+        return True
+
+    @work
+    async def action_initial_setup(self) -> None:
+        await self.open_discover_ad(self.discovery_domain_default())
+        await self.open_connection_settings()
+
+    @work
+    async def action_connection(self) -> None:
+        await self.open_connection_settings()
 
     async def run_command(
         self, client: SambaToolClient, cmd: list[str]
@@ -697,6 +812,9 @@ class SambatuiApp(App):
 
     def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
         self.view_mode = "smart"
+        with suppress(Exception):
+            self.query_one("#side_tabs", TabbedContent).active = "smart_tab"
+            self.refresh_key_hints()
         self.set_records_columns(SMART_COLUMNS)
         self.query_one("#records_title", Label).update(f"Smart View: {title}")
         self.smart_view_rows = rows
@@ -898,16 +1016,22 @@ class SambatuiApp(App):
     async def action_load_zones(self) -> None:
         await self.load_zones()
 
-    @work
-    async def action_discover_ad(self) -> None:
+    async def open_discover_ad(self, default_domain: str = "") -> bool:
         values = await self.form(
             "Discover AD domain controllers",
             "Uses DNS SRV records. No LDAP bind or new dependency required.",
-            [("AD DNS domain", "domain", "example.com", self.val("zone"))],
+            [
+                (
+                    "AD DNS domain",
+                    "domain",
+                    "example.com",
+                    default_domain or self.val("zone"),
+                )
+            ],
             "Discover",
         )
         if not values:
-            return
+            return False
         domain = values["domain"] or self.val("zone")
         self.set_busy(True)
         try:
@@ -917,16 +1041,18 @@ class SambatuiApp(App):
                 message = str(exc)
                 self.notify(message, severity="error")
                 self.set_status(message)
-                return
+                return False
             controller = preferred_domain_controller(services)
             if controller is None:
                 message = f"No AD SRV records found for {domain}"
                 self.notify(message, severity="error")
                 self.set_status(message)
-                return
-            self.query_one("#server", Input).value = controller.target
+                return False
+            self.set_val("server", controller.target)
             if not self.val("zone"):
-                self.query_one("#zone", Input).value = controller.domain
+                self.set_val("zone", controller.domain)
+            if not self.val("ldap_base"):
+                self.set_val("ldap_base", domain_to_base_dn(controller.domain))
             self.refresh_connection_summary()
             message = (
                 f"Discovered {len(services)} AD SRV record(s); "
@@ -934,8 +1060,13 @@ class SambatuiApp(App):
             )
             self.set_status(message)
             self.notify(message)
+            return True
         finally:
             self.set_busy(False)
+
+    @work
+    async def action_discover_ad(self) -> None:
+        await self.open_discover_ad(self.discovery_domain_default())
 
     @work
     async def action_ldap_search(self) -> None:
@@ -1000,9 +1131,41 @@ class SambatuiApp(App):
         finally:
             self.set_busy(False)
 
-    def normalize_smart_view_name(self, value: str) -> str | None:
-        key = " ".join(value.strip().casefold().replace("_", " ").split())
-        return SMART_VIEW_ALIASES.get(key)
+    def smart_view_choices(self) -> list[SmartViewChoice]:
+        return [
+            (view.shortcut, view.view_id, view.source, view.label, view.description)
+            for view in SMART_VIEWS
+        ]
+
+    def smart_view_fields(self, view: SmartViewDefinition) -> list[FormField]:
+        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+        fields: list[FormField] = []
+        if view.needs_days:
+            fields.append(("Stale/inactive days", "days", "90", "90"))
+        if view.needs_disabled_days:
+            fields.append(("Disabled cleanup days", "disabled_days", "180", "180"))
+        if view.needs_never_logged_days:
+            fields.append(("Never-logged-in days", "never_logged_days", "30", "30"))
+        if view.needs_ldap:
+            fields.extend(
+                [
+                    ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
+                    (
+                        "LDAP encryption",
+                        "ldap_encryption",
+                        "off | ldaps | starttls",
+                        self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+                    ),
+                    (
+                        "LDAP compatibility",
+                        "ldap_compatibility",
+                        "on | off",
+                        self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+                    ),
+                ]
+            )
+        fields.append(("Max rows", "max_rows", "500", "500"))
+        return fields
 
     async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
         if not self.zones:
@@ -1029,68 +1192,53 @@ class SambatuiApp(App):
 
     @work
     async def action_smart_view(self) -> None:
-        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+        view_id = await self.push_screen_wait(
+            SmartViewPickerScreen(self.smart_view_choices())
+        )
+        if view_id is None:
+            return
+        await self.run_smart_view(view_id)
+
+    async def action_smart_view_shortcut(self, shortcut: str) -> None:
+        view = SMART_VIEW_BY_SHORTCUT.get(shortcut)
+        if view is None:
+            return
+        await self.run_smart_view(view.view_id)
+
+    async def run_smart_view(self, view_id: str) -> None:
+        view = SMART_VIEW_BY_ID[view_id]
         values = await self.form(
-            "Smart views",
-            "Read-only hygiene findings. No deletes/changes are performed.",
-            [
-                (
-                    "Smart view",
-                    "smart_view",
-                    "dns duplicates | dns a without ptr | dns ptr without a | ldap inactive users | ldap delete candidates | ldap stale computers | ldap users no groups",
-                    "dns duplicates",
-                ),
-                ("Stale/inactive days", "days", "90", "90"),
-                ("Disabled cleanup days", "disabled_days", "180", "180"),
-                ("Never-logged-in days", "never_logged_days", "30", "30"),
-                ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
-                (
-                    "LDAP encryption",
-                    "ldap_encryption",
-                    "off | ldaps | starttls",
-                    self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-                ),
-                (
-                    "LDAP compatibility",
-                    "ldap_compatibility",
-                    "on | off",
-                    self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
-                ),
-                ("Max rows", "max_rows", "500", "500"),
-            ],
+            view.label,
+            f"{view.description}\nRead-only hygiene findings. No deletes/changes are performed.",
+            self.smart_view_fields(view),
             "Run",
         )
         if not values:
             return
 
-        view = self.normalize_smart_view_name(values["smart_view"])
-        if view is None:
-            valid = ", ".join(SMART_VIEW_LABELS)
-            self.notify(f"Unknown smart view. Use one of: {valid}", severity="error")
-            return
         try:
-            days = max(1, int(values["days"] or "90"))
+            days = max(1, int(values.get("days") or "90"))
         except ValueError:
             days = 90
         try:
-            disabled_days = max(1, int(values["disabled_days"] or "180"))
+            disabled_days = max(1, int(values.get("disabled_days") or "180"))
         except ValueError:
             disabled_days = 180
         try:
-            never_logged_days = max(1, int(values["never_logged_days"] or "30"))
+            never_logged_days = max(1, int(values.get("never_logged_days") or "30"))
         except ValueError:
             never_logged_days = 30
         try:
-            max_rows = max(1, min(int(values["max_rows"] or "500"), 5000))
+            max_rows = max(1, min(int(values.get("max_rows") or "500"), 5000))
         except ValueError:
             max_rows = 500
 
         rows: list[SmartViewRow]
-        if view.startswith("dns_"):
+        if view.source == "DNS":
             records_by_zone = await self.dns_records_for_smart_view()
             if records_by_zone is None:
                 return
-            match view:
+            match view.view_id:
                 case "dns_duplicates":
                     rows = dns_duplicate_records(records_by_zone)
                 case "dns_a_without_ptr":
@@ -1100,7 +1248,7 @@ class SambatuiApp(App):
                 case _:
                     rows = []
             self.search_text = ""
-            self.populate_smart_view(SMART_VIEW_LABELS[view], rows[:max_rows])
+            self.populate_smart_view(view.label, rows[:max_rows])
             self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
             return
 
@@ -1114,7 +1262,7 @@ class SambatuiApp(App):
             self.set_status(error)
             return
 
-        kind = "computers" if view == "ldap_stale_computers" else "users"
+        kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
         self.set_busy(True)
         try:
             try:
@@ -1127,7 +1275,7 @@ class SambatuiApp(App):
         finally:
             self.set_busy(False)
 
-        match view:
+        match view.view_id:
             case "ldap_inactive_users":
                 rows = ldap_inactive_users(directory_rows, days=days)
             case "ldap_delete_candidates":
@@ -1143,7 +1291,7 @@ class SambatuiApp(App):
             case _:
                 rows = []
         self.search_text = ""
-        self.populate_smart_view(SMART_VIEW_LABELS[view], rows[:max_rows])
+        self.populate_smart_view(view.label, rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
     async def action_refresh(self) -> None:
@@ -1381,13 +1529,20 @@ class SambatuiApp(App):
 
     def switch_side_tab(self, delta: int) -> None:
         tabs = self.query_one("#side_tabs", TabbedContent)
-        tab_ids = ["dns_tab", "ldap_tab"]
+        tab_ids = ["dns_tab", "ldap_tab", "smart_tab"]
         current = tabs.active if tabs.active in tab_ids else "dns_tab"
         tabs.active = tab_ids[(tab_ids.index(current) + delta) % len(tab_ids)]
+        self.refresh_key_hints()
         if tabs.active == "dns_tab":
             self.action_focus_zones()
         else:
             self.action_focus_records()
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        if event.tabbed_content.id == "side_tabs":
+            self.refresh_key_hints()
 
     def action_sort_name(self) -> None:
         self.sort_records("name")
@@ -1615,6 +1770,10 @@ class SambatuiApp(App):
                 self.action_discover_ad()
             case _, "l" if char == "L":
                 self.action_ldap_search()
+            case _, "s" if char == "S":
+                self.action_smart_view()
+            case _, shortcut if shortcut in SMART_VIEW_BY_SHORTCUT:
+                await self.action_smart_view_shortcut(shortcut)
             case _, "r":
                 await self.action_refresh()
             case _, "q":
