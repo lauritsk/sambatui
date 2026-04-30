@@ -1,0 +1,27 @@
+[tools]
+uv = "0.11.8"
+python = "3.11"
+
+[tasks.sambatui]
+description = "Run Sambatui"
+run = "uv run sambatui"
+
+[tasks.lint]
+description = "Lint Python files"
+run = "uv run --extra dev ruff check ."
+
+[tasks.fix]
+description = "Auto-fix Python lint issues"
+run = "uv run --extra dev ruff check . --fix"
+
+[tasks.test]
+description = "Run tests"
+run = "uv run --extra dev pytest"
+
+[tasks.build]
+description = "Build wheel and sdist"
+run = "uv build"
+
+[tasks.check]
+description = "Run quality gates"
+depends = ["lint", "test", "build"]
