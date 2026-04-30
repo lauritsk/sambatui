@@ -60,6 +60,7 @@ from .ldap_directory import (
     domain_to_base_dn,
 )
 from .models import DnsRow
+from .remediation import actionable_error, bounded_int
 from .screens import (
     ConfirmScreen,
     FormField,
@@ -241,72 +242,6 @@ __all__ = [
     "validate_record",
     "actionable_error",
 ]
-
-
-def actionable_error(message: str) -> str:
-    base = " ".join(message.strip().split())
-    lower = base.casefold()
-    if not base or " action: " in lower:
-        return base
-
-    action = ""
-    if "samba-tool not found" in lower:
-        action = "install Samba tools or run on a Samba admin host"
-    elif "enter username" in lower:
-        action = "press Ctrl+O and set User, or switch auth to kerberos"
-    elif "enter password" in lower or "needs a password" in lower:
-        action = "press p to load password, Ctrl+O to edit, or use kerberos"
-    elif "no password found" in lower:
-        action = "press P to save password file or Ctrl+O to enter password"
-    elif "auth must" in lower:
-        action = "press Ctrl+O and set auth to password or kerberos"
-    elif "kerberos must" in lower:
-        action = "press Ctrl+O and set Kerberos to off, desired, or required"
-    elif "kerberos" in lower or "kdc" in lower or "krb5" in lower:
-        action = "run kinit, set krb5 ccache, or switch auth to password"
-    elif "ldap encryption" in lower or "starttls" in lower or "ldaps" in lower:
-        action = "use ldaps/starttls, or set LDAP compatibility on for legacy DCs"
-    elif "ldap base dn" in lower:
-        action = "set Base DN like DC=example,DC=com"
-    elif "ldap bind failed" in lower:
-        action = "check credentials, domain format, encryption, or Kerberos ticket"
-    elif "ldap search failed" in lower:
-        action = "check Base DN, rights, filter text, and network reachability"
-    elif "no ad srv records found" in lower:
-        action = "check AD DNS domain or set DC manually with Ctrl+O"
-    elif "load zones before dns smart views" in lower:
-        action = "press z to load zones, or Ctrl+O to fix server/auth"
-    elif any(
-        term in lower
-        for term in (
-            "timed out",
-            "timeout",
-            "connection refused",
-            "no route to host",
-            "host unreachable",
-            "name or service not known",
-            "could not resolve",
-            "nt_status_host_unreachable",
-        )
-    ):
-        action = "check DC/server, DNS, VPN/firewall; Ctrl+O edits connection"
-
-    return f"{base} Action: {action}." if action else base
-
-
-def bounded_int(
-    value: str | None,
-    default: int,
-    *,
-    minimum: int = 1,
-    maximum: int | None = None,
-) -> int:
-    try:
-        number = int(value or str(default))
-    except ValueError:
-        return default
-    number = max(minimum, number)
-    return min(number, maximum) if maximum is not None else number
 
 
 class SambatuiApp(App):
