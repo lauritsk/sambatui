@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlparse
+import ssl
+import warnings
 
+from ldap3 import Tls
 from ldap3.utils.conv import escape_filter_chars
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
 LdapAuthMode = Literal["password", "kerberos"]
 LDAP_AUTH_MODES = frozenset({"password", "kerberos"})
 LDAP_ENCRYPTION_MODES = frozenset({"off", "ldaps", "starttls"})
+LDAP_COMPATIBILITY_ON = frozenset(
+    {"1", "true", "yes", "on", "legacy", "compat", "compatibility"}
+)
+LDAP_COMPATIBILITY_OFF = frozenset({"", "0", "false", "no", "off"})
+LEGACY_LDAP_TLS_CIPHERS = "DEFAULT:@SECLEVEL=0"
 LDAP_SEARCH_KINDS: tuple[DirectorySearchKind, ...] = (
     "users",
     "groups",
@@ -57,6 +66,7 @@ class LdapSearchConfig:
     encryption: str = "ldaps"
     auth_mode: str = "password"
     krb5_ccache: str = ""
+    compatibility: str = "off"
     page_size: int = 200
     timeout: int = 10
 
@@ -68,6 +78,14 @@ class LdapSearchConfig:
     def normalized_auth_mode(self) -> str:
         return (self.auth_mode or "password").casefold()
 
+    @property
+    def normalized_compatibility(self) -> str:
+        return (self.compatibility or "off").casefold()
+
+    @property
+    def legacy_compatibility_enabled(self) -> bool:
+        return ldap_compatibility_enabled(self.compatibility)
+
     def validation_error(self) -> str | None:
         if not self.server:
             return "Enter LDAP server/DC."
@@ -75,6 +93,11 @@ class LdapSearchConfig:
             return "LDAP auth mode must be password or kerberos."
         if self.normalized_encryption not in LDAP_ENCRYPTION_MODES:
             return "LDAP encryption must be off, ldaps, or starttls."
+        if (
+            self.normalized_compatibility
+            not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF
+        ):
+            return "LDAP compatibility must be on or off."
         scheme = ldap_server_scheme(self.server)
         if scheme == "ldap" and self.normalized_encryption == "ldaps":
             return "ldap:// server URLs require LDAP encryption starttls or off."
@@ -147,6 +170,56 @@ def gssapi_cred_store(krb5_ccache: str) -> dict[str, str] | None:
     return {"ccache": ccache}
 
 
+def ldap_compatibility_enabled(value: str) -> bool:
+    return (value or "off").casefold() in LDAP_COMPATIBILITY_ON
+
+
+def ldap_server_get_info(config: LdapSearchConfig) -> str:
+    from ldap3 import ALL, NONE
+
+    return NONE if config.legacy_compatibility_enabled else ALL
+
+
+class LegacyLdapTls(Tls):
+    def __init__(self) -> None:
+        super().__init__(
+            validate=ssl.CERT_NONE,
+            version=ssl.PROTOCOL_TLS_CLIENT,
+            ciphers=LEGACY_LDAP_TLS_CIPHERS,
+        )
+
+    def wrap_socket(self, connection: Any, do_handshake: bool = False) -> None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        _allow_legacy_tls_versions(context)
+        with suppress(ssl.SSLError):
+            context.set_ciphers(LEGACY_LDAP_TLS_CIPHERS)
+        connection.socket = context.wrap_socket(
+            connection.socket,
+            server_side=False,
+            do_handshake_on_connect=do_handshake,
+        )
+
+
+def _allow_legacy_tls_versions(context: ssl.SSLContext) -> None:
+    minimum = getattr(ssl.TLSVersion, "TLSv1", None)
+    if minimum is not None:
+        with warnings.catch_warnings(), suppress(ValueError, ssl.SSLError):
+            warnings.simplefilter("ignore", DeprecationWarning)
+            context.minimum_version = minimum
+    for option_name in ("OP_NO_TLSv1", "OP_NO_TLSv1_1"):
+        option = getattr(ssl, option_name, 0)
+        if option:
+            context.options &= ~option
+
+
+def ldap_server_tls(config: LdapSearchConfig) -> LegacyLdapTls | None:
+    if config.normalized_encryption == "off" or not config.legacy_compatibility_enabled:
+        return None
+    return LegacyLdapTls()
+
+
 def ldap_connection_kwargs(config: LdapSearchConfig) -> dict[str, Any]:
     from ldap3 import GSSAPI, NTLM, SASL, SIMPLE
 
@@ -203,7 +276,7 @@ class LdapDirectoryClient:
         if error:
             raise ValueError(error)
 
-        from ldap3 import ALL, SUBTREE, Connection, Server
+        from ldap3 import SUBTREE, Connection, Server
         from ldap3.core.exceptions import LDAPException, LDAPPackageUnavailableError
 
         settings = parse_ldap_server(
@@ -213,7 +286,8 @@ class LdapDirectoryClient:
             settings.host,
             port=settings.port,
             use_ssl=settings.use_ssl,
-            get_info=ALL,
+            get_info=ldap_server_get_info(self.config),
+            tls=ldap_server_tls(self.config),
             connect_timeout=self.config.timeout,
         )
         connection = Connection(server, **ldap_connection_kwargs(self.config))

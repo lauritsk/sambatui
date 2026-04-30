@@ -20,6 +20,7 @@ from .config import (
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
     DEFAULT_LDAP_BASE,
+    DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_OPTIONS,
     DEFAULT_PASSWORD,
@@ -57,6 +58,7 @@ __all__ = [
     "DEFAULT_KERBEROS",
     "DEFAULT_KRB5_CCACHE",
     "DEFAULT_LDAP_BASE",
+    "DEFAULT_LDAP_COMPATIBILITY",
     "DEFAULT_LDAP_ENCRYPTION",
     "DEFAULT_OPTIONS",
     "DEFAULT_PASSWORD",
@@ -183,6 +185,7 @@ class SambatuiApp(App):
             yield Input(DEFAULT_OPTIONS, id="options")
             yield Input(DEFAULT_LDAP_BASE, id="ldap_base")
             yield Input(DEFAULT_LDAP_ENCRYPTION, id="ldap_encryption")
+            yield Input(DEFAULT_LDAP_COMPATIBILITY, id="ldap_compatibility")
             yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
 
         with Horizontal(id="main"):
@@ -337,6 +340,12 @@ class SambatuiApp(App):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
+                "LDAP compatibility — on relaxes TLS and schema probing for old Samba/EL6-era servers.",
+                "ldap_compatibility",
+                "on | off",
+                self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+            ),
+            (
                 "Password file — used at startup and by password load/save commands.",
                 "password_file",
                 "~/.config/sambatui/password",
@@ -373,6 +382,7 @@ class SambatuiApp(App):
             encryption=self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             auth_mode=self.val("auth") or DEFAULT_AUTH,
             krb5_ccache=self.val("krb5_ccache"),
+            compatibility=self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
         )
 
     def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
@@ -794,6 +804,12 @@ class SambatuiApp(App):
                     "off | ldaps | starttls",
                     self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
                 ),
+                (
+                    "LDAP compatibility",
+                    "ldap_compatibility",
+                    "on | off",
+                    self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+                ),
                 ("Max rows", "max_rows", "200", "200"),
             ],
             "Search",
@@ -802,6 +818,7 @@ class SambatuiApp(App):
             return
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
+        self.set_val("ldap_compatibility", values["ldap_compatibility"])
         try:
             max_rows = max(1, min(int(values["max_rows"] or "200"), 1000))
         except ValueError:
