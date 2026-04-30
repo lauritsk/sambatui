@@ -1,21 +1,47 @@
+[env]
+HK_MISE = 1
+
 [tools]
+actionlint = "1.7.12"
+cocogitto = "7.0.0"
+cosign = "3.0.6"
+goreleaser = "2.15.4"
+hk = "1.44.2"
+pkl = "0.31.1"
+ruff = "0.15.12"
+rumdl = "0.1.84"
+shellcheck = "0.11.0"
+shfmt = "3.13.1"
+syft = "1.43.0"
+tombi = "0.9.26"
+ty = "0.0.33"
 uv = "0.11.8"
+
+[hooks]
+postinstall = "hk install --mise"
 
 [tasks.sambatui]
 description = "Run Sambatui"
 run = "uv run sambatui"
 
-[tasks.lint]
-description = "Lint Python files"
-run = "uv run --extra dev ruff check ."
+[tasks.install]
+description = "Install project dependencies"
+run = "uv sync --locked --dev"
 
 [tasks.fix]
-description = "Auto-fix Python lint issues"
-run = "uv run --extra dev ruff check . --fix"
+description = "Run hk-managed fixers across the repository"
+depends = ["install"]
+run = "hk fix --all"
+
+[tasks.lint]
+description = "Run hk-managed checks across the repository"
+depends = ["install"]
+run = "hk check --all"
 
 [tasks.test]
-description = "Run tests"
-run = "uv run --extra dev pytest"
+description = "Run test suite with coverage gate"
+depends = ["install"]
+run = "uv run pytest -n auto --cov=sambatui --cov-report=term-missing --cov-fail-under=25"
 
 [tasks.build]
 description = "Build wheel and sdist"
@@ -24,3 +50,11 @@ run = "uv build"
 [tasks.check]
 description = "Run quality gates"
 depends = ["lint", "test", "build"]
+
+[tasks."release:bump"]
+description = "Bump project version"
+run = "cog bump --auto"
+
+[tasks."release:publish"]
+description = "Publish release"
+run = "goreleaser release --clean"
