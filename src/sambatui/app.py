@@ -4,11 +4,11 @@ import asyncio
 import os
 import shutil
 import socket
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, TypeVar
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -91,6 +91,9 @@ SMART_COLUMNS = (
     "Suggested action",
     "Source",
 )
+
+RowValues: TypeAlias = tuple[str, ...]
+TableRow = TypeVar("TableRow")
 
 
 @dataclass(frozen=True)
@@ -924,60 +927,70 @@ class SambatuiApp(App):
         self.selection_anchor = None
         self.visual_selecting = False
 
-    def render_records(self, rows: list[DnsRow]) -> None:
+    def render_result_rows(
+        self,
+        rows: list[TableRow],
+        view_mode: str,
+        row_values: Callable[[TableRow], RowValues],
+    ) -> None:
         self.reset_render_state()
         table = self.query_one("#records", DataTable)
         table.clear()
-        if not rows:
-            title, hint = self.empty_state_text("dns")
+        if rows:
+            for row in rows:
+                table.add_row("", *row_values(row))
+        else:
+            title, hint = self.empty_state_text(view_mode)
             table.add_row("", title, "-", hint, "", "", "")
-            table.move_cursor(row=0)
-            self.update_details_pane()
-            return
-        for row in rows:
-            table.add_row(
-                "", row.name, row.rtype, row.value, row.ttl, row.records, row.children
-            )
         table.move_cursor(row=0)
         self.update_details_pane()
+
+    @staticmethod
+    def dns_result_values(row: DnsRow) -> RowValues:
+        return row.name, row.rtype, row.value, row.ttl, row.records, row.children
+
+    @staticmethod
+    def directory_result_values(row: DirectoryRow) -> RowValues:
+        return row.name, row.kind, row.summary, "", "", row.dn
+
+    @staticmethod
+    def smart_result_values(row: SmartViewRow) -> RowValues:
+        return (
+            row.severity,
+            row.object,
+            row.finding,
+            row.evidence,
+            row.suggested_action,
+            row.source,
+        )
+
+    @staticmethod
+    def dns_search_values(row: DnsRow) -> RowValues:
+        return row.name, row.rtype, row.value
+
+    @staticmethod
+    def directory_search_values(row: DirectoryRow) -> RowValues:
+        return row.name, row.kind, row.summary, row.dn
+
+    @staticmethod
+    def smart_search_values(row: SmartViewRow) -> RowValues:
+        return (
+            row.severity,
+            row.object,
+            row.finding,
+            row.evidence,
+            row.suggested_action,
+            row.source,
+        )
+
+    def render_records(self, rows: list[DnsRow]) -> None:
+        self.render_result_rows(rows, "dns", self.dns_result_values)
 
     def render_directory(self, rows: list[DirectoryRow]) -> None:
-        self.reset_render_state()
-        table = self.query_one("#records", DataTable)
-        table.clear()
-        if not rows:
-            title, hint = self.empty_state_text("directory")
-            table.add_row("", title, "-", hint, "", "", "")
-            table.move_cursor(row=0)
-            self.update_details_pane()
-            return
-        for row in rows:
-            table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
-        table.move_cursor(row=0)
-        self.update_details_pane()
+        self.render_result_rows(rows, "directory", self.directory_result_values)
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
-        self.reset_render_state()
-        table = self.query_one("#records", DataTable)
-        table.clear()
-        if not rows:
-            title, hint = self.empty_state_text("smart")
-            table.add_row("", title, "-", hint, "", "", "")
-            table.move_cursor(row=0)
-            self.update_details_pane()
-            return
-        for row in rows:
-            table.add_row(
-                "",
-                row.severity,
-                row.object,
-                row.finding,
-                row.evidence,
-                row.suggested_action,
-                row.source,
-            )
-        table.move_cursor(row=0)
-        self.update_details_pane()
+        self.render_result_rows(rows, "smart", self.smart_result_values)
 
     def detail_text(self, title: str, fields: Iterable[tuple[str, str]]) -> str:
         lines = [title]
@@ -1102,41 +1115,23 @@ class SambatuiApp(App):
         needle = self.search_text.casefold()
         return any(needle in value.casefold() for value in values)
 
-    def visible_records(self) -> list[DnsRow]:
+    def visible_rows(
+        self,
+        rows: list[TableRow],
+        search_values: Callable[[TableRow], Iterable[str]],
+    ) -> list[TableRow]:
         if not self.search_text:
-            return self.record_rows
-        return [
-            row
-            for row in self.record_rows
-            if self.matches_search((row.name, row.rtype, row.value))
-        ]
+            return rows
+        return [row for row in rows if self.matches_search(search_values(row))]
+
+    def visible_records(self) -> list[DnsRow]:
+        return self.visible_rows(self.record_rows, self.dns_search_values)
 
     def visible_directory(self) -> list[DirectoryRow]:
-        if not self.search_text:
-            return self.directory_rows
-        return [
-            row
-            for row in self.directory_rows
-            if self.matches_search((row.name, row.kind, row.summary, row.dn))
-        ]
+        return self.visible_rows(self.directory_rows, self.directory_search_values)
 
     def visible_smart_view(self) -> list[SmartViewRow]:
-        if not self.search_text:
-            return self.smart_view_rows
-        return [
-            row
-            for row in self.smart_view_rows
-            if self.matches_search(
-                (
-                    row.severity,
-                    row.object,
-                    row.finding,
-                    row.evidence,
-                    row.suggested_action,
-                    row.source,
-                )
-            )
-        ]
+        return self.visible_rows(self.smart_view_rows, self.smart_search_values)
 
     def set_visible_status(
         self, shown: int, total: int, label: str, view_mode: str
