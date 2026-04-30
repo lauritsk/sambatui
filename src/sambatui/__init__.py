@@ -1,7 +1,14 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from .app import SambatuiApp, main
-from .dns import parse_records, parse_zones, validate_record
+from .dns import (
+    parse_records,
+    parse_zones,
+    ptr_target_for_name,
+    reverse_record_for_ipv4,
+    valid_dns_name,
+    validate_record,
+)
 from .models import DnsRow
 
 try:
@@ -16,5 +23,8 @@ __all__ = [
     "main",
     "parse_records",
     "parse_zones",
+    "ptr_target_for_name",
+    "reverse_record_for_ipv4",
+    "valid_dns_name",
     "validate_record",
 ]

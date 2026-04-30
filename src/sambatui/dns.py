@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import ipaddress
 import re
 from typing import cast
+
+import dns.exception
+import dns.name
+import dns.rdata
+import dns.rdataclass
+import dns.rdatatype
+import dns.reversename
 
 from .models import DnsRow
 
 NAME_RE = re.compile(r"^\s*Name=(.*?), Records=(\d+), Children=(\d+)")
 REC_RE = re.compile(r"^\s+([A-Z0-9_]+):\s*(.*?)(?:\s+\(flags=.*?ttl=(\d+)\))?\s*$")
-LABEL_RE = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
+_LABEL_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+)
+_LABEL_EDGE_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+)
 
 
 def parse_records(output: str) -> list[DnsRow]:
@@ -62,13 +75,28 @@ def parse_zones(output: str) -> list[str]:
 
 
 def valid_dns_name(value: str, *, allow_at: bool = False) -> bool:
-    if allow_at and value == "@":
-        return True
-    value = value.rstrip(".")
-    if not value or len(value) > 253:
+    if value == "@":
+        return allow_at
+
+    text = value.rstrip(".")
+    if not text or len(text) > 253:
         return False
-    labels = value.split(".")
-    return all(LABEL_RE.fullmatch(label) for label in labels)
+
+    try:
+        dns.name.from_text(value, origin=dns.name.root)
+    except dns.exception.DNSException, UnicodeError, ValueError:
+        return False
+
+    for label in text.split("."):
+        if not label or not label.isascii():
+            return False
+        if len(label) > 63:
+            return False
+        if label[0] not in _LABEL_EDGE_CHARS or label[-1] not in _LABEL_EDGE_CHARS:
+            return False
+        if any(char not in _LABEL_CHARS for char in label):
+            return False
+    return True
 
 
 def ptr_target_for_name(name: str, zone: str) -> str:
@@ -81,20 +109,60 @@ def ptr_target_for_name(name: str, zone: str) -> str:
     return f"{name}.{zone}"
 
 
-def reverse_record_for_ipv4(ip_value: str, zones: list[str]) -> tuple[str, str] | None:
+def _parse_rdata(rtype: str, value: str) -> None:
+    dns.rdata.from_text(
+        dns.rdataclass.IN,
+        dns.rdatatype.from_text(rtype),
+        value,
+        origin=dns.name.root,
+    )
+
+
+def _valid_mx(value: str) -> bool:
+    try:
+        _parse_rdata("MX", value)
+    except dns.exception.DNSException:
+        pass
+    else:
+        parts = value.split()
+        return len(parts) == 2 and valid_dns_name(parts[1])
+
+    parts = value.split()
+    if len(parts) != 2 or not parts[1].isdigit() or not valid_dns_name(parts[0]):
+        return False
+    try:
+        _parse_rdata("MX", f"{parts[1]} {parts[0]}")
+    except dns.exception.DNSException:
+        return False
+    return True
+
+
+def reverse_record_for_ipv4(
+    ip_value: str, reverse_zones: Iterable[str] = ()
+) -> tuple[str, str] | None:
     try:
         ip = ipaddress.IPv4Address(ip_value)
     except ValueError:
         return None
-    parts = str(ip).split(".")
-    fqdn = ".".join(reversed(parts)) + ".in-addr.arpa"
-    reverse_zones = [zone for zone in zones if zone.endswith(".in-addr.arpa")]
-    matching_zones = [zone for zone in reverse_zones if fqdn.endswith(zone)]
+
+    reverse_name = dns.reversename.from_address(str(ip)).to_text().rstrip(".")
+    zones: list[str] = [
+        zone.rstrip(".") for zone in reverse_zones if zone.endswith(".in-addr.arpa")
+    ]
+    matching_zones: list[str] = [
+        zone
+        for zone in zones
+        if reverse_name == zone or reverse_name.endswith(f".{zone}")
+    ]
     if matching_zones:
         best_zone = cast("str", max(matching_zones, key=len))
-        ptr_name = fqdn[: -(len(best_zone) + 1)]
+        ptr_name = (
+            "@" if reverse_name == best_zone else reverse_name[: -(len(best_zone) + 1)]
+        )
         return best_zone, ptr_name
-    return ".".join(reversed(parts[:3])) + ".in-addr.arpa", parts[3]
+
+    labels = reverse_name.split(".")
+    return ".".join(labels[1:]), labels[0]
 
 
 def validate_record(
@@ -103,7 +171,7 @@ def validate_record(
     rtype = rtype.upper()
     if not valid_dns_name(name, allow_at=True):
         return "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
-    if not re.fullmatch(r"[A-Z0-9]+", rtype):
+    if not (rtype.isascii() and rtype.isalnum()):
         return "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV."
     if require_value and not value:
         return "Value is required."
@@ -112,10 +180,8 @@ def validate_record(
 
     try:
         match rtype:
-            case "A":
-                ipaddress.IPv4Address(value)
-            case "AAAA":
-                ipaddress.IPv6Address(value)
+            case "A" | "AAAA" | "TXT":
+                _parse_rdata(rtype, value)
             case "CNAME" | "PTR" | "NS":
                 if not valid_dns_name(value):
                     return f"{rtype} value must be a DNS name, e.g. host.example.com."
@@ -125,6 +191,7 @@ def validate_record(
                         return "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
                     except ValueError:
                         pass
+                _parse_rdata(rtype, value)
             case "SRV":
                 parts = value.split()
                 if (
@@ -133,13 +200,12 @@ def validate_record(
                     or not valid_dns_name(parts[3])
                 ):
                     return "SRV value must be: priority weight port target.example.com."
+                _parse_rdata("SRV", value)
             case "MX":
-                parts = value.split()
-                if len(parts) == 2 and parts[0].isdigit() and valid_dns_name(parts[1]):
-                    return None
-                if len(parts) == 2 and valid_dns_name(parts[0]) and parts[1].isdigit():
-                    return None
-                return "MX value must be: priority mail.example.com. (or mail.example.com. priority)"
+                if not _valid_mx(value):
+                    return "MX value must be: priority mail.example.com. (or mail.example.com. priority)"
+    except dns.exception.DNSException as exc:
+        return str(exc)
     except ValueError as exc:
         return str(exc)
     return None

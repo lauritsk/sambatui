@@ -1,5 +1,5 @@
 from sambatui.app import DnsRow, parse_records, parse_zones, validate_record
-from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4
+from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
 
 
 def test_parse_zones_deduplicates_zone_names() -> None:
@@ -43,6 +43,18 @@ def test_validate_record_rejects_bad_cname_ip() -> None:
     assert validate_record("alias", "CNAME", "192.0.2.10") == (
         "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
     )
+
+
+def test_validate_record_uses_dns_parser_for_supported_types() -> None:
+    assert validate_record("_ldap._tcp", "SRV", "0 100 389 dc.example.com.") is None
+    assert validate_record("@", "MX", "mail.example.com. 10") is None
+    assert validate_record("www", "A", "999.0.2.10") is not None
+
+
+def test_valid_dns_name_keeps_sambatui_label_policy() -> None:
+    assert valid_dns_name("_ldap._tcp.example.com.")
+    assert not valid_dns_name("-bad.example.com")
+    assert not valid_dns_name("bad space.example.com")
 
 
 def test_ptr_target_for_name_uses_zone_for_relative_names() -> None:
