@@ -8,7 +8,7 @@ from sambatui.app import (
     parse_zones,
     validate_record,
 )
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import Button, DataTable, Input, Static
 
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
 from sambatui.ldap_directory import DirectoryRow
@@ -30,6 +30,95 @@ def test_actionable_error_adds_concise_remediation() -> None:
     )
     assert "run kinit" in actionable_error("Kerberos ticket expired")
     assert actionable_error("") == ""
+
+
+def test_sidebar_action_buttons_are_visible() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            buttons = {button.id for button in app.query(Button)}
+
+            assert {
+                "load_zones",
+                "refresh_zone",
+                "query_record",
+                "add_record",
+                "delete_records",
+                "ldap_search_users",
+                "ldap_search_groups",
+                "ldap_search_computers",
+                "smart_dns_health",
+                "smart_ldap_cleanup",
+            }.issubset(buttons)
+
+    asyncio.run(run_app())
+
+
+def test_sidebar_buttons_route_to_existing_actions() -> None:
+    class ButtonApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.actions: list[str] = []
+
+        async def action_load_zones(self) -> None:
+            self.actions.append("load_zones")
+
+        async def action_refresh(self) -> None:
+            self.actions.append("refresh")
+
+        def action_query(self) -> None:
+            self.actions.append("query")
+
+        def action_add(self) -> None:
+            self.actions.append("add")
+
+        def action_delete(self) -> None:
+            self.actions.append("delete")
+
+        def action_ldap_search_kind(self, kind: str) -> None:
+            self.actions.append(f"ldap:{kind}")
+
+        def action_smart_view_shortcut(self, shortcut: str) -> None:
+            self.actions.append(f"smart:{shortcut}")
+
+    async def run_app() -> None:
+        app = ButtonApp()
+        for button_id in [
+            "load_zones",
+            "refresh_zone",
+            "query_record",
+            "add_record",
+            "delete_records",
+            "ldap_search_users",
+            "ldap_search_groups",
+            "ldap_search_computers",
+            "smart_dns_health",
+            "smart_ldap_cleanup",
+        ]:
+            assert await app.run_sidebar_button_action(button_id)
+        assert app.actions == [
+            "load_zones",
+            "refresh",
+            "query",
+            "add",
+            "delete",
+            "ldap:users",
+            "ldap:groups",
+            "ldap:computers",
+            "smart:1",
+            "smart:5",
+        ]
+
+    asyncio.run(run_app())
+
+
+def test_ldap_search_fields_accept_default_kind() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            assert app.ldap_search_fields("groups")[0][3] == "groups"
+
+    asyncio.run(run_app())
 
 
 def test_empty_states_explain_next_actions() -> None:

@@ -161,7 +161,9 @@ LDAP search, or running smart views.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
   records and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
-  `ous`, or `all`).
+  `ous`, or `all`). The LDAP sidebar also has one-click searches for users,
+  groups, and computers.
+- Smart sidebar buttons run common DNS duplicate and LDAP cleanup checks.
 - Move through DNS, LDAP, or smart-view rows to update the details pane with
   wrapped context for the focused row.
 - Select a zone: refresh records for that zone; the records title shows the

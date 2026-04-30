@@ -27,7 +27,9 @@ Screen { layout: vertical; }
     padding: 0 1;
 }
 
-#dns_panel, #ldap_panel { height: 1fr; }
+#dns_panel, #ldap_panel, #smart_panel { height: 1fr; }
+.action-buttons { height: auto; margin-bottom: 1; }
+.action-buttons Button { margin-bottom: 1; }
 
 .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
 .hint { color: $text-muted; margin-bottom: 1; }
