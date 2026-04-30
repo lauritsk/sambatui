@@ -156,14 +156,16 @@ LDAP search, or running smart views.
 
 ## Use
 
-- `z` or **Load DNS zones**: list zones, including reverse zones.
+- `z` or **Load DNS zones**: list zones, including reverse zones. If the
+  saved zone is still available, its records are restored automatically.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
   records and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
   `ous`, or `all`).
 - Move through DNS, LDAP, or smart-view rows to update the details pane with
   wrapped context for the focused row.
-- Select a zone: refresh records for that zone.
+- Select a zone: refresh records for that zone; the records title shows the
+  active zone.
 - `r`: refresh current zone (`dns query SERVER ZONE @ ALL`) or rerun the
   current smart view.
 - `f`: apply a guided smart-view fix when available. Currently this adds

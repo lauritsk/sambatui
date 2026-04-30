@@ -59,6 +59,58 @@ def test_empty_states_explain_next_actions() -> None:
     asyncio.run(run_app())
 
 
+def test_zone_activation_restores_saved_zone_and_updates_title() -> None:
+    class ZoneApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.commands: list[tuple[str, str, list[str]]] = []
+            self.saved_preferences = 0
+
+        async def run_zonelist(self) -> tuple[int, str]:
+            return (
+                0,
+                """
+                pszZoneName : example.com
+                pszZoneName : other.example
+                """,
+            )
+
+        async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
+            self.commands.append((self.val("zone"), action, args))
+            return (
+                0,
+                """
+                Name=www, Records=1, Children=0
+                  A: 192.0.2.10 (flags=f0, serial=1, ttl=3600)
+                """,
+            )
+
+        def save_preferences(self) -> None:
+            self.saved_preferences += 1
+
+    async def run_app() -> None:
+        app = ZoneApp()
+        async with app.run_test():
+            title = app.query_one("#records_title", Static)
+            status = app.query_one("#status", Static)
+            zone = app.query_one("#zone", Input)
+
+            zone.value = "example.com"
+            await app.load_zones()
+            assert app.commands[-1] == ("example.com", "query", ["@", "ALL"])
+            assert str(title.render()) == "Records — example.com"
+            assert "Loaded 1 records from example.com" in str(status.render())
+            assert app.saved_preferences == 0
+
+            assert await app.activate_zone("other.example")
+            assert zone.value == "other.example"
+            assert app.commands[-1] == ("other.example", "query", ["@", "ALL"])
+            assert str(title.render()) == "Records — other.example"
+            assert app.saved_preferences == 1
+
+    asyncio.run(run_app())
+
+
 def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> None:
     async def run_app() -> None:
         app = SambatuiApp()

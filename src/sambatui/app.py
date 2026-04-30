@@ -408,6 +408,7 @@ class SambatuiApp(App):
         self.zones: list[str] = []
         self.pending_g = False
         self.refresh_connection_summary()
+        self.update_records_title()
         self.action_focus_records()
 
         self.refresh_key_hints()
@@ -694,7 +695,7 @@ class SambatuiApp(App):
             self.notify(f"Added PTR {ptr_name} -> {ptr_target}")
         return code
 
-    async def load_zones(self) -> None:
+    async def load_zones(self, *, restore_active_zone: bool = True) -> None:
         self.set_busy(True)
         try:
             code, output = await self.run_zonelist()
@@ -703,8 +704,21 @@ class SambatuiApp(App):
             zones = parse_zones(output)
             self.zones = zones
             self.populate_zones(zones)
-            self.set_status(f"Loaded {len(zones)} zones")
             self.notify(f"Loaded {len(zones)} zones")
+            if restore_active_zone and await self.restore_active_zone_records():
+                return
+            if not zones:
+                self.set_status(DNS_EMPTY_STATE[1])
+                return
+            active_zone = self.val("zone")
+            if active_zone:
+                self.set_status(
+                    f"Loaded {len(zones)} zones; saved zone {active_zone} not found"
+                )
+            else:
+                self.set_status(
+                    f"Loaded {len(zones)} zones; select a zone and press Enter"
+                )
         finally:
             self.set_busy(False)
 
@@ -716,6 +730,42 @@ class SambatuiApp(App):
             return
         for zone in zones:
             table.add_row(zone)
+        self.select_zone_cursor(self.val("zone"))
+
+    def select_zone_cursor(self, zone: str) -> None:
+        if not zone or zone not in self.zones:
+            return
+        table = self.query_one("#zones", DataTable)
+        with suppress(Exception):
+            table.move_cursor(row=self.zones.index(zone))
+
+    async def restore_active_zone_records(self) -> bool:
+        zone = self.val("zone")
+        if not zone or zone not in self.zones:
+            return False
+        self.select_zone_cursor(zone)
+        await self.activate_zone(zone, save=False)
+        return True
+
+    def records_title(self) -> str:
+        zone = self.val("zone")
+        return f"Records — {zone}" if zone else "Records"
+
+    def update_records_title(self) -> None:
+        self.query_one("#records_title", Label).update(self.records_title())
+
+    async def activate_zone(self, zone: str, *, save: bool = True) -> bool:
+        if zone not in self.zones:
+            self.set_status(DNS_EMPTY_STATE[1])
+            return False
+        self.query_one("#zone", Input).value = zone
+        self.refresh_connection_summary()
+        self.update_records_title()
+        if save:
+            self.save_preferences()
+        self.set_status(f"Loading records for {zone}")
+        await self.refresh_current_zone()
+        return True
 
     def set_records_columns(self, columns: tuple[str, ...]) -> None:
         if self.records_columns == columns:
@@ -728,7 +778,7 @@ class SambatuiApp(App):
     def populate_records(self, rows: list[DnsRow]) -> None:
         self.view_mode = "dns"
         self.set_records_columns(DNS_COLUMNS)
-        self.query_one("#records_title", Label).update("Records")
+        self.update_records_title()
         self.record_rows = self.sorted_records(rows)
         self.refresh_record_view()
         self.set_status(
@@ -1171,7 +1221,7 @@ class SambatuiApp(App):
 
     async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
         if not self.zones:
-            await self.load_zones()
+            await self.load_zones(restore_active_zone=False)
         if not self.zones:
             self.report_error("Load zones before DNS smart views.")
             return None
@@ -1828,11 +1878,7 @@ class SambatuiApp(App):
             except Exception:
                 return
             if row:
-                self.query_one("#zone", Input).value = str(row[0])
-                self.refresh_connection_summary()
-                self.save_preferences()
-                self.set_status(f"Selected {row[0]}; refreshing records")
-                await self.refresh_current_zone()
+                await self.activate_zone(str(row[0]))
 
     async def on_key(self, event: Any) -> None:
         if isinstance(self.focused, Input):
@@ -1970,11 +2016,7 @@ class SambatuiApp(App):
         if zone not in self.zones:
             self.set_status(DNS_EMPTY_STATE[1])
             return
-        self.query_one("#zone", Input).value = zone
-        self.refresh_connection_summary()
-        self.save_preferences()
-        self.set_status(f"Selected {zone}; refreshing records")
-        await self.refresh_current_zone()
+        await self.activate_zone(zone)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         if event.data_table.id != "records":
