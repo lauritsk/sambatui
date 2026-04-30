@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import socket
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,6 +274,21 @@ def actionable_error(message: str) -> str:
         action = "check DC/server, DNS, VPN/firewall; Ctrl+O edits connection"
 
     return f"{base} Action: {action}." if action else base
+
+
+def bounded_int(
+    value: str | None,
+    default: int,
+    *,
+    minimum: int = 1,
+    maximum: int | None = None,
+) -> int:
+    try:
+        number = int(value or str(default))
+    except ValueError:
+        return default
+    number = max(minimum, number)
+    return min(number, maximum) if maximum is not None else number
 
 
 class SambatuiApp(App):
@@ -874,10 +890,13 @@ class SambatuiApp(App):
         self.refresh_smart_view()
         self.set_status(f"Loaded {len(rows)} smart-view findings")
 
-    def render_records(self, rows: list[DnsRow]) -> None:
+    def reset_render_state(self) -> None:
         self.selected_record_rows.clear()
         self.selection_anchor = None
         self.visual_selecting = False
+
+    def render_records(self, rows: list[DnsRow]) -> None:
+        self.reset_render_state()
         table = self.query_one("#records", DataTable)
         table.clear()
         if not rows:
@@ -890,9 +909,7 @@ class SambatuiApp(App):
             )
 
     def render_directory(self, rows: list[DirectoryRow]) -> None:
-        self.selected_record_rows.clear()
-        self.selection_anchor = None
-        self.visual_selecting = False
+        self.reset_render_state()
         table = self.query_one("#records", DataTable)
         table.clear()
         if not rows:
@@ -903,9 +920,7 @@ class SambatuiApp(App):
             table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
-        self.selected_record_rows.clear()
-        self.selection_anchor = None
-        self.visual_selecting = False
+        self.reset_render_state()
         table = self.query_one("#records", DataTable)
         table.clear()
         if not rows:
@@ -939,81 +954,81 @@ class SambatuiApp(App):
         title, hint = self.empty_state_text(view_mode)
         return f"{title}. {hint}"
 
+    def matches_search(self, values: Iterable[str]) -> bool:
+        needle = self.search_text.casefold()
+        return any(needle in value.casefold() for value in values)
+
     def visible_records(self) -> list[DnsRow]:
-        rows = self.record_rows
-        if self.search_text:
-            needle = self.search_text.casefold()
-            rows = [
-                row
-                for row in rows
-                if needle in row.name.casefold()
-                or needle in row.rtype.casefold()
-                or needle in row.value.casefold()
-            ]
-        return rows
+        if not self.search_text:
+            return self.record_rows
+        return [
+            row
+            for row in self.record_rows
+            if self.matches_search((row.name, row.rtype, row.value))
+        ]
 
     def visible_directory(self) -> list[DirectoryRow]:
-        rows = self.directory_rows
-        if self.search_text:
-            needle = self.search_text.casefold()
-            rows = [
-                row
-                for row in rows
-                if needle in row.name.casefold()
-                or needle in row.kind.casefold()
-                or needle in row.summary.casefold()
-                or needle in row.dn.casefold()
-            ]
-        return rows
+        if not self.search_text:
+            return self.directory_rows
+        return [
+            row
+            for row in self.directory_rows
+            if self.matches_search((row.name, row.kind, row.summary, row.dn))
+        ]
 
     def visible_smart_view(self) -> list[SmartViewRow]:
-        rows = self.smart_view_rows
-        if self.search_text:
-            needle = self.search_text.casefold()
-            rows = [
-                row
-                for row in rows
-                if needle in row.severity.casefold()
-                or needle in row.object.casefold()
-                or needle in row.finding.casefold()
-                or needle in row.evidence.casefold()
-                or needle in row.suggested_action.casefold()
-                or needle in row.source.casefold()
-            ]
-        return rows
+        if not self.search_text:
+            return self.smart_view_rows
+        return [
+            row
+            for row in self.smart_view_rows
+            if self.matches_search(
+                (
+                    row.severity,
+                    row.object,
+                    row.finding,
+                    row.evidence,
+                    row.suggested_action,
+                    row.source,
+                )
+            )
+        ]
+
+    def set_visible_status(
+        self, shown: int, total: int, label: str, view_mode: str
+    ) -> None:
+        if not shown:
+            self.set_status(self.empty_state_status(view_mode))
+            return
+        extra = f" matching /{self.search_text}/" if self.search_text else ""
+        self.set_status(f"Showing {shown} of {total} {label}{extra}")
 
     def refresh_record_view(self) -> None:
         rows = self.visible_records()
         self.render_records(rows)
-        extra = f" matching /{self.search_text}/" if self.search_text else ""
-        if rows:
-            self.set_status(
-                f"Showing {len(rows)} of {len(self.record_rows)} records{extra}"
-            )
-        else:
-            self.set_status(self.empty_state_status("dns"))
+        self.set_visible_status(len(rows), len(self.record_rows), "records", "dns")
 
     def refresh_directory_view(self) -> None:
         rows = self.visible_directory()
         self.render_directory(rows)
-        extra = f" matching /{self.search_text}/" if self.search_text else ""
-        if rows:
-            self.set_status(
-                f"Showing {len(rows)} of {len(self.directory_rows)} LDAP entries{extra}"
-            )
-        else:
-            self.set_status(self.empty_state_status("directory"))
+        self.set_visible_status(
+            len(rows), len(self.directory_rows), "LDAP entries", "directory"
+        )
 
     def refresh_smart_view(self) -> None:
         rows = self.visible_smart_view()
         self.render_smart_view(rows)
-        extra = f" matching /{self.search_text}/" if self.search_text else ""
-        if rows:
-            self.set_status(
-                f"Showing {len(rows)} of {len(self.smart_view_rows)} smart-view findings{extra}"
-            )
+        self.set_visible_status(
+            len(rows), len(self.smart_view_rows), "smart-view findings", "smart"
+        )
+
+    def refresh_current_view(self) -> None:
+        if self.view_mode == "directory":
+            self.refresh_directory_view()
+        elif self.view_mode == "smart":
+            self.refresh_smart_view()
         else:
-            self.set_status(self.empty_state_status("smart"))
+            self.refresh_record_view()
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         key_map = {
@@ -1190,10 +1205,7 @@ class SambatuiApp(App):
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
-        try:
-            max_rows = max(1, min(int(values["max_rows"] or "200"), 1000))
-        except ValueError:
-            max_rows = 200
+        max_rows = bounded_int(values["max_rows"], 200, maximum=1000)
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
@@ -1300,22 +1312,10 @@ class SambatuiApp(App):
         if not values:
             return
 
-        try:
-            days = max(1, int(values.get("days") or "90"))
-        except ValueError:
-            days = 90
-        try:
-            disabled_days = max(1, int(values.get("disabled_days") or "180"))
-        except ValueError:
-            disabled_days = 180
-        try:
-            never_logged_days = max(1, int(values.get("never_logged_days") or "30"))
-        except ValueError:
-            never_logged_days = 30
-        try:
-            max_rows = max(1, min(int(values.get("max_rows") or "500"), 5000))
-        except ValueError:
-            max_rows = 500
+        days = bounded_int(values.get("days"), 90)
+        disabled_days = bounded_int(values.get("disabled_days"), 180)
+        never_logged_days = bounded_int(values.get("never_logged_days"), 30)
+        max_rows = bounded_int(values.get("max_rows"), 500, maximum=5000)
 
         rows: list[SmartViewRow]
         if view.source == "DNS":
@@ -1570,12 +1570,7 @@ class SambatuiApp(App):
         if values is None:
             return
         self.search_text = values["search"]
-        if self.view_mode == "directory":
-            self.refresh_directory_view()
-        elif self.view_mode == "smart":
-            self.refresh_smart_view()
-        else:
-            self.refresh_record_view()
+        self.refresh_current_view()
 
     def focused_table(self) -> DataTable | None:
         focused = self.focused
@@ -1784,12 +1779,7 @@ class SambatuiApp(App):
             return
         if self.search_text:
             self.search_text = ""
-            if self.view_mode == "directory":
-                self.refresh_directory_view()
-            elif self.view_mode == "smart":
-                self.refresh_smart_view()
-            else:
-                self.refresh_record_view()
+            self.refresh_current_view()
             self.set_status("Search cleared")
             return
         self.action_focus_records()
