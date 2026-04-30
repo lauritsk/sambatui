@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 import ipaddress
 import re
-from typing import cast
-
 import dns.exception
 import dns.name
 import dns.rdata
@@ -118,23 +116,23 @@ def _parse_rdata(rtype: str, value: str) -> None:
     )
 
 
-def _valid_mx(value: str) -> bool:
+def _rdata_is_valid(rtype: str, value: str) -> bool:
     try:
-        _parse_rdata("MX", value)
-    except dns.exception.DNSException:
-        pass
-    else:
-        parts = value.split()
-        return len(parts) == 2 and valid_dns_name(parts[1])
-
-    parts = value.split()
-    if len(parts) != 2 or not parts[1].isdigit() or not valid_dns_name(parts[0]):
-        return False
-    try:
-        _parse_rdata("MX", f"{parts[1]} {parts[0]}")
+        _parse_rdata(rtype, value)
     except dns.exception.DNSException:
         return False
     return True
+
+
+def _valid_mx(value: str) -> bool:
+    parts = value.split()
+    if len(parts) != 2:
+        return False
+    if _rdata_is_valid("MX", value):
+        return valid_dns_name(parts[1])
+    if not parts[1].isdigit() or not valid_dns_name(parts[0]):
+        return False
+    return _rdata_is_valid("MX", f"{parts[1]} {parts[0]}")
 
 
 def reverse_record_for_ipv4(
@@ -155,7 +153,7 @@ def reverse_record_for_ipv4(
         if reverse_name == zone or reverse_name.endswith(f".{zone}")
     ]
     if matching_zones:
-        best_zone = cast("str", max(matching_zones, key=len))
+        best_zone = max(matching_zones, key=lambda zone: len(zone))
         ptr_name = (
             "@" if reverse_name == best_zone else reverse_name[: -(len(best_zone) + 1)]
         )
@@ -169,43 +167,67 @@ def validate_record(
     name: str, rtype: str, value: str, *, require_value: bool = True
 ) -> str | None:
     rtype = rtype.upper()
+    error = _record_shape_error(name, rtype, value, require_value=require_value)
+    if error or not value:
+        return error
+
+    try:
+        return _record_value_error(rtype, value)
+    except dns.exception.DNSException as exc:
+        return str(exc)
+    except ValueError as exc:
+        return str(exc)
+
+
+def _record_shape_error(
+    name: str, rtype: str, value: str, *, require_value: bool
+) -> str | None:
     if not valid_dns_name(name, allow_at=True):
         return "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
     if not (rtype.isascii() and rtype.isalnum()):
         return "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV."
     if require_value and not value:
         return "Value is required."
-    if not value:
-        return None
+    return None
 
-    try:
-        match rtype:
-            case "A" | "AAAA" | "TXT":
-                _parse_rdata(rtype, value)
-            case "CNAME" | "PTR" | "NS":
-                if not valid_dns_name(value):
-                    return f"{rtype} value must be a DNS name, e.g. host.example.com."
-                if rtype == "CNAME":
-                    try:
-                        ipaddress.ip_address(value.rstrip("."))
-                        return "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
-                    except ValueError:
-                        pass
-                _parse_rdata(rtype, value)
-            case "SRV":
-                parts = value.split()
-                if (
-                    len(parts) != 4
-                    or not all(part.isdigit() for part in parts[:3])
-                    or not valid_dns_name(parts[3])
-                ):
-                    return "SRV value must be: priority weight port target.example.com."
-                _parse_rdata("SRV", value)
-            case "MX":
-                if not _valid_mx(value):
-                    return "MX value must be: priority mail.example.com. (or mail.example.com. priority)"
-    except dns.exception.DNSException as exc:
-        return str(exc)
-    except ValueError as exc:
-        return str(exc)
+
+def _record_value_error(rtype: str, value: str) -> str | None:
+    match rtype:
+        case "A" | "AAAA" | "TXT":
+            _parse_rdata(rtype, value)
+        case "CNAME" | "PTR" | "NS":
+            return _dns_name_record_error(rtype, value)
+        case "SRV":
+            return _srv_record_error(value)
+        case "MX":
+            if not _valid_mx(value):
+                return "MX value must be: priority mail.example.com. (or mail.example.com. priority)"
+    return None
+
+
+def _dns_name_record_error(rtype: str, value: str) -> str | None:
+    if not valid_dns_name(value):
+        return f"{rtype} value must be a DNS name, e.g. host.example.com."
+    if rtype == "CNAME":
+        try:
+            ipaddress.ip_address(value.rstrip("."))
+        except ValueError:
+            pass
+        else:
+            return (
+                "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
+            )
+    _parse_rdata(rtype, value)
+    return None
+
+
+def _srv_record_error(value: str) -> str | None:
+    parts = value.split()
+    if (
+        len(parts) != 4
+        or not all(part.isdigit() for part in parts[:3])
+        or not valid_dns_name(parts[3])
+    ):
+        return "SRV value must be: priority weight port target.example.com."
+    _parse_rdata("SRV", value)
     return None
