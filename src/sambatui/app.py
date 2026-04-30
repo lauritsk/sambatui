@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, TypeVar
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -70,6 +70,7 @@ from .screens import (
     SmartViewPickerScreen,
     infer_domain_from_server,
 )
+from .settings import ConnectionSettings
 from .smart_views import (
     SmartViewRow,
     dns_a_without_ptr,
@@ -80,20 +81,30 @@ from .smart_views import (
     ldap_stale_computers,
     ldap_users_without_groups,
 )
-
-DNS_COLUMNS = ("✓", "Name", "Type", "Value", "TTL", "Records", "Children")
-DIRECTORY_COLUMNS = ("✓", "Name", "Kind", "Summary", "", "", "DN")
-SMART_COLUMNS = (
-    "✓",
-    "Severity",
-    "Object",
-    "Finding",
-    "Evidence",
-    "Suggested action",
-    "Source",
+from .ui.details import (
+    details_empty_text,
+    directory_details_text,
+    dns_details_text,
+    dns_ptr_status,
+    smart_details_text,
+)
+from .ui.styles import APP_CSS
+from .ui.tables import (
+    DIRECTORY_COLUMNS,
+    DNS_COLUMNS,
+    DNS_EMPTY_STATE,
+    SMART_COLUMNS,
+    RowValues,
+    directory_result_values,
+    directory_search_values,
+    dns_result_values,
+    dns_search_values,
+    empty_state_text,
+    matches_search,
+    smart_result_values,
+    smart_search_values,
 )
 
-RowValues: TypeAlias = tuple[str, ...]
 TableRow = TypeVar("TableRow")
 
 
@@ -173,34 +184,6 @@ SMART_VIEW_BY_ID = {view.view_id: view for view in SMART_VIEWS}
 SMART_VIEW_BY_SHORTCUT = {view.shortcut: view for view in SMART_VIEWS}
 SMART_VIEW_LABELS = {view.view_id: view.label for view in SMART_VIEWS}
 
-DNS_EMPTY_STATE = (
-    "No DNS records shown",
-    "Press z to load zones, select zone, then q to query; a adds record.",
-)
-LDAP_EMPTY_STATE = (
-    "No LDAP entries shown",
-    "Press L to search directory; check Base DN, text, max rows.",
-)
-SMART_EMPTY_STATE = (
-    "No smart-view findings shown",
-    "Press S to pick view or 1-7 quick run; / filters findings.",
-)
-
-LDAP_DETAIL_ATTRIBUTES = (
-    "sAMAccountName",
-    "userPrincipalName",
-    "mail",
-    "description",
-    "memberOf",
-    "member",
-    "userAccountControl",
-    "lastLogonTimestamp",
-    "whenCreated",
-    "whenChanged",
-    "dNSHostName",
-    "servicePrincipalName",
-)
-
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
     "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
@@ -251,57 +234,7 @@ __all__ = [
 
 
 class SambatuiApp(App):
-    CSS = """
-    Screen { layout: vertical; }
-
-    #connection_state { display: none; }
-
-    #main {
-        height: 1fr;
-        margin: 0 1;
-    }
-
-    #sidebar {
-        width: 42;
-        min-width: 34;
-        height: 1fr;
-        margin-right: 1;
-    }
-
-    #side_tabs { height: 1fr; }
-
-    #results {
-        width: 1fr;
-        height: 1fr;
-    }
-
-    .panel {
-        border: tall $surface;
-        padding: 0 1;
-    }
-
-    #dns_panel, #ldap_panel { height: 1fr; }
-
-    .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
-    .hint { color: $text-muted; margin-bottom: 1; }
-    #connection_summary { color: $text-muted; margin-bottom: 1; }
-    #keys { height: 1; margin: 0 1; color: $text-muted; }
-
-    Button { width: 1fr; }
-
-    #zones { height: 1fr; margin-bottom: 1; }
-    #ldap_hint { height: 1fr; }
-    #records { height: 1fr; }
-    #record_details {
-        height: 10;
-        margin-top: 1;
-        border: tall $surface;
-        padding: 0 1;
-        overflow-y: auto;
-        color: $text;
-    }
-    #status { height: 3; color: $text-muted; }
-    """
+    CSS = APP_CSS
 
     BINDINGS = [
         ("question_mark", "help", "Help"),
@@ -480,20 +413,14 @@ class SambatuiApp(App):
     def set_val(self, widget_id: str, value: str) -> None:
         self.query_one(f"#{widget_id}", Input).value = value
 
+    def connection_settings(self) -> ConnectionSettings:
+        return ConnectionSettings.from_lookup(self.val)
+
     def connection_summary(self) -> str:
-        server = self.val("server") or "no server"
-        zone = self.val("zone") or "no zone"
-        auth = self.val("auth") or DEFAULT_AUTH
-        return f"{server} · {zone} · {auth} auth"
+        return self.connection_settings().summary
 
     def connection_needs_setup(self) -> bool:
-        if not self.val("server") or not self.val("zone"):
-            return True
-        if (self.val("auth") or DEFAULT_AUTH).casefold() != "password":
-            return False
-        if not self.val("user"):
-            return True
-        return not (self.val("password") or read_password_file(self.password_file()))
+        return self.connection_settings().needs_setup(read_password_file)
 
     def discovery_domain_default(self) -> str:
         candidates = [
@@ -519,118 +446,19 @@ class SambatuiApp(App):
             )
 
     def connection_fields(self) -> list[FormField]:
-        return [
-            (
-                "Server — AD domain controller hostname or IP used by samba-tool -H.",
-                "server",
-                "dc01.example.com or 192.0.2.10",
-                self.val("server"),
-            ),
-            (
-                "DNS zone — zone to query and edit after you select/load zones.",
-                "zone",
-                "example.com",
-                self.val("zone"),
-            ),
-            (
-                "User — DOMAIN\\user or user accepted by Samba.",
-                "user",
-                "EXAMPLE\\admin",
-                self.val("user"),
-            ),
-            (
-                "Password — hidden. Leave empty for Kerberos or password file/env loading.",
-                "password",
-                "password",
-                self.val("password"),
-            ),
-            (
-                "Auth mode — password or kerberos.",
-                "auth",
-                "password | kerberos",
-                self.val("auth"),
-            ),
-            (
-                "Kerberos option — value passed to --use-kerberos.",
-                "kerberos",
-                "desired | required | off",
-                self.val("kerberos"),
-            ),
-            (
-                "Kerberos credential cache — optional --use-krb5-ccache path.",
-                "krb5_ccache",
-                "/tmp/krb5cc_1000",
-                self.val("krb5_ccache"),
-            ),
-            (
-                "smb.conf — optional --configfile path for Samba settings.",
-                "configfile",
-                "/etc/samba/smb.conf",
-                self.val("configfile"),
-            ),
-            (
-                "Extra samba-tool options — separate multiple options with semicolons.",
-                "options",
-                "--option=name=value; --debuglevel=1",
-                self.val("options"),
-            ),
-            (
-                "LDAP base DN — used by read-only directory search.",
-                "ldap_base",
-                "DC=example,DC=com",
-                self.val("ldap_base") or domain_to_base_dn(self.val("zone")),
-            ),
-            (
-                "LDAP encryption — password bind requires ldaps or starttls; kerberos also supports off.",
-                "ldap_encryption",
-                "off | ldaps | starttls",
-                self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            ),
-            (
-                "LDAP compatibility — on relaxes TLS and schema probing for old Samba/EL6-era servers.",
-                "ldap_compatibility",
-                "on | off",
-                self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
-            ),
-            (
-                "Password file — used at startup and by password load/save commands.",
-                "password_file",
-                "~/.config/sambatui/password",
-                self.val("password_file"),
-            ),
-        ]
+        return self.connection_settings().form_fields()
 
     def password_file(self) -> Path:
-        return Path(self.val("password_file")).expanduser()
+        return self.connection_settings().path_password_file
 
     def samba_config(self) -> SambaToolConfig:
-        return SambaToolConfig(
-            server=self.val("server"),
-            user=self.val("user"),
-            password=self.val("password"),
-            auth_mode=self.val("auth") or DEFAULT_AUTH,
-            kerberos=self.val("kerberos") or DEFAULT_KERBEROS,
-            krb5_ccache=self.val("krb5_ccache"),
-            configfile=self.val("configfile"),
-            options=parse_samba_options(self.val("options")),
-        )
+        return self.connection_settings().samba_config()
 
     def samba_client(self) -> SambaToolClient:
         return SambaToolClient(self.samba_config())
 
     def ldap_config(self, base_dn: str = "") -> LdapSearchConfig:
-        return LdapSearchConfig(
-            server=self.val("server"),
-            user=self.val("user"),
-            password=self.val("password"),
-            base_dn=base_dn
-            or self.val("ldap_base")
-            or domain_to_base_dn(self.val("zone")),
-            encryption=self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            auth_mode=self.val("auth") or DEFAULT_AUTH,
-            krb5_ccache=self.val("krb5_ccache"),
-            compatibility=self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
-        )
+        return self.connection_settings().ldap_config(base_dn)
 
     def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
         return LdapDirectoryClient(self.ldap_config(base_dn))
@@ -889,154 +717,42 @@ class SambatuiApp(App):
         table.move_cursor(row=0)
         self.update_details_pane()
 
-    @staticmethod
-    def dns_result_values(row: DnsRow) -> RowValues:
-        return row.name, row.rtype, row.value, row.ttl, row.records, row.children
-
-    @staticmethod
-    def directory_result_values(row: DirectoryRow) -> RowValues:
-        return row.name, row.kind, row.summary, "", "", row.dn
-
-    @staticmethod
-    def smart_fix_hint(row: SmartViewRow) -> str:
-        if row.fix_action:
-            return f"{row.suggested_action} Fix: press f to {row.fix_label}."
-        if row.source == "ldap":
-            return f"{row.suggested_action} LDAP findings are read-only/export-only."
-        return row.suggested_action
-
-    @staticmethod
-    def smart_result_values(row: SmartViewRow) -> RowValues:
-        return (
-            row.severity,
-            row.object,
-            row.finding,
-            row.evidence,
-            SambatuiApp.smart_fix_hint(row),
-            row.source,
-        )
-
-    @staticmethod
-    def dns_search_values(row: DnsRow) -> RowValues:
-        return row.name, row.rtype, row.value
-
-    @staticmethod
-    def directory_search_values(row: DirectoryRow) -> RowValues:
-        return row.name, row.kind, row.summary, row.dn
-
-    @staticmethod
-    def smart_search_values(row: SmartViewRow) -> RowValues:
-        return (
-            row.severity,
-            row.object,
-            row.finding,
-            row.evidence,
-            row.suggested_action,
-            row.source,
-            row.fix_label,
-        )
-
     def render_records(self, rows: list[DnsRow]) -> None:
-        self.render_result_rows(rows, "dns", self.dns_result_values)
+        self.render_result_rows(rows, "dns", dns_result_values)
 
     def render_directory(self, rows: list[DirectoryRow]) -> None:
-        self.render_result_rows(rows, "directory", self.directory_result_values)
+        self.render_result_rows(rows, "directory", directory_result_values)
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
-        self.render_result_rows(rows, "smart", self.smart_result_values)
-
-    def detail_text(self, title: str, fields: Iterable[tuple[str, str]]) -> str:
-        lines = [title]
-        for label, value in fields:
-            lines.append(f"{label}: {value.strip() or '—'}")
-        return "\n".join(lines)
+        self.render_result_rows(rows, "smart", smart_result_values)
 
     def details_empty_text(self) -> str:
-        title, hint = self.empty_state_text(self.view_mode)
-        return self.detail_text("Details", (("Status", title), ("Next", hint)))
-
-    def dns_ptr_status(self, row: DnsRow) -> str:
-        rtype = row.rtype.upper()
-        if rtype == "A":
-            reverse = self.reverse_record_for_ipv4(row.value)
-            if reverse is None:
-                return "unknown for this value"
-            ptr_zone, ptr_name = reverse
-            target = self.ptr_target_for_name(row.name)
-            status = f"expected {ptr_name}.{ptr_zone} PTR {target}"
-            if ptr_zone in self.zones:
-                return f"{status}; query reverse zone to verify"
-            return f"{status}; reverse zone not loaded"
-        if rtype == "PTR":
-            return f"points to {row.value}" if row.value else "PTR target unavailable"
-        return "not applicable"
+        return details_empty_text(self.empty_state_text(self.view_mode))
 
     def dns_details_text(self, row_index: int) -> str:
         rows = self.visible_records()
         if row_index < 0 or row_index >= len(rows):
             return self.details_empty_text()
         row = rows[row_index]
-        return self.detail_text(
-            "DNS details",
-            (
-                ("Name", row.name),
-                ("Type", row.rtype),
-                ("Value", row.value),
-                ("Zone", self.val("zone")),
-                ("TTL", row.ttl),
-                ("PTR status", self.dns_ptr_status(row)),
-                ("Records", row.records),
-                ("Children", row.children),
-            ),
+        ptr_status = dns_ptr_status(
+            row,
+            zones=self.zones,
+            reverse_record_for_ipv4=self.reverse_record_for_ipv4,
+            ptr_target_for_name=self.ptr_target_for_name,
         )
-
-    def attribute_detail_value(self, values: Iterable[str]) -> str:
-        items = [value for value in values if value]
-        if not items:
-            return ""
-        shown = "; ".join(items[:3])
-        remaining = len(items) - 3
-        return f"{shown}; … (+{remaining} more)" if remaining > 0 else shown
+        return dns_details_text(row, zone=self.val("zone"), ptr_status=ptr_status)
 
     def directory_details_text(self, row_index: int) -> str:
         rows = self.visible_directory()
         if row_index < 0 or row_index >= len(rows):
             return self.details_empty_text()
-        row = rows[row_index]
-        fields = [
-            ("Name", row.name),
-            ("Kind", row.kind),
-            ("Summary", row.summary),
-            ("DN", row.dn),
-        ]
-        for attribute in LDAP_DETAIL_ATTRIBUTES:
-            value = self.attribute_detail_value(row.attributes.get(attribute, ()))
-            if value:
-                fields.append((attribute, value))
-        return self.detail_text("LDAP details", fields)
+        return directory_details_text(rows[row_index])
 
     def smart_details_text(self, row_index: int) -> str:
         rows = self.visible_smart_view()
         if row_index < 0 or row_index >= len(rows):
             return self.details_empty_text()
-        row = rows[row_index]
-        remediation = "Manual review only"
-        if row.fix_action:
-            remediation = f"Press f to {row.fix_label}"
-        elif row.source == "ldap":
-            remediation = "LDAP findings are read-only/export-only"
-        return self.detail_text(
-            "Smart-view details",
-            (
-                ("Severity", row.severity),
-                ("Object", row.object),
-                ("Finding", row.finding),
-                ("Evidence", row.evidence),
-                ("Suggested action", row.suggested_action),
-                ("Remediation", remediation),
-                ("Source", row.source),
-            ),
-        )
+        return smart_details_text(rows[row_index])
 
     def current_details_text(self) -> str:
         row_index = 0
@@ -1055,24 +771,14 @@ class SambatuiApp(App):
             )
 
     def empty_state_text(self, view_mode: str) -> tuple[str, str]:
-        if self.search_text:
-            return (
-                "No matches",
-                f"Esc clears /{self.search_text}/; / changes search text.",
-            )
-        if view_mode == "directory":
-            return LDAP_EMPTY_STATE
-        if view_mode == "smart":
-            return SMART_EMPTY_STATE
-        return DNS_EMPTY_STATE
+        return empty_state_text(view_mode, self.search_text)
 
     def empty_state_status(self, view_mode: str) -> str:
         title, hint = self.empty_state_text(view_mode)
         return f"{title}. {hint}"
 
     def matches_search(self, values: Iterable[str]) -> bool:
-        needle = self.search_text.casefold()
-        return any(needle in value.casefold() for value in values)
+        return matches_search(values, self.search_text)
 
     def visible_rows(
         self,
@@ -1084,13 +790,13 @@ class SambatuiApp(App):
         return [row for row in rows if self.matches_search(search_values(row))]
 
     def visible_records(self) -> list[DnsRow]:
-        return self.visible_rows(self.record_rows, self.dns_search_values)
+        return self.visible_rows(self.record_rows, dns_search_values)
 
     def visible_directory(self) -> list[DirectoryRow]:
-        return self.visible_rows(self.directory_rows, self.directory_search_values)
+        return self.visible_rows(self.directory_rows, directory_search_values)
 
     def visible_smart_view(self) -> list[SmartViewRow]:
-        return self.visible_rows(self.smart_view_rows, self.smart_search_values)
+        return self.visible_rows(self.smart_view_rows, smart_search_values)
 
     def set_visible_status(
         self, shown: int, total: int, label: str, view_mode: str
