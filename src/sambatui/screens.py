@@ -96,6 +96,7 @@ class HelpScreen(ModalScreen[None]):
   Ctrl+O    Open connection settings
   p/P       Load/save password file
   c         Discover AD domain controllers
+  L         Search AD directory over LDAP
   z         Load DNS zones
 
 Navigation

@@ -12,6 +12,8 @@ DEFAULT_KRB5_CCACHE = os.getenv("SAMBATUI_KRB5_CCACHE", "")
 DEFAULT_CONFIGFILE = os.getenv("SAMBATUI_CONFIGFILE", "")
 DEFAULT_OPTIONS = os.getenv("SAMBATUI_OPTIONS", "")
 DEFAULT_AUTO_PTR = os.getenv("SAMBATUI_AUTO_PTR", "off")
+DEFAULT_LDAP_BASE = os.getenv("SAMBATUI_LDAP_BASE", "")
+DEFAULT_LDAP_ENCRYPTION = os.getenv("SAMBATUI_LDAP_ENCRYPTION", "ldaps")
 DEFAULT_PASSWORD_FILE = Path(
     os.getenv("SAMBATUI_PASSWORD_FILE", "~/.config/sambatui/password")
 ).expanduser()

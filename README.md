@@ -4,7 +4,8 @@ Textual terminal UI for managing Samba services.
 
 Current functionality focuses on DNS records on Samba Active Directory domain
 controllers. It wraps `samba-tool dns` with a table UI for zones, records,
-search, sorting, bulk delete, and optional A-record PTR creation.
+search, sorting, bulk delete, and optional A-record PTR creation. It also offers
+read-only LDAP directory search for AD users, groups, computers, and OUs.
 
 ## Requirements
 
@@ -16,6 +17,7 @@ host install needs:
 - network access to the AD DNS/DC endpoint
 - credentials allowed to manage Samba AD DNS
 - Kerberos client config/tickets when using Kerberos auth
+- LDAPS or StartTLS access when using LDAP directory search
 
 Useful system packages by distro:
 
@@ -125,6 +127,8 @@ Optional variables:
 | `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
 | `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
+| `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
+| `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport for password bind: `ldaps` or `starttls` | `ldaps` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 
@@ -133,6 +137,8 @@ Optional variables:
 - `z` or **Load DNS zones**: list zones, including reverse zones.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
   records and populate the server field.
+- `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
+  `ous`, or `all`).
 - Select a zone: refresh records for that zone.
 - `r`: refresh current zone (`dns query SERVER ZONE @ ALL`).
 - `q`: query one name/type.
@@ -188,9 +194,18 @@ other users.
 - `_ldap._tcp.dc._msdcs.DOMAIN`
 - `_kerberos._tcp.DOMAIN`
 
-This is intentionally DNS-only for now: no LDAP bind, no direct AD writes, and no
-extra AD dependency. Future LDAP discovery can be added behind the client seam if
-DNS SRV discovery is not enough.
+Discovery remains DNS-only: no LDAP bind and no direct AD writes.
+
+## LDAP directory search
+
+`L` opens read-only AD directory search powered by Python `ldap3`. It uses the
+configured server, username, and password, then searches a base DN such as
+`DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI proposes a base DN
+from the current DNS zone.
+
+LDAP password bind is allowed only with `ldaps` or `starttls`. Cleartext simple
+bind is intentionally unsupported. Kerberos/GSSAPI LDAP bind is not implemented
+yet; use existing `samba-tool` Kerberos mode for DNS operations.
 
 ## Development
 
