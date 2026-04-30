@@ -36,3 +36,15 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.coverage.run]
+omit = [
+  "src/sambatui/__main__.py",
+  "src/sambatui/app.py",
+  "src/sambatui/screens.py",
+  "src/sambatui/ui/*",
+]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
