@@ -26,7 +26,6 @@ from textual.widgets import (
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
     DEFAULT_AUTH,
-    DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
@@ -177,7 +176,6 @@ KEY_HINTS = {
 
 __all__ = [
     "DEFAULT_AUTH",
-    "DEFAULT_AUTO_PTR",
     "DEFAULT_CONFIGFILE",
     "DEFAULT_KERBEROS",
     "DEFAULT_KRB5_CCACHE",
@@ -329,7 +327,6 @@ class SambatuiApp(App):
             yield Input(DEFAULT_PASSWORD, password=True, id="password")
             yield Input(DEFAULT_AUTH, id="auth")
             yield Input(DEFAULT_KERBEROS, id="kerberos")
-            yield Input(DEFAULT_AUTO_PTR, id="auto_ptr")
             yield Input(DEFAULT_KRB5_CCACHE, id="krb5_ccache")
             yield Input(DEFAULT_CONFIGFILE, id="configfile")
             yield Input(DEFAULT_OPTIONS, id="options")
@@ -407,7 +404,7 @@ class SambatuiApp(App):
             self.set_status("Enter password, load password file, or use kerberos auth")
 
         if self.connection_needs_setup():
-            self.call_after_refresh(self.action_initial_setup)
+            self.set_status("Connection incomplete. Press Ctrl+O to configure.")
         else:
             self.call_after_refresh(self.load_zones)
 
@@ -496,12 +493,6 @@ class SambatuiApp(App):
                 "kerberos",
                 "desired | required | off",
                 self.val("kerberos"),
-            ),
-            (
-                "Auto PTR — on adds matching reverse PTR when adding A records.",
-                "auto_ptr",
-                "on | off",
-                self.val("auto_ptr"),
             ),
             (
                 "Kerberos credential cache — optional --use-krb5-ccache path.",
@@ -670,11 +661,6 @@ class SambatuiApp(App):
         return True
 
     @work
-    async def action_initial_setup(self) -> None:
-        await self.open_discover_ad(self.discovery_domain_default())
-        await self.open_connection_settings()
-
-    @work
     async def action_connection(self) -> None:
         await self.open_connection_settings()
 
@@ -742,16 +728,13 @@ class SambatuiApp(App):
         finally:
             self.set_busy(False)
 
-    def auto_ptr_enabled(self) -> bool:
-        return self.val("auto_ptr").casefold() in {"1", "yes", "y", "true", "on"}
-
     def ptr_target_for_name(self, name: str) -> str:
         return dns_ptr_target_for_name(name, self.val("zone"))
 
     def reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
         return dns_reverse_record_for_ipv4(ip_value, self.zones)
 
-    async def add_auto_ptr(self, name: str, ip_value: str) -> int:
+    async def add_ptr(self, name: str, ip_value: str) -> int:
         reverse = self.reverse_record_for_ipv4(ip_value)
         if reverse is None:
             return 0
@@ -1347,21 +1330,24 @@ class SambatuiApp(App):
         args = [name, rtype, value]
         if ttl:
             args.append(f"--ttl={ttl}")
-        ptr_text = ""
-        if rtype == "A" and self.auto_ptr_enabled():
-            reverse = self.reverse_record_for_ipv4(value)
-            if reverse:
-                ptr_zone, ptr_name = reverse
-                ptr_text = f"\nAuto PTR: {ptr_zone} / {ptr_name} PTR {self.ptr_target_for_name(name)}"
         if not await self.confirm(
-            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}{ptr_text}",
+            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}",
             default_confirm=True,
         ):
             self.notify("Add cancelled")
             return
         if await self.do_command("add", args) == 0:
-            if rtype == "A" and self.auto_ptr_enabled():
-                await self.add_auto_ptr(name, value)
+            if rtype == "A":
+                reverse = self.reverse_record_for_ipv4(value)
+                if reverse:
+                    ptr_zone, ptr_name = reverse
+                    ptr_target = self.ptr_target_for_name(name)
+                    if await self.confirm(
+                        "Add matching PTR record?\n\n"
+                        f"Zone: {ptr_zone}\n{ptr_name} PTR {ptr_target}",
+                        default_confirm=True,
+                    ):
+                        await self.add_ptr(name, value)
             await self.refresh_current_zone()
 
     @work
