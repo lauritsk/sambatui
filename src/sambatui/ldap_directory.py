@@ -204,7 +204,7 @@ class LdapDirectoryClient:
             raise ValueError(error)
 
         from ldap3 import ALL, SUBTREE, Connection, Server
-        from ldap3.core.exceptions import LDAPPackageUnavailableError
+        from ldap3.core.exceptions import LDAPException, LDAPPackageUnavailableError
 
         settings = parse_ldap_server(
             self.config.server, self.config.normalized_encryption
@@ -219,7 +219,13 @@ class LdapDirectoryClient:
         connection = Connection(server, **ldap_connection_kwargs(self.config))
         try:
             if self.config.normalized_encryption == "starttls" and not settings.use_ssl:
-                if not connection.start_tls():
+                try:
+                    tls_started = connection.start_tls()
+                except LDAPException as exc:
+                    raise ValueError(
+                        _ldap_exception_message(exc, "LDAP StartTLS failed")
+                    ) from exc
+                if not tls_started:
                     raise ValueError(
                         _ldap_result_message(connection.result, "LDAP StartTLS failed")
                     )
@@ -230,25 +236,37 @@ class LdapDirectoryClient:
                     "LDAP Kerberos bind needs optional package. "
                     "Install sambatui[kerberos]."
                 ) from exc
+            except LDAPException as exc:
+                raise ValueError(
+                    _ldap_exception_message(exc, "LDAP bind failed")
+                ) from exc
             if not bound:
                 raise ValueError(
                     _ldap_result_message(connection.result, "LDAP bind failed")
                 )
             search_filter = build_directory_filter(kind, text)
-            ok = connection.search(
-                self.config.base_dn,
-                search_filter,
-                search_scope=SUBTREE,
-                attributes=list(DEFAULT_LDAP_ATTRIBUTES),
-                paged_size=self.config.page_size,
-            )
+            try:
+                ok = connection.search(
+                    self.config.base_dn,
+                    search_filter,
+                    search_scope=SUBTREE,
+                    attributes=list(DEFAULT_LDAP_ATTRIBUTES),
+                    paged_size=self.config.page_size,
+                )
+            except LDAPException as exc:
+                raise ValueError(
+                    _ldap_exception_message(exc, "LDAP search failed")
+                ) from exc
             if not ok:
                 raise ValueError(
                     _ldap_result_message(connection.result, "LDAP search failed")
                 )
             return [entry_to_directory_row(entry, kind) for entry in connection.entries]
         finally:
-            connection.unbind()
+            try:
+                connection.unbind()
+            except LDAPException:
+                pass
 
 
 def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:
@@ -318,3 +336,8 @@ def _ldap_result_message(result: Mapping[str, Any] | None, fallback: str) -> str
     message = str(result.get("message") or "").strip()
     detail = ": ".join(part for part in (description, message) if part)
     return f"{fallback}: {detail}" if detail else fallback
+
+
+def _ldap_exception_message(exc: Exception, fallback: str) -> str:
+    message = str(exc).strip()
+    return f"{fallback}: {message}" if message else fallback
