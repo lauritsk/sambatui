@@ -107,7 +107,7 @@ class ConnectionSettings:
             compatibility=self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,
         )
 
-    def form_fields(self) -> list[FormField]:
+    def samba_form_fields(self) -> list[FormField]:
         return [
             (
                 "Server — AD domain controller hostname or IP used by samba-tool -H.",
@@ -163,6 +163,10 @@ class ConnectionSettings:
                 "--option=name=value; --debuglevel=1",
                 self.options,
             ),
+        ]
+
+    def ldap_form_fields(self) -> list[FormField]:
+        return [
             (
                 "LDAP base DN — used by read-only directory search.",
                 "ldap_base",
@@ -181,6 +185,10 @@ class ConnectionSettings:
                 "on | off",
                 self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,
             ),
+        ]
+
+    def convenience_form_fields(self) -> list[FormField]:
+        return [
             (
                 "Auto PTR — ask prompts after A adds; on auto-adds; off skips.",
                 "auto_ptr",
@@ -193,4 +201,11 @@ class ConnectionSettings:
                 "~/.config/sambatui/password",
                 self.password_file,
             ),
+        ]
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            *self.samba_form_fields(),
+            *self.ldap_form_fields(),
+            *self.convenience_form_fields(),
         ]
