@@ -1,5 +1,19 @@
-from sambatui.app import DnsRow, parse_records, parse_zones, validate_record
+from sambatui.app import (
+    DnsRow,
+    SambatuiApp,
+    parse_records,
+    parse_zones,
+    validate_record,
+)
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
+
+
+def test_key_hints_change_by_side_tab() -> None:
+    app = SambatuiApp()
+
+    assert app.keys_hint_for_tab("dns_tab").startswith("DNS:")
+    assert app.keys_hint_for_tab("ldap_tab").startswith("LDAP:")
+    assert app.keys_hint_for_tab("smart_tab").startswith("Smart:")
 
 
 def test_parse_zones_deduplicates_zone_names() -> None:
