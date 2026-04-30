@@ -100,7 +100,9 @@ class HelpScreen(ModalScreen[None]):
 Main tabs
   DNS       Load zones, select a zone, manage records
   LDAP      Search AD directory over LDAP (read-only)
+  Smart     Read-only DNS/LDAP hygiene findings
   L         Search LDAP from anywhere
+  S         Run smart views from anywhere
   z         Load DNS zones
 
 Navigation

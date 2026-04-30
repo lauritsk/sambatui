@@ -58,6 +58,61 @@ from .ldap_directory import (
 )
 from .models import DnsRow
 from .screens import ConfirmScreen, FormField, FormScreen, HelpScreen
+from .smart_views import (
+    SmartViewRow,
+    dns_a_without_ptr,
+    dns_duplicate_records,
+    dns_ptr_without_a,
+    ldap_delete_candidate_users,
+    ldap_inactive_users,
+    ldap_stale_computers,
+    ldap_users_without_groups,
+)
+
+DNS_COLUMNS = ("✓", "Name", "Type", "Value", "TTL", "Records", "Children")
+DIRECTORY_COLUMNS = ("✓", "Name", "Kind", "Summary", "", "", "DN")
+SMART_COLUMNS = (
+    "✓",
+    "Severity",
+    "Object",
+    "Finding",
+    "Evidence",
+    "Suggested action",
+    "Source",
+)
+
+SMART_VIEW_ALIASES = {
+    "dns duplicates": "dns_duplicates",
+    "duplicates": "dns_duplicates",
+    "dns a without ptr": "dns_a_without_ptr",
+    "a without ptr": "dns_a_without_ptr",
+    "dns forward without ptr": "dns_a_without_ptr",
+    "forward without ptr": "dns_a_without_ptr",
+    "dns ptr without a": "dns_ptr_without_a",
+    "ptr without a": "dns_ptr_without_a",
+    "dns ptr without forward": "dns_ptr_without_a",
+    "ptr without forward": "dns_ptr_without_a",
+    "ldap inactive users": "ldap_inactive_users",
+    "inactive users": "ldap_inactive_users",
+    "ldap delete candidates": "ldap_delete_candidates",
+    "delete candidates": "ldap_delete_candidates",
+    "ldap stale computers": "ldap_stale_computers",
+    "stale computers": "ldap_stale_computers",
+    "ldap users no groups": "ldap_users_without_groups",
+    "users no groups": "ldap_users_without_groups",
+    "users without groups": "ldap_users_without_groups",
+    "ldap users without groups": "ldap_users_without_groups",
+}
+
+SMART_VIEW_LABELS = {
+    "dns_duplicates": "DNS duplicates/conflicts",
+    "dns_a_without_ptr": "DNS A records without matching PTR",
+    "dns_ptr_without_a": "DNS PTR records without matching A",
+    "ldap_inactive_users": "LDAP inactive enabled users",
+    "ldap_delete_candidates": "LDAP user cleanup candidates",
+    "ldap_stale_computers": "LDAP stale computer accounts",
+    "ldap_users_without_groups": "LDAP users with no secondary groups",
+}
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -148,6 +203,7 @@ class SambatuiApp(App):
         ("z", "load_zones", "Zones"),
         ("c", "discover_ad", "Discover DC"),
         ("L", "ldap_search", "LDAP"),
+        ("S", "smart_view", "Smart views"),
         ("r", "refresh", "Refresh"),
         ("q", "query", "Query"),
         ("a", "add", "Add"),
@@ -221,12 +277,10 @@ class SambatuiApp(App):
             with Vertical(id="results", classes="panel"):
                 yield Label("Records", id="records_title", classes="section-title")
                 table = DataTable(id="records", cursor_type="row")
-                table.add_columns(
-                    "✓", "Name", "Type", "Value", "TTL", "Records", "Children"
-                )
+                table.add_columns(*DNS_COLUMNS)
                 yield table
         yield Static(
-            "? help  Ctrl+O connection  z zones  c discover  L ldap  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
+            "? help  Ctrl+O connection  z zones  c discover  L ldap  S smart  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select",
             id="keys",
         )
 
@@ -236,6 +290,8 @@ class SambatuiApp(App):
         self.visual_selecting = False
         self.record_rows: list[DnsRow] = []
         self.directory_rows: list[DirectoryRow] = []
+        self.smart_view_rows: list[SmartViewRow] = []
+        self.records_columns = DNS_COLUMNS
         self.view_mode = "dns"
         self.sort_field = "name"
         self.sort_reverse = False
@@ -610,8 +666,17 @@ class SambatuiApp(App):
         for zone in zones:
             table.add_row(zone)
 
+    def set_records_columns(self, columns: tuple[str, ...]) -> None:
+        if self.records_columns == columns:
+            return
+        table = self.query_one("#records", DataTable)
+        table.clear(columns=True)
+        table.add_columns(*columns)
+        self.records_columns = columns
+
     def populate_records(self, rows: list[DnsRow]) -> None:
         self.view_mode = "dns"
+        self.set_records_columns(DNS_COLUMNS)
         self.query_one("#records_title", Label).update("Records")
         self.record_rows = self.sorted_records(rows)
         self.refresh_record_view()
@@ -621,10 +686,19 @@ class SambatuiApp(App):
 
     def populate_directory(self, rows: list[DirectoryRow]) -> None:
         self.view_mode = "directory"
+        self.set_records_columns(DIRECTORY_COLUMNS)
         self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
         self.directory_rows = rows
         self.refresh_directory_view()
         self.set_status(f"Loaded {len(rows)} LDAP entries")
+
+    def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
+        self.view_mode = "smart"
+        self.set_records_columns(SMART_COLUMNS)
+        self.query_one("#records_title", Label).update(f"Smart View: {title}")
+        self.smart_view_rows = rows
+        self.refresh_smart_view()
+        self.set_status(f"Loaded {len(rows)} smart-view findings")
 
     def render_records(self, rows: list[DnsRow]) -> None:
         self.selected_record_rows.clear()
@@ -645,6 +719,23 @@ class SambatuiApp(App):
         table.clear()
         for row in rows:
             table.add_row("", row.name, row.kind, row.summary, "", "", row.dn)
+
+    def render_smart_view(self, rows: list[SmartViewRow]) -> None:
+        self.selected_record_rows.clear()
+        self.selection_anchor = None
+        self.visual_selecting = False
+        table = self.query_one("#records", DataTable)
+        table.clear()
+        for row in rows:
+            table.add_row(
+                "",
+                row.severity,
+                row.object,
+                row.finding,
+                row.evidence,
+                row.suggested_action,
+                row.source,
+            )
 
     def visible_records(self) -> list[DnsRow]:
         rows = self.record_rows
@@ -673,6 +764,22 @@ class SambatuiApp(App):
             ]
         return rows
 
+    def visible_smart_view(self) -> list[SmartViewRow]:
+        rows = self.smart_view_rows
+        if self.search_text:
+            needle = self.search_text.casefold()
+            rows = [
+                row
+                for row in rows
+                if needle in row.severity.casefold()
+                or needle in row.object.casefold()
+                or needle in row.finding.casefold()
+                or needle in row.evidence.casefold()
+                or needle in row.suggested_action.casefold()
+                or needle in row.source.casefold()
+            ]
+        return rows
+
     def refresh_record_view(self) -> None:
         rows = self.visible_records()
         self.render_records(rows)
@@ -689,6 +796,14 @@ class SambatuiApp(App):
             f"Showing {len(rows)} of {len(self.directory_rows)} LDAP entries{extra}"
         )
 
+    def refresh_smart_view(self) -> None:
+        rows = self.visible_smart_view()
+        self.render_smart_view(rows)
+        extra = f" matching /{self.search_text}/" if self.search_text else ""
+        self.set_status(
+            f"Showing {len(rows)} of {len(self.smart_view_rows)} smart-view findings{extra}"
+        )
+
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         key_map = {
             "name": lambda row: row.name.casefold(),
@@ -698,6 +813,11 @@ class SambatuiApp(App):
         return sorted(rows, key=key_map[self.sort_field], reverse=self.sort_reverse)
 
     def sort_records(self, field: str) -> None:
+        if self.view_mode != "dns":
+            self.set_status(
+                "Current view is read-only; sorting applies to DNS records."
+            )
+            return
         if self.sort_field == field:
             self.sort_reverse = not self.sort_reverse
         else:
@@ -876,6 +996,152 @@ class SambatuiApp(App):
             self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
         finally:
             self.set_busy(False)
+
+    def normalize_smart_view_name(self, value: str) -> str | None:
+        key = " ".join(value.strip().casefold().replace("_", " ").split())
+        return SMART_VIEW_ALIASES.get(key)
+
+    async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
+        if not self.zones:
+            await self.load_zones()
+        if not self.zones:
+            self.notify("Load zones before DNS smart views.", severity="error")
+            return None
+
+        records_by_zone: dict[str, list[DnsRow]] = {}
+        failed = 0
+        self.set_busy(True)
+        try:
+            for zone in self.zones:
+                code, output = await self.run_samba_zone("query", zone, ["@", "ALL"])
+                if code != 0:
+                    failed += 1
+                    continue
+                records_by_zone[zone] = parse_records(output)
+        finally:
+            self.set_busy(False)
+        if failed:
+            self.notify(f"Skipped {failed} zone(s) with query errors", severity="error")
+        return records_by_zone
+
+    @work
+    async def action_smart_view(self) -> None:
+        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+        values = await self.form(
+            "Smart views",
+            "Read-only hygiene findings. No deletes/changes are performed.",
+            [
+                (
+                    "Smart view",
+                    "smart_view",
+                    "dns duplicates | dns a without ptr | dns ptr without a | ldap inactive users | ldap delete candidates | ldap stale computers | ldap users no groups",
+                    "dns duplicates",
+                ),
+                ("Stale/inactive days", "days", "90", "90"),
+                ("Disabled cleanup days", "disabled_days", "180", "180"),
+                ("Never-logged-in days", "never_logged_days", "30", "30"),
+                ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
+                (
+                    "LDAP encryption",
+                    "ldap_encryption",
+                    "off | ldaps | starttls",
+                    self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+                ),
+                (
+                    "LDAP compatibility",
+                    "ldap_compatibility",
+                    "on | off",
+                    self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+                ),
+                ("Max rows", "max_rows", "500", "500"),
+            ],
+            "Run",
+        )
+        if not values:
+            return
+
+        view = self.normalize_smart_view_name(values["smart_view"])
+        if view is None:
+            valid = ", ".join(SMART_VIEW_LABELS)
+            self.notify(f"Unknown smart view. Use one of: {valid}", severity="error")
+            return
+        try:
+            days = max(1, int(values["days"] or "90"))
+        except ValueError:
+            days = 90
+        try:
+            disabled_days = max(1, int(values["disabled_days"] or "180"))
+        except ValueError:
+            disabled_days = 180
+        try:
+            never_logged_days = max(1, int(values["never_logged_days"] or "30"))
+        except ValueError:
+            never_logged_days = 30
+        try:
+            max_rows = max(1, min(int(values["max_rows"] or "500"), 5000))
+        except ValueError:
+            max_rows = 500
+
+        rows: list[SmartViewRow]
+        if view.startswith("dns_"):
+            records_by_zone = await self.dns_records_for_smart_view()
+            if records_by_zone is None:
+                return
+            match view:
+                case "dns_duplicates":
+                    rows = dns_duplicate_records(records_by_zone)
+                case "dns_a_without_ptr":
+                    rows = dns_a_without_ptr(records_by_zone)
+                case "dns_ptr_without_a":
+                    rows = dns_ptr_without_a(records_by_zone)
+                case _:
+                    rows = []
+            self.search_text = ""
+            self.populate_smart_view(SMART_VIEW_LABELS[view], rows[:max_rows])
+            self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
+            return
+
+        self.set_val("ldap_base", values["base_dn"])
+        self.set_val("ldap_encryption", values["ldap_encryption"])
+        self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        client = self.ldap_client(values["base_dn"])
+        error = client.validation_error()
+        if error:
+            self.notify(error, severity="error")
+            self.set_status(error)
+            return
+
+        kind = "computers" if view == "ldap_stale_computers" else "users"
+        self.set_busy(True)
+        try:
+            try:
+                directory_rows = await asyncio.to_thread(client.search, kind, "")
+            except ValueError as exc:
+                message = str(exc)
+                self.notify(message, severity="error")
+                self.set_status(message)
+                return
+        finally:
+            self.set_busy(False)
+
+        match view:
+            case "ldap_inactive_users":
+                rows = ldap_inactive_users(directory_rows, days=days)
+            case "ldap_delete_candidates":
+                rows = ldap_delete_candidate_users(
+                    directory_rows,
+                    disabled_days=disabled_days,
+                    never_logged_days=never_logged_days,
+                )
+            case "ldap_stale_computers":
+                rows = ldap_stale_computers(directory_rows, days=days)
+            case "ldap_users_without_groups":
+                rows = ldap_users_without_groups(directory_rows)
+            case _:
+                rows = []
+        self.search_text = ""
+        self.populate_smart_view(SMART_VIEW_LABELS[view], rows[:max_rows])
+        self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
     async def action_refresh(self) -> None:
         await self.refresh_current_zone()
@@ -1073,6 +1339,8 @@ class SambatuiApp(App):
         self.search_text = values["search"]
         if self.view_mode == "directory":
             self.refresh_directory_view()
+        elif self.view_mode == "smart":
+            self.refresh_smart_view()
         else:
             self.refresh_record_view()
 
@@ -1180,7 +1448,7 @@ class SambatuiApp(App):
         if table.id != "records" or not table.row_count:
             return
         if self.view_mode != "dns":
-            self.set_status("LDAP directory rows are read-only.")
+            self.set_status("Current view is read-only.")
             return
         row_index = table.cursor_row
         self.selection_anchor = (
@@ -1194,6 +1462,9 @@ class SambatuiApp(App):
         table = self.query_one("#records", DataTable)
         table.focus()
         if not table.row_count:
+            return
+        if self.view_mode != "dns":
+            self.set_status("Current view is read-only.")
             return
         if self.visual_selecting:
             self.visual_selecting = False
@@ -1212,6 +1483,9 @@ class SambatuiApp(App):
         table.focus()
         if not table.row_count:
             return
+        if self.view_mode != "dns":
+            self.set_status("Current view is read-only.")
+            return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
         self.select_record_range(self.selection_anchor, table.cursor_row)
@@ -1220,6 +1494,9 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
+        if self.view_mode != "dns":
+            self.set_status("Current view is read-only.")
+            return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
         self.move_cursor_by(-1)
@@ -1229,6 +1506,9 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
+        if self.view_mode != "dns":
+            self.set_status("Current view is read-only.")
+            return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
         self.move_cursor_by(1)
@@ -1248,7 +1528,12 @@ class SambatuiApp(App):
             return
         if self.search_text:
             self.search_text = ""
-            self.refresh_record_view()
+            if self.view_mode == "directory":
+                self.refresh_directory_view()
+            elif self.view_mode == "smart":
+                self.refresh_smart_view()
+            else:
+                self.refresh_record_view()
             self.set_status("Search cleared")
             return
         self.action_focus_records()
