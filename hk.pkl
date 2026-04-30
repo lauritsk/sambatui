@@ -1,0 +1,44 @@
+amends "package://github.com/jdx/hk/releases/download/v1.44.2/hk@1.44.2#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.44.2/hk@1.44.2#/Builtins.pkl"
+
+local linters = new Mapping<String, Step> {
+  ["ruff"] = Builtins.ruff
+  ["ruff-format"] = Builtins.ruff_format
+  ["ty"] = Builtins.ty
+  ["mise"] = Builtins.mise
+  ["pkl"] = Builtins.pkl
+  ["pkl-format"] = Builtins.pkl_format
+  ["tombi"] = Builtins.tombi
+  ["tombi-format"] = Builtins.tombi_format
+  ["rumdl"] = Builtins.rumdl
+  ["shellcheck"] = Builtins.shellcheck
+  ["shfmt"] = Builtins.shfmt
+  ["actionlint"] = Builtins.actionlint
+  ["goreleaser"] = new Step {
+    glob = ".goreleaser.yaml"
+    check = "goreleaser check"
+  }
+  ["audit"] = new Step {
+    check = "uv audit --preview-features audit --locked"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = linters
+  }
+  ["fix"] {
+    fix = true
+    steps = linters
+  }
+  ["check"] {
+    steps = linters
+  }
+  ["commit-msg"] {
+    steps {
+      ["cocogitto-commit-msg"] = Builtins.cocogitto_commit_msg
+    }
+  }
+}

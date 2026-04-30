@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+builds:
+  - id: wheel
+    builder: uv
+    buildmode: wheel
+  - id: sdist
+    builder: uv
+    buildmode: sdist
+
+dockers_v2:
+  - id: ghcr
+    ids:
+      - wheel
+    images:
+      - ghcr.io/lauritsk/sambatui
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.description: Textual TUI for managing Samba services
+      org.opencontainers.image.licenses: MIT
+      org.opencontainers.image.name: "{{ .ProjectName }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+
+docker_digest:
+  name_template: digests.txt
+
+sboms:
+  - artifacts: any
+    documents:
+      - "{{ .ProjectName }}_{{ .Version }}_sbom.spdx.json"
+    args:
+      - "."
+      - "--output"
+      - "spdx-json=$document"
+      - "--enrich"
+      - "all"
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

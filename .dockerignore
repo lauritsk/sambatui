@@ -1,0 +1,12 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.rumdl_cache
+.venv
+.coverage
+build
+dist
+htmlcov
+*.egg-info
+.env
