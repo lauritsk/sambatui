@@ -132,8 +132,27 @@ Optional variables:
 | `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
 | `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in legacy LDAP mode (`on`/`off`) for old Samba/EL6-era servers | `off` |
+| `SAMBATUI_AUTO_PTR` | Matching PTR behavior after adding A records: `ask`, `on`, or `off` | `ask` |
+| `SAMBATUI_SMART_DAYS` | Default stale/inactive smart-view threshold | `90` |
+| `SAMBATUI_SMART_DISABLED_DAYS` | Default disabled-user cleanup threshold | `180` |
+| `SAMBATUI_SMART_NEVER_LOGGED_DAYS` | Default never-logged-in user threshold | `30` |
+| `SAMBATUI_SMART_MAX_ROWS` | Default smart-view row limit | `500` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
+| `SAMBATUI_USER_CONFIG` | User preference file path | `~/.config/sambatui/config.toml` |
+
+### Preference persistence
+
+sambatui stores non-secret preferences in `~/.config/sambatui/config.toml` so
+server, zone, auth mode, LDAP base/encryption, auto-PTR behavior, the last
+selected zone, and smart-view thresholds survive restarts. Secrets are never
+written there: passwords, password-file contents, and usernames remain runtime
+inputs only.
+
+Precedence is: environment variables for the current process, then values saved
+in `config.toml`, then built-in defaults. Values changed in the UI update the
+preference file after applying connection settings, selecting a zone, discovery,
+LDAP search, or running smart views.
 
 ## Use
 

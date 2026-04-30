@@ -9,7 +9,12 @@ from ldap3 import NTLM, SIMPLE
 from ldap3.core.exceptions import LDAPPackageUnavailableError
 
 from sambatui.client import SambaToolClient, SambaToolConfig
-from sambatui.config import password_file_warning, read_password_file
+from sambatui.config import (
+    load_user_config,
+    password_file_warning,
+    read_password_file,
+    save_user_config,
+)
 from sambatui.dns import (
     parse_records,
     parse_zones,
@@ -128,6 +133,43 @@ def test_config_password_file_missing_empty_and_os_errors(tmp_path: Path) -> Non
     directory.mkdir()
     directory.chmod(0o600)
     assert read_password_file(directory) == ""
+
+
+def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    saved = save_user_config(
+        {
+            "server": "dc01.example.com",
+            "zone": "example.com",
+            "last_zone": "example.com",
+            "auth": "kerberos",
+            "ldap_base": "DC=example,DC=com",
+            "ldap_encryption": "starttls",
+            "auto_ptr": "ask",
+            "smart_days": "120",
+            "smart_max_rows": "250",
+            "password": "secret",
+            "user": "admin",
+        },
+        path,
+    )
+
+    assert "password" not in saved
+    assert "user" not in saved
+    assert load_user_config(path) == saved
+    assert "secret" not in path.read_text(encoding="utf-8")
+
+    save_user_config({"server": "nested"}, tmp_path / "nested" / "config.toml")
+    assert load_user_config(tmp_path / "nested" / "config.toml") == {"server": "nested"}
+
+    path.write_text(
+        'auto_ptr = true\nsmart_days = 120\nserver = ["bad"]\n',
+        encoding="utf-8",
+    )
+    assert load_user_config(path) == {"auto_ptr": "on", "smart_days": "120"}
+    path.write_text("invalid =", encoding="utf-8")
+    assert load_user_config(path) == {}
+    assert load_user_config(tmp_path / "missing.toml") == {}
 
 
 def test_dns_parsing_and_validation_edges() -> None:
@@ -332,6 +374,7 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
         "ldap_base": "",
         "ldap_encryption": "",
         "ldap_compatibility": "",
+        "auto_ptr": "",
         "password_file": str(tmp_path / "pw"),
     }
     settings = ConnectionSettings.from_lookup(lambda key: values[key])

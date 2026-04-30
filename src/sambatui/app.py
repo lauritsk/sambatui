@@ -27,6 +27,7 @@ from textual.widgets import (
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
     DEFAULT_AUTH,
+    DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
@@ -37,10 +38,15 @@ from .config import (
     DEFAULT_PASSWORD,
     DEFAULT_PASSWORD_FILE,
     DEFAULT_SERVER,
+    DEFAULT_SMART_DAYS,
+    DEFAULT_SMART_DISABLED_DAYS,
+    DEFAULT_SMART_MAX_ROWS,
+    DEFAULT_SMART_NEVER_LOGGED_DAYS,
     DEFAULT_USER,
     DEFAULT_ZONE,
     password_file_warning,
     read_password_file,
+    save_user_config,
 )
 from .discovery import discover_ad_services, preferred_domain_controller
 from .dns import (
@@ -198,6 +204,7 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
 
 __all__ = [
     "DEFAULT_AUTH",
+    "DEFAULT_AUTO_PTR",
     "DEFAULT_CONFIGFILE",
     "DEFAULT_KERBEROS",
     "DEFAULT_KRB5_CCACHE",
@@ -208,6 +215,10 @@ __all__ = [
     "DEFAULT_PASSWORD",
     "DEFAULT_PASSWORD_FILE",
     "DEFAULT_SERVER",
+    "DEFAULT_SMART_DAYS",
+    "DEFAULT_SMART_DISABLED_DAYS",
+    "DEFAULT_SMART_MAX_ROWS",
+    "DEFAULT_SMART_NEVER_LOGGED_DAYS",
     "DEFAULT_USER",
     "DEFAULT_ZONE",
     "NAME_RE",
@@ -315,6 +326,11 @@ class SambatuiApp(App):
             yield Input(DEFAULT_LDAP_BASE, id="ldap_base")
             yield Input(DEFAULT_LDAP_ENCRYPTION, id="ldap_encryption")
             yield Input(DEFAULT_LDAP_COMPATIBILITY, id="ldap_compatibility")
+            yield Input(DEFAULT_AUTO_PTR, id="auto_ptr")
+            yield Input(DEFAULT_SMART_DAYS, id="smart_days")
+            yield Input(DEFAULT_SMART_DISABLED_DAYS, id="smart_disabled_days")
+            yield Input(DEFAULT_SMART_NEVER_LOGGED_DAYS, id="smart_never_logged_days")
+            yield Input(DEFAULT_SMART_MAX_ROWS, id="smart_max_rows")
             yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
 
         with Horizontal(id="main"):
@@ -412,6 +428,32 @@ class SambatuiApp(App):
 
     def set_val(self, widget_id: str, value: str) -> None:
         self.query_one(f"#{widget_id}", Input).value = value
+
+    def preference_values(self) -> dict[str, str]:
+        zone = self.val("zone")
+        return {
+            "server": self.val("server"),
+            "zone": zone,
+            "auth": self.val("auth") or DEFAULT_AUTH,
+            "ldap_base": self.val("ldap_base"),
+            "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            "ldap_compatibility": self.val("ldap_compatibility")
+            or DEFAULT_LDAP_COMPATIBILITY,
+            "auto_ptr": self.val("auto_ptr") or DEFAULT_AUTO_PTR,
+            "last_zone": zone,
+            "smart_days": self.val("smart_days") or DEFAULT_SMART_DAYS,
+            "smart_disabled_days": self.val("smart_disabled_days")
+            or DEFAULT_SMART_DISABLED_DAYS,
+            "smart_never_logged_days": self.val("smart_never_logged_days")
+            or DEFAULT_SMART_NEVER_LOGGED_DAYS,
+            "smart_max_rows": self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
+        }
+
+    def save_preferences(self) -> None:
+        try:
+            save_user_config(self.preference_values())
+        except OSError as exc:
+            self.report_error(f"Cannot save preferences: {exc}")
 
     def connection_settings(self) -> ConnectionSettings:
         return ConnectionSettings.from_lookup(self.val)
@@ -544,6 +586,7 @@ class SambatuiApp(App):
             if password:
                 self.set_val("password", password)
         self.refresh_connection_summary()
+        self.save_preferences()
         self.set_status("Connection settings updated")
         if not self.connection_needs_setup():
             await self.load_zones()
@@ -958,6 +1001,7 @@ class SambatuiApp(App):
             if not self.val("ldap_base"):
                 self.set_val("ldap_base", domain_to_base_dn(controller.domain))
             self.refresh_connection_summary()
+            self.save_preferences()
             message = (
                 f"Discovered {len(services)} AD SRV record(s); "
                 f"selected {controller.target}:{controller.port}"
@@ -1009,6 +1053,7 @@ class SambatuiApp(App):
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
         max_rows = bounded_int(values["max_rows"], 200, maximum=1000)
+        self.save_preferences()
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
@@ -1039,11 +1084,33 @@ class SambatuiApp(App):
         base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
         fields: list[FormField] = []
         if view.needs_days:
-            fields.append(("Stale/inactive days", "days", "90", "90"))
+            fields.append(
+                (
+                    "Stale/inactive days",
+                    "days",
+                    "90",
+                    self.val("smart_days") or DEFAULT_SMART_DAYS,
+                )
+            )
         if view.needs_disabled_days:
-            fields.append(("Disabled cleanup days", "disabled_days", "180", "180"))
+            fields.append(
+                (
+                    "Disabled cleanup days",
+                    "disabled_days",
+                    "180",
+                    self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS,
+                )
+            )
         if view.needs_never_logged_days:
-            fields.append(("Never-logged-in days", "never_logged_days", "30", "30"))
+            fields.append(
+                (
+                    "Never-logged-in days",
+                    "never_logged_days",
+                    "30",
+                    self.val("smart_never_logged_days")
+                    or DEFAULT_SMART_NEVER_LOGGED_DAYS,
+                )
+            )
         if view.needs_ldap:
             fields.extend(
                 [
@@ -1062,7 +1129,14 @@ class SambatuiApp(App):
                     ),
                 ]
             )
-        fields.append(("Max rows", "max_rows", "500", "500"))
+        fields.append(
+            (
+                "Max rows",
+                "max_rows",
+                "500",
+                self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
+            )
+        )
         return fields
 
     async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
@@ -1154,6 +1228,14 @@ class SambatuiApp(App):
         disabled_days = bounded_int(values.get("disabled_days"), 180)
         never_logged_days = bounded_int(values.get("never_logged_days"), 30)
         max_rows = bounded_int(values.get("max_rows"), 500, maximum=5000)
+        if view.needs_days:
+            self.set_val("smart_days", str(days))
+        if view.needs_disabled_days:
+            self.set_val("smart_disabled_days", str(disabled_days))
+        if view.needs_never_logged_days:
+            self.set_val("smart_never_logged_days", str(never_logged_days))
+        self.set_val("smart_max_rows", str(max_rows))
+        self.save_preferences()
 
         rows: list[SmartViewRow]
         self.current_smart_view_id = view.view_id
@@ -1171,6 +1253,7 @@ class SambatuiApp(App):
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        self.save_preferences()
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
@@ -1314,10 +1397,11 @@ class SambatuiApp(App):
         if await self.do_command("add", args) == 0:
             if rtype == "A":
                 reverse = self.reverse_record_for_ipv4(value)
-                if reverse:
+                auto_ptr = (self.val("auto_ptr") or DEFAULT_AUTO_PTR).casefold()
+                if reverse and auto_ptr != "off":
                     ptr_zone, ptr_name = reverse
                     ptr_target = self.ptr_target_for_name(name)
-                    if await self.confirm(
+                    if auto_ptr == "on" or await self.confirm(
                         "Add matching PTR record?\n\n"
                         f"Zone: {ptr_zone}\n{ptr_name} PTR {ptr_target}",
                         default_confirm=True,
@@ -1684,6 +1768,7 @@ class SambatuiApp(App):
             if row:
                 self.query_one("#zone", Input).value = str(row[0])
                 self.refresh_connection_summary()
+                self.save_preferences()
                 self.set_status(f"Selected {row[0]}; refreshing records")
                 await self.refresh_current_zone()
 
@@ -1825,6 +1910,7 @@ class SambatuiApp(App):
             return
         self.query_one("#zone", Input).value = zone
         self.refresh_connection_summary()
+        self.save_preferences()
         self.set_status(f"Selected {zone}; refreshing records")
         await self.refresh_current_zone()
 

@@ -59,6 +59,31 @@ def test_empty_states_explain_next_actions() -> None:
     asyncio.run(run_app())
 
 
+def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#zone", Input).value = "example.com"
+            app.query_one("#user", Input).value = "admin"
+            app.query_one("#password", Input).value = "secret"
+            app.query_one("#auth", Input).value = "kerberos"
+            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            app.query_one("#auto_ptr", Input).value = "off"
+            app.query_one("#smart_days", Input).value = "120"
+
+            prefs = app.preference_values()
+
+            assert prefs["server"] == "dc01.example.com"
+            assert prefs["last_zone"] == "example.com"
+            assert prefs["auto_ptr"] == "off"
+            assert prefs["smart_days"] == "120"
+            assert "password" not in prefs
+            assert "user" not in prefs
+
+    asyncio.run(run_app())
+
+
 def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
     async def run_app() -> None:
         app = SambatuiApp()

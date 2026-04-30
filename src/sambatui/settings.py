@@ -8,6 +8,7 @@ from typing import TypeAlias
 from .client import SambaToolConfig, parse_samba_options
 from .config import (
     DEFAULT_AUTH,
+    DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
@@ -39,6 +40,7 @@ class ConnectionSettings:
     ldap_base: str = ""
     ldap_encryption: str = DEFAULT_LDAP_ENCRYPTION
     ldap_compatibility: str = DEFAULT_LDAP_COMPATIBILITY
+    auto_ptr: str = DEFAULT_AUTO_PTR
     password_file: str = str(DEFAULT_PASSWORD_FILE)
 
     @classmethod
@@ -57,6 +59,7 @@ class ConnectionSettings:
             ldap_encryption=lookup("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ldap_compatibility=lookup("ldap_compatibility")
             or DEFAULT_LDAP_COMPATIBILITY,
+            auto_ptr=lookup("auto_ptr") or DEFAULT_AUTO_PTR,
             password_file=lookup("password_file") or str(DEFAULT_PASSWORD_FILE),
         )
 
@@ -177,6 +180,12 @@ class ConnectionSettings:
                 "ldap_compatibility",
                 "on | off",
                 self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,
+            ),
+            (
+                "Auto PTR — ask prompts after A adds; on auto-adds; off skips.",
+                "auto_ptr",
+                "ask | on | off",
+                self.auto_ptr or DEFAULT_AUTO_PTR,
             ),
             (
                 "Password file — used at startup and by password load/save commands.",
