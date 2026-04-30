@@ -4,7 +4,7 @@ Textual terminal UI for managing Samba services.
 
 Current functionality focuses on DNS records on Samba Active Directory domain
 controllers. It wraps `samba-tool dns` with a table UI for zones, records,
-search, sorting, bulk delete, and optional A-record PTR creation. It also offers
+search, sorting, bulk delete, and prompted A-record PTR creation. It also offers
 read-only LDAP directory search for AD users, groups, computers, and OUs.
 
 ## Requirements
@@ -129,7 +129,6 @@ Optional variables:
 | `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
 | `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
-| `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
 | `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
 | `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in legacy LDAP mode (`on`/`off`) for old Samba/EL6-era servers | `off` |
