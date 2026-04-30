@@ -1,251 +1,62 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import os
-import re
 import shutil
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeAlias, cast
+from typing import Any
 
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Header, Input, Label, Static
 
-DEFAULT_SERVER = os.getenv("SAMBATUI_SERVER", "")
-DEFAULT_ZONE = os.getenv("SAMBATUI_ZONE", "")
-DEFAULT_USER = os.getenv("SAMBATUI_USER", "")
-DEFAULT_KERBEROS = os.getenv("SAMBATUI_KERBEROS", "off")
-DEFAULT_AUTO_PTR = os.getenv("SAMBATUI_AUTO_PTR", "off")
-DEFAULT_PASSWORD_FILE = Path(
-    os.getenv("SAMBATUI_PASSWORD_FILE", "~/.config/sambatui/password")
-).expanduser()
+from .config import (
+    DEFAULT_AUTO_PTR,
+    DEFAULT_KERBEROS,
+    DEFAULT_PASSWORD,
+    DEFAULT_PASSWORD_FILE,
+    DEFAULT_SERVER,
+    DEFAULT_USER,
+    DEFAULT_ZONE,
+    read_password_file,
+)
+from .dns import (
+    NAME_RE,
+    REC_RE,
+    parse_records,
+    parse_zones,
+    ptr_target_for_name as dns_ptr_target_for_name,
+    reverse_record_for_ipv4 as dns_reverse_record_for_ipv4,
+    valid_dns_name,
+    validate_record,
+)
+from .models import DnsRow
+from .screens import ConfirmScreen, FormField, FormScreen
 
-
-@dataclass(frozen=True)
-class DnsRow:
-    name: str
-    records: str
-    children: str
-    rtype: str
-    value: str
-    ttl: str
-    raw: str
-
-
-NAME_RE = re.compile(r"^\s*Name=(.*?), Records=(\d+), Children=(\d+)")
-REC_RE = re.compile(r"^\s+([A-Z0-9_]+):\s*(.*?)(?:\s+\(flags=.*?ttl=(\d+)\))?\s*$")
-
-
-def read_password_file(path: Path = DEFAULT_PASSWORD_FILE) -> str:
-    try:
-        return path.read_text(encoding="utf-8").splitlines()[0].strip()
-    except FileNotFoundError, IndexError, OSError:
-        return ""
-
-
-DEFAULT_PASSWORD = os.getenv("SAMBATUI_PASSWORD", read_password_file())
-
-
-def parse_records(output: str) -> list[DnsRow]:
-    rows: list[DnsRow] = []
-    current: tuple[str, str, str] | None = None
-
-    for line in output.splitlines():
-        name_match = NAME_RE.match(line)
-        if name_match:
-            display_name = name_match.group(1) or "@"
-            current = display_name, name_match.group(2), name_match.group(3)
-            if current[1] == "0":
-                rows.append(
-                    DnsRow(
-                        current[0], current[1], current[2], "-", "", "", line.strip()
-                    )
-                )
-            continue
-
-        rec_match = REC_RE.match(line)
-        if rec_match and current:
-            value = rec_match.group(2).strip()
-            rows.append(
-                DnsRow(
-                    name=current[0],
-                    records=current[1],
-                    children=current[2],
-                    rtype=rec_match.group(1),
-                    value=value,
-                    ttl=rec_match.group(3) or "",
-                    raw=line.strip(),
-                )
-            )
-    return rows
-
-
-def parse_zones(output: str) -> list[str]:
-    zones: list[str] = []
-    seen: set[str] = set()
-    for line in output.splitlines():
-        if "ZoneName" not in line and "pszZoneName" not in line:
-            continue
-        _, sep, value = line.partition(":")
-        if not sep:
-            continue
-        zone = value.strip()
-        if zone and zone not in seen:
-            zones.append(zone)
-            seen.add(zone)
-    return zones
-
-
-def valid_dns_name(value: str, *, allow_at: bool = False) -> bool:
-    if allow_at and value == "@":
-        return True
-    value = value.rstrip(".")
-    if not value or len(value) > 253:
-        return False
-    labels = value.split(".")
-    label_re = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
-    return all(label_re.fullmatch(label) for label in labels)
-
-
-def validate_record(
-    name: str, rtype: str, value: str, *, require_value: bool = True
-) -> str | None:
-    rtype = rtype.upper()
-    if not valid_dns_name(name, allow_at=True):
-        return "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
-    if not re.fullmatch(r"[A-Z0-9]+", rtype):
-        return "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV."
-    if require_value and not value:
-        return "Value is required."
-    if not value:
-        return None
-
-    try:
-        match rtype:
-            case "A":
-                ipaddress.IPv4Address(value)
-            case "AAAA":
-                ipaddress.IPv6Address(value)
-            case "CNAME" | "PTR" | "NS":
-                if not valid_dns_name(value):
-                    return f"{rtype} value must be a DNS name, e.g. host.example.com."
-                if rtype == "CNAME":
-                    try:
-                        ipaddress.ip_address(value.rstrip("."))
-                        return "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
-                    except ValueError:
-                        pass
-            case "SRV":
-                parts = value.split()
-                if (
-                    len(parts) != 4
-                    or not all(part.isdigit() for part in parts[:3])
-                    or not valid_dns_name(parts[3])
-                ):
-                    return "SRV value must be: priority weight port target.example.com."
-            case "MX":
-                parts = value.split()
-                if len(parts) == 2 and parts[0].isdigit() and valid_dns_name(parts[1]):
-                    return None
-                if len(parts) == 2 and valid_dns_name(parts[0]) and parts[1].isdigit():
-                    return None
-                return "MX value must be: priority mail.example.com. (or mail.example.com. priority)"
-    except ValueError as exc:
-        return str(exc)
-    return None
-
-
-class ConfirmScreen(ModalScreen[bool]):
-    CSS = """
-    ConfirmScreen { align: center middle; }
-    #confirm_dialog {
-        width: 76;
-        height: auto;
-        border: round $error;
-        background: $surface;
-        padding: 1 2;
-    }
-    #confirm_message { margin-bottom: 1; }
-    #confirm_buttons { height: auto; align-horizontal: right; }
-    #confirm_buttons Button { width: 16; margin-left: 1; }
-    """
-
-    def __init__(self, message: str) -> None:
-        super().__init__()
-        self.message = message
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_dialog"):
-            yield Static(self.message, id="confirm_message")
-            with Horizontal(id="confirm_buttons"):
-                yield Button("Cancel", id="cancel")
-                yield Button("Confirm", id="confirm", variant="error")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "confirm")
-
-
-FormField: TypeAlias = tuple[str, str, str, str]
-
-
-class FormScreen(ModalScreen[dict[str, str] | None]):
-    CSS = """
-    FormScreen { align: center middle; }
-    #form_dialog {
-        width: 78;
-        height: auto;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #form_title { text-style: bold; color: $accent; margin-bottom: 1; }
-    #form_hint { color: $text-muted; margin-bottom: 1; }
-    .form_row { height: auto; margin-bottom: 1; }
-    .form_row Input { width: 1fr; margin-right: 1; }
-    #form_buttons { height: auto; align-horizontal: right; }
-    #form_buttons Button { width: 16; margin-left: 1; }
-    """
-
-    def __init__(
-        self,
-        title: str,
-        hint: str,
-        fields: list[FormField],
-        submit_label: str = "Continue",
-    ) -> None:
-        super().__init__()
-        self.form_title = title
-        self.hint = hint
-        self.fields = fields
-        self.submit_label = submit_label
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="form_dialog"):
-            yield Static(self.form_title, id="form_title")
-            if self.hint:
-                yield Static(self.hint, id="form_hint")
-            for label, field_id, placeholder, value in self.fields:
-                yield Static(label, classes="hint")
-                with Horizontal(classes="form_row"):
-                    yield Input(value=value, placeholder=placeholder, id=field_id)
-            with Horizontal(id="form_buttons"):
-                yield Button("Cancel", id="cancel")
-                yield Button(self.submit_label, id="submit", variant="primary")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel":
-            self.dismiss(None)
-            return
-        values = {}
-        for _, field_id, _, _ in self.fields:
-            values[field_id] = self.query_one(f"#{field_id}", Input).value.strip()
-        self.dismiss(values)
+__all__ = [
+    "DEFAULT_AUTO_PTR",
+    "DEFAULT_KERBEROS",
+    "DEFAULT_PASSWORD",
+    "DEFAULT_PASSWORD_FILE",
+    "DEFAULT_SERVER",
+    "DEFAULT_USER",
+    "DEFAULT_ZONE",
+    "NAME_RE",
+    "REC_RE",
+    "ConfirmScreen",
+    "DnsRow",
+    "FormField",
+    "FormScreen",
+    "SambatuiApp",
+    "main",
+    "parse_records",
+    "parse_zones",
+    "read_password_file",
+    "valid_dns_name",
+    "validate_record",
+]
 
 
 class SambatuiApp(App):
@@ -519,28 +330,10 @@ class SambatuiApp(App):
         return self.val("auto_ptr").casefold() in {"1", "yes", "y", "true", "on"}
 
     def ptr_target_for_name(self, name: str) -> str:
-        if name == "@":
-            return self.val("zone")
-        if name.endswith("."):
-            return name.rstrip(".")
-        if "." in name:
-            return name.rstrip(".")
-        return f"{name}.{self.val('zone')}"
+        return dns_ptr_target_for_name(name, self.val("zone"))
 
     def reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
-        try:
-            ip = ipaddress.IPv4Address(ip_value)
-        except ValueError:
-            return None
-        parts = str(ip).split(".")
-        fqdn = ".".join(reversed(parts)) + ".in-addr.arpa"
-        reverse_zones = [zone for zone in self.zones if zone.endswith(".in-addr.arpa")]
-        matching_zones = [zone for zone in reverse_zones if fqdn.endswith(zone)]
-        if matching_zones:
-            best_zone = cast("str", max(matching_zones, key=len))
-            ptr_name = fqdn[: -(len(best_zone) + 1)]
-            return best_zone, ptr_name
-        return ".".join(reversed(parts[:3])) + ".in-addr.arpa", parts[3]
+        return dns_reverse_record_for_ipv4(ip_value, self.zones)
 
     async def add_auto_ptr(self, name: str, ip_value: str) -> int:
         reverse = self.reverse_record_for_ipv4(ip_value)

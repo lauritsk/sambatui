@@ -1,4 +1,5 @@
 from sambatui.app import DnsRow, parse_records, parse_zones, validate_record
+from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4
 
 
 def test_parse_zones_deduplicates_zone_names() -> None:
@@ -42,3 +43,29 @@ def test_validate_record_rejects_bad_cname_ip() -> None:
     assert validate_record("alias", "CNAME", "192.0.2.10") == (
         "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
     )
+
+
+def test_ptr_target_for_name_uses_zone_for_relative_names() -> None:
+    assert ptr_target_for_name("www", "example.com") == "www.example.com"
+    assert ptr_target_for_name("@", "example.com") == "example.com"
+    assert ptr_target_for_name("host.example.net.", "example.com") == "host.example.net"
+
+
+def test_reverse_record_for_ipv4_prefers_longest_matching_zone() -> None:
+    zones = ["2.0.192.in-addr.arpa", "0.192.in-addr.arpa", "example.com"]
+
+    assert reverse_record_for_ipv4("192.0.2.10", zones) == (
+        "2.0.192.in-addr.arpa",
+        "10",
+    )
+
+
+def test_reverse_record_for_ipv4_falls_back_to_24_zone() -> None:
+    assert reverse_record_for_ipv4("192.0.2.10", []) == (
+        "2.0.192.in-addr.arpa",
+        "10",
+    )
+
+
+def test_reverse_record_for_ipv4_rejects_non_ipv4_values() -> None:
+    assert reverse_record_for_ipv4("not-an-ip", []) is None
