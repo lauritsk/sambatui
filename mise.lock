@@ -146,32 +146,32 @@ url = "https://github.com/goreleaser/goreleaser/releases/download/v2.15.4/gorele
 provenance = "github-attestations"
 
 [[tools.hk]]
-version = "1.44.2"
+version = "1.44.3"
 backend = "aqua:jdx/hk"
 
 [tools.hk."platforms.linux-arm64"]
-checksum = "sha256:075411c60b897504ed6d0ab8d82cab89d376ef9b476e98b2543852aadec71908"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-aarch64-unknown-linux-gnu.tar.gz"
+checksum = "sha256:85e0f8b7c3107f5b7853390bf8201d3d9839021e3f2d7629f5457f7569218fcc"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-aarch64-unknown-linux-gnu.tar.gz"
 
 [tools.hk."platforms.linux-arm64-musl"]
-checksum = "sha256:5a595804cf56b1ce1b03659e3202769b1f74a42173a7b31de5c5b03f3c5d9e59"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-aarch64-unknown-linux-musl.tar.gz"
+checksum = "sha256:1794def830f7bea3e1ab162ea8eb0cef91f9292bb3ce660385f761048cca8599"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-aarch64-unknown-linux-musl.tar.gz"
 
 [tools.hk."platforms.linux-x64"]
-checksum = "sha256:01b564318f88c2726634c689bea1475d90b8e68e2b67d969442d645cfb1a867f"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-x86_64-unknown-linux-gnu.tar.gz"
+checksum = "sha256:8ff22722b831acae2ac61eddbe349497f9538ac7ac28f4b1a2e3dd7c0e43ee8c"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-x86_64-unknown-linux-gnu.tar.gz"
 
 [tools.hk."platforms.linux-x64-musl"]
-checksum = "sha256:4313d2f452c901ec4ccd5af821822444eb364c05f8ce7708854ec115124eabb3"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:41b0fbe9ddec1bf0879b56d05abb9177a8a2fb98a2a6fa3d279576fbc4da5eac"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-x86_64-unknown-linux-musl.tar.gz"
 
 [tools.hk."platforms.macos-arm64"]
-checksum = "sha256:b1d6b50682055ff7b92a6f17122f6a6a49d03f611199a9a470c19ec70d5df770"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-aarch64-apple-darwin.tar.gz"
+checksum = "sha256:e9000438928e7c66fd7790f0b47ca9b1c0b971c834238c1fa5faffae7fd92625"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-aarch64-apple-darwin.tar.gz"
 
 [tools.hk."platforms.windows-x64"]
-checksum = "sha256:58d1c25b42fd103a4df7f549591b46fa7049f1858c3b4ea463123b8b163577d5"
-url = "https://github.com/jdx/hk/releases/download/v1.44.2/hk-x86_64-pc-windows-msvc.zip"
+checksum = "sha256:c59c6bf1c45157903ce58a5572257a959ca5e3895b6b9cbfb808a744d4858fb9"
+url = "https://github.com/jdx/hk/releases/download/v1.44.3/hk-x86_64-pc-windows-msvc.zip"
 
 [[tools.pkl]]
 version = "0.31.1"
@@ -387,36 +387,36 @@ checksum = "sha256:c51695d171c61460369dabdd5c71b8f350ef8618466818356a30808d7105c
 url = "https://github.com/anchore/syft/releases/download/v1.43.0/syft_1.43.0_windows_amd64.zip"
 
 [[tools.tombi]]
-version = "0.9.26"
+version = "0.10.1"
 backend = "aqua:tombi-toml/tombi"
 
 [tools.tombi."platforms.linux-arm64"]
-checksum = "sha256:208a38f26b1b7ce3c060f82fb326f6a6304b04d661002f96bddee53bdb20e707"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-aarch64-unknown-linux-musl.tar.gz"
+checksum = "sha256:d22273331c5d8eed13d4d04f9c632ca3c0eaa01a7c03c63f856a67a24a55994d"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-aarch64-unknown-linux-musl.tar.gz"
 
 [tools.tombi."platforms.linux-arm64-musl"]
-checksum = "sha256:208a38f26b1b7ce3c060f82fb326f6a6304b04d661002f96bddee53bdb20e707"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-aarch64-unknown-linux-musl.tar.gz"
+checksum = "sha256:d22273331c5d8eed13d4d04f9c632ca3c0eaa01a7c03c63f856a67a24a55994d"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-aarch64-unknown-linux-musl.tar.gz"
 
 [tools.tombi."platforms.linux-x64"]
-checksum = "sha256:3839e78a4f5db8a785f593b3113e86908ca125a9e0f3f9955e0a759b0b39c6ad"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:c58931575a5033ac851d050a51c2bbb193b6980b4ce06169c76789e6079fcd2f"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-x86_64-unknown-linux-musl.tar.gz"
 
 [tools.tombi."platforms.linux-x64-musl"]
-checksum = "sha256:3839e78a4f5db8a785f593b3113e86908ca125a9e0f3f9955e0a759b0b39c6ad"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:c58931575a5033ac851d050a51c2bbb193b6980b4ce06169c76789e6079fcd2f"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-x86_64-unknown-linux-musl.tar.gz"
 
 [tools.tombi."platforms.macos-arm64"]
-checksum = "sha256:7012f29da0ceb81755ced1463f225f4b482cae124dff6eb72d7e52ab0c13b0b9"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-aarch64-apple-darwin.tar.gz"
+checksum = "sha256:73bcea0c4fc7cd413b5724795e1ed1c466a69534e641fb6aee421487f09d37a5"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-aarch64-apple-darwin.tar.gz"
 
 [tools.tombi."platforms.macos-x64"]
-checksum = "sha256:313e082bf5981afbd96a4972e5eb568cbf5922a6bfa4b83c4c28346f5052b001"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-x86_64-apple-darwin.tar.gz"
+checksum = "sha256:0fe1000af463e5a39c0ee5aa5aa54fd5ebcd15d60440fc124c0437594de0f28b"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-x86_64-apple-darwin.tar.gz"
 
 [tools.tombi."platforms.windows-x64"]
-checksum = "sha256:c72b563a65d3c83543360205e5a915fc0eeaba70db3171a17a75472563897cf6"
-url = "https://github.com/tombi-toml/tombi/releases/download/v0.9.26/tombi-cli-0.9.26-x86_64-pc-windows-msvc.zip"
+checksum = "sha256:ad7e71c5de3e96fee8f67b5ac54a4ce32347ffdab6b85e1d7be8c857b5b6438b"
+url = "https://github.com/tombi-toml/tombi/releases/download/v0.10.1/tombi-cli-0.10.1-x86_64-pc-windows-msvc.zip"
 
 [[tools.ty]]
 version = "0.0.33"
