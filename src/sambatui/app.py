@@ -206,6 +206,12 @@ KEY_HINTS = {
     "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
     "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
 }
+SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
+RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
+    "name": lambda row: row.name.casefold(),
+    "type": lambda row: row.rtype.casefold(),
+    "value": lambda row: row.value.casefold(),
+}
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -1123,12 +1129,11 @@ class SambatuiApp(App):
             self.refresh_record_view()
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
-        key_map = {
-            "name": lambda row: row.name.casefold(),
-            "type": lambda row: row.rtype.casefold(),
-            "value": lambda row: row.value.casefold(),
-        }
-        return sorted(rows, key=key_map[self.sort_field], reverse=self.sort_reverse)
+        return sorted(
+            rows,
+            key=RECORD_SORT_KEYS[self.sort_field],
+            reverse=self.sort_reverse,
+        )
 
     def sort_records(self, field: str) -> None:
         if self.view_mode != "dns":
@@ -1774,9 +1779,9 @@ class SambatuiApp(App):
 
     def switch_side_tab(self, delta: int) -> None:
         tabs = self.query_one("#side_tabs", TabbedContent)
-        tab_ids = ["dns_tab", "ldap_tab", "smart_tab"]
-        current = tabs.active if tabs.active in tab_ids else "dns_tab"
-        tabs.active = tab_ids[(tab_ids.index(current) + delta) % len(tab_ids)]
+        current = tabs.active if tabs.active in SIDE_TAB_IDS else "dns_tab"
+        current_index = SIDE_TAB_IDS.index(current)
+        tabs.active = SIDE_TAB_IDS[(current_index + delta) % len(SIDE_TAB_IDS)]
         self.refresh_key_hints()
         if tabs.active == "dns_tab":
             self.action_focus_zones()
@@ -1864,13 +1869,18 @@ class SambatuiApp(App):
             self.update_visual_selection()
             self.update_details_pane()
 
+    def ensure_dns_records_view(self) -> bool:
+        if self.view_mode == "dns":
+            return True
+        self.set_status("Current view is read-only.")
+        return False
+
     def action_toggle_select(self) -> None:
         self.pending_g = False
         table = self.focused_table() or self.query_one("#records", DataTable)
         if table.id != "records" or not table.row_count:
             return
-        if self.view_mode != "dns":
-            self.set_status("Current view is read-only.")
+        if not self.ensure_dns_records_view():
             return
         row_index = table.cursor_row
         self.selection_anchor = (
@@ -1885,8 +1895,7 @@ class SambatuiApp(App):
         table.focus()
         if not table.row_count:
             return
-        if self.view_mode != "dns":
-            self.set_status("Current view is read-only.")
+        if not self.ensure_dns_records_view():
             return
         if self.visual_selecting:
             self.visual_selecting = False
@@ -1905,8 +1914,7 @@ class SambatuiApp(App):
         table.focus()
         if not table.row_count:
             return
-        if self.view_mode != "dns":
-            self.set_status("Current view is read-only.")
+        if not self.ensure_dns_records_view():
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
@@ -1916,8 +1924,7 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
-        if self.view_mode != "dns":
-            self.set_status("Current view is read-only.")
+        if not self.ensure_dns_records_view():
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
@@ -1928,8 +1935,7 @@ class SambatuiApp(App):
         self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
-        if self.view_mode != "dns":
-            self.set_status("Current view is read-only.")
+        if not self.ensure_dns_records_view():
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row

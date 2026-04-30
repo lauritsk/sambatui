@@ -99,30 +99,28 @@ class LdapSearchConfig:
         return ldap_compatibility_enabled(self.compatibility)
 
     def validation_error(self) -> str | None:
+        auth_mode = self.normalized_auth_mode
+        encryption = self.normalized_encryption
+        compatibility = self.normalized_compatibility
+
         if not self.server:
             return "Enter LDAP server/DC."
-        if self.normalized_auth_mode not in LDAP_AUTH_MODES:
+        if auth_mode not in LDAP_AUTH_MODES:
             return "LDAP auth mode must be password or kerberos."
-        if self.normalized_encryption not in LDAP_ENCRYPTION_MODES:
+        if encryption not in LDAP_ENCRYPTION_MODES:
             return "LDAP encryption must be off, ldaps, or starttls."
-        if (
-            self.normalized_compatibility
-            not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF
-        ):
+        if compatibility not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF:
             return "LDAP compatibility must be on or off."
         scheme = ldap_server_scheme(self.server)
-        if scheme == "ldap" and self.normalized_encryption == "ldaps":
+        if scheme == "ldap" and encryption == "ldaps":
             return "ldap:// server URLs require LDAP encryption starttls or off."
-        if scheme == "ldaps" and self.normalized_encryption != "ldaps":
+        if scheme == "ldaps" and encryption != "ldaps":
             return "ldaps:// server URLs require LDAP encryption ldaps."
-        if (
-            self.normalized_auth_mode == "password"
-            and self.normalized_encryption == "off"
-        ):
+        if auth_mode == "password" and encryption == "off":
             return "LDAP password bind requires ldaps or starttls."
-        if self.normalized_auth_mode == "password" and not self.user:
+        if auth_mode == "password" and not self.user:
             return "LDAP search needs a username."
-        if self.normalized_auth_mode == "password" and not self.password:
+        if auth_mode == "password" and not self.password:
             return "LDAP search needs a password or auth mode kerberos."
         if not self.base_dn:
             return "Enter LDAP base DN, e.g. DC=example,DC=com."
@@ -349,10 +347,8 @@ class LdapDirectoryClient:
                 )
             return [entry_to_directory_row(entry, kind) for entry in connection.entries]
         finally:
-            try:
+            with suppress(LDAPException):
                 connection.unbind()
-            except LDAPException:
-                pass
 
 
 def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:

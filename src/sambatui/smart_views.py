@@ -11,7 +11,7 @@ import dns.name
 import dns.reversename
 
 from .dns import reverse_record_for_ipv4
-from .ldap_directory import DirectoryRow
+from .ldap_directory import DirectoryRow, first_attr
 from .models import DnsRow
 
 ACCOUNTDISABLE = 0x0002
@@ -266,8 +266,9 @@ def ldap_delete_candidate_users(
         created = first_ad_datetime(row, "whenCreated")
         changed = first_ad_datetime(row, "whenChanged")
         last_logon = first_ad_datetime(row, "lastLogonTimestamp", "lastLogon")
+        is_disabled = ldap_is_disabled(row)
         disabled_reference = changed or created
-        if ldap_is_disabled(row) and (
+        if is_disabled and (
             disabled_reference is None or disabled_reference < disabled_cutoff
         ):
             evidence = "disabled"
@@ -287,7 +288,7 @@ def ldap_delete_candidate_users(
             )
             continue
         if (
-            not ldap_is_disabled(row)
+            not is_disabled
             and last_logon is None
             and created is not None
             and created < never_logged_cutoff
@@ -409,14 +410,6 @@ def ipv4_from_ptr_name(name: str, zone: str) -> str | None:
         return dns.reversename.to_address(dns.name.from_text(f"{reverse_name}."))
     except dns.exception.DNSException, ValueError:
         return None
-
-
-def first_attr(attrs: Mapping[str, Sequence[str]], *names: str) -> str:
-    for name in names:
-        values = attrs.get(name, ())
-        if values:
-            return values[0]
-    return ""
 
 
 def directory_object_name(row: DirectoryRow) -> str:
