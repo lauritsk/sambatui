@@ -142,6 +142,8 @@ Optional variables:
   records and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
   `ous`, or `all`).
+- Move through DNS, LDAP, or smart-view rows to update the details pane with
+  wrapped context for the focused row.
 - Select a zone: refresh records for that zone.
 - `r`: refresh current zone (`dns query SERVER ZONE @ ALL`).
 - `q`: query one name/type.
