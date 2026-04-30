@@ -40,7 +40,8 @@ or set environment variables:
 SAMBATUI_SERVER=dc01.example.com \
 SAMBATUI_ZONE=example.com \
 SAMBATUI_USER='EXAMPLE\\administrator' \
-SAMBATUI_KERBEROS=off \
+SAMBATUI_AUTH=kerberos \
+SAMBATUI_KERBEROS=required \
 uv run sambatui
 ```
 
@@ -51,7 +52,11 @@ Optional variables:
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
 | `SAMBATUI_USER` | Samba username, often `DOMAIN\\user` | empty |
-| `SAMBATUI_KERBEROS` | Passed to `--use-kerberos` | `off` |
+| `SAMBATUI_AUTH` | `password` or `kerberos` | `password` |
+| `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
+| `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache` | empty |
+| `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
+| `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
 | `SAMBATUI_AUTO_PTR` | Add PTR for new A records (`on`/`off`) | `off` |
 | `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
@@ -59,6 +64,8 @@ Optional variables:
 ## Use
 
 - `z` or **Load DNS zones**: list zones, including reverse zones.
+- `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
+  records and populate the server field.
 - Select a zone: refresh records for that zone.
 - `r`: refresh current zone (`dns query SERVER ZONE @ ALL`).
 - `q`: query one name/type.
@@ -74,10 +81,15 @@ Optional variables:
 
 Destructive actions require confirmation.
 
-## Passwords
+## Authentication and passwords
 
-The app cannot safely drive the interactive `samba-tool` password prompt.
-Provide a password by:
+Prefer Kerberos where possible. With an existing ticket (`kinit` or system login),
+set `SAMBATUI_AUTH=kerberos`; Sambatui then omits the password from
+`samba-tool` arguments and uses `--use-kerberos=required` unless overridden.
+
+Password mode remains available for environments without Kerberos tickets. The
+app cannot safely drive the interactive `samba-tool` password prompt. Provide a
+password by:
 
 1. Typing it into the password field.
 2. Setting `SAMBATUI_PASSWORD` for the current process.
@@ -89,8 +101,24 @@ Provide a password by:
    chmod 600 ~/.config/sambatui/password
    ```
 
-You can also use **Save password** / **Load password** in the app. Do not commit
-password files or `.env` files.
+You can also use **Save password** / **Load password** in the app. Password
+files must be readable only by the owner (`chmod 600`) or Sambatui will refuse to
+load them. Do not commit password files or `.env` files.
+
+Password mode still passes credentials to `samba-tool` non-interactively. Prefer
+Kerberos ticket mode on shared systems where process arguments may be visible to
+other users.
+
+## AD discovery
+
+**Discover DCs** uses DNS SRV records already published by Active Directory:
+
+- `_ldap._tcp.dc._msdcs.DOMAIN`
+- `_kerberos._tcp.DOMAIN`
+
+This is intentionally DNS-only for now: no LDAP bind, no direct AD writes, and no
+extra AD dependency. Future LDAP discovery can be added behind the client seam if
+DNS SRV discovery is not enough.
 
 ## Development
 
