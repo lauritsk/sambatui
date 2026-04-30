@@ -789,11 +789,20 @@ class SambatuiApp(App):
     def details_empty_text(self) -> str:
         return details_empty_text(self.empty_state_text(self.view_mode))
 
-    def dns_details_text(self, row_index: int) -> str:
-        rows = self.visible_records()
+    def records_cursor_row(self) -> int:
+        with suppress(Exception):
+            return self.query_one("#records", DataTable).cursor_row
+        return 0
+
+    def visible_row_at(self, rows: list[TableRow], row_index: int) -> TableRow | None:
         if row_index < 0 or row_index >= len(rows):
+            return None
+        return rows[row_index]
+
+    def dns_details_text(self, row_index: int) -> str:
+        row = self.visible_row_at(self.visible_records(), row_index)
+        if row is None:
             return self.details_empty_text()
-        row = rows[row_index]
         ptr_status = dns_ptr_status(
             row,
             zones=self.zones,
@@ -803,21 +812,15 @@ class SambatuiApp(App):
         return dns_details_text(row, zone=self.val("zone"), ptr_status=ptr_status)
 
     def directory_details_text(self, row_index: int) -> str:
-        rows = self.visible_directory()
-        if row_index < 0 or row_index >= len(rows):
-            return self.details_empty_text()
-        return directory_details_text(rows[row_index])
+        row = self.visible_row_at(self.visible_directory(), row_index)
+        return self.details_empty_text() if row is None else directory_details_text(row)
 
     def smart_details_text(self, row_index: int) -> str:
-        rows = self.visible_smart_view()
-        if row_index < 0 or row_index >= len(rows):
-            return self.details_empty_text()
-        return smart_details_text(rows[row_index])
+        row = self.visible_row_at(self.visible_smart_view(), row_index)
+        return self.details_empty_text() if row is None else smart_details_text(row)
 
     def current_details_text(self) -> str:
-        row_index = 0
-        with suppress(Exception):
-            row_index = self.query_one("#records", DataTable).cursor_row
+        row_index = self.records_cursor_row()
         if self.view_mode == "directory":
             return self.directory_details_text(row_index)
         if self.view_mode == "smart":
@@ -1033,63 +1036,93 @@ class SambatuiApp(App):
     async def action_discover_ad(self) -> None:
         await self.open_discover_ad(self.discovery_domain_default())
 
+    def ldap_base_default(self) -> str:
+        return self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+
+    def ldap_connection_fields(self, base_dn: str) -> list[FormField]:
+        return [
+            ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
+            (
+                "LDAP encryption",
+                "ldap_encryption",
+                "off | ldaps | starttls",
+                self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            ),
+            (
+                "LDAP compatibility",
+                "ldap_compatibility",
+                "on | off",
+                self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+            ),
+        ]
+
+    def smart_max_rows_field(self) -> FormField:
+        return (
+            "Max rows",
+            "max_rows",
+            "500",
+            self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
+        )
+
+    def ldap_search_fields(self) -> list[FormField]:
+        return [
+            (
+                "Search type",
+                "kind",
+                "users | groups | computers | ous | all",
+                "users",
+            ),
+            ("Search text", "text", "name, login, mail, DN fragment", ""),
+            *self.ldap_connection_fields(self.ldap_base_default()),
+            ("Max rows", "max_rows", "200", "200"),
+        ]
+
+    def apply_ldap_connection_values(self, values: dict[str, str]) -> None:
+        self.set_val("ldap_base", values["base_dn"])
+        self.set_val("ldap_encryption", values["ldap_encryption"])
+        self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        self.save_preferences()
+
+    async def directory_search_rows(
+        self, client: LdapDirectoryClient, kind: str, text: str
+    ) -> list[DirectoryRow] | None:
+        self.set_busy(True)
+        try:
+            try:
+                return await asyncio.to_thread(client.search, kind, text)
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return None
+        finally:
+            self.set_busy(False)
+
     @work
     async def action_ldap_search(self) -> None:
-        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
         values = await self.form(
             "Search AD directory",
             "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; kerberos uses current ticket.",
-            [
-                (
-                    "Search type",
-                    "kind",
-                    "users | groups | computers | ous | all",
-                    "users",
-                ),
-                ("Search text", "text", "name, login, mail, DN fragment", ""),
-                ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
-                (
-                    "LDAP encryption",
-                    "ldap_encryption",
-                    "off | ldaps | starttls",
-                    self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-                ),
-                (
-                    "LDAP compatibility",
-                    "ldap_compatibility",
-                    "on | off",
-                    self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
-                ),
-                ("Max rows", "max_rows", "200", "200"),
-            ],
+            self.ldap_search_fields(),
             "Search",
         )
         if not values:
             return
-        self.set_val("ldap_base", values["base_dn"])
-        self.set_val("ldap_encryption", values["ldap_encryption"])
-        self.set_val("ldap_compatibility", values["ldap_compatibility"])
+
+        self.apply_ldap_connection_values(values)
         max_rows = bounded_int(values["max_rows"], 200, maximum=1000)
-        self.save_preferences()
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
         if error:
             self.report_error(error)
             return
-        self.set_busy(True)
-        try:
-            try:
-                rows = await asyncio.to_thread(
-                    client.search, values["kind"] or "users", values["text"]
-                )
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return
-            self.search_text = ""
-            self.populate_directory(rows[:max_rows])
-            self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
-        finally:
-            self.set_busy(False)
+
+        rows = await self.directory_search_rows(
+            client, values["kind"] or "users", values["text"]
+        )
+        if rows is None:
+            return
+        self.search_text = ""
+        self.populate_directory(rows[:max_rows])
+        self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
 
     def smart_view_choices(self) -> list[SmartViewChoice]:
         return [
@@ -1097,8 +1130,7 @@ class SambatuiApp(App):
             for view in SMART_VIEWS
         ]
 
-    def smart_view_fields(self, view: SmartViewDefinition) -> list[FormField]:
-        base_dn = self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+    def smart_threshold_fields(self, view: SmartViewDefinition) -> list[FormField]:
         fields: list[FormField] = []
         if view.needs_days:
             fields.append(
@@ -1128,32 +1160,13 @@ class SambatuiApp(App):
                     or DEFAULT_SMART_NEVER_LOGGED_DAYS,
                 )
             )
+        return fields
+
+    def smart_view_fields(self, view: SmartViewDefinition) -> list[FormField]:
+        fields = self.smart_threshold_fields(view)
         if view.needs_ldap:
-            fields.extend(
-                [
-                    ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
-                    (
-                        "LDAP encryption",
-                        "ldap_encryption",
-                        "off | ldaps | starttls",
-                        self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-                    ),
-                    (
-                        "LDAP compatibility",
-                        "ldap_compatibility",
-                        "on | off",
-                        self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
-                    ),
-                ]
-            )
-        fields.append(
-            (
-                "Max rows",
-                "max_rows",
-                "500",
-                self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
-            )
-        )
+            fields.extend(self.ldap_connection_fields(self.ldap_base_default()))
+        fields.append(self.smart_max_rows_field())
         return fields
 
     async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
@@ -1207,12 +1220,7 @@ class SambatuiApp(App):
     def selected_smart_row(self) -> SmartViewRow | None:
         if self.view_mode != "smart":
             return None
-        table = self.query_one("#records", DataTable)
-        rows = self.visible_smart_view()
-        row_index = table.cursor_row
-        if row_index < 0 or row_index >= len(rows):
-            return None
-        return rows[row_index]
+        return self.visible_row_at(self.visible_smart_view(), self.records_cursor_row())
 
     @work
     async def action_smart_view(self) -> None:
@@ -1252,10 +1260,7 @@ class SambatuiApp(App):
     async def ldap_directory_for_smart_view(
         self, view: SmartViewDefinition, values: dict[str, str]
     ) -> list[DirectoryRow] | None:
-        self.set_val("ldap_base", values["base_dn"])
-        self.set_val("ldap_encryption", values["ldap_encryption"])
-        self.set_val("ldap_compatibility", values["ldap_compatibility"])
-        self.save_preferences()
+        self.apply_ldap_connection_values(values)
 
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
@@ -1264,15 +1269,7 @@ class SambatuiApp(App):
             return None
 
         kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
-        self.set_busy(True)
-        try:
-            try:
-                return await asyncio.to_thread(client.search, kind, "")
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return None
-        finally:
-            self.set_busy(False)
+        return await self.directory_search_rows(client, kind, "")
 
     def ldap_smart_rows(
         self,
@@ -1393,6 +1390,28 @@ class SambatuiApp(App):
         rtype = (values["rtype"] or "ALL").upper()
         await self.do_command("query", [name, rtype], update_table=True)
 
+    async def maybe_add_matching_ptr(self, name: str, rtype: str, value: str) -> None:
+        if rtype != "A":
+            return
+        reverse = self.reverse_record_for_ipv4(value)
+        auto_ptr = (self.val("auto_ptr") or DEFAULT_AUTO_PTR).casefold()
+        if reverse is None or auto_ptr == "off":
+            return
+        ptr_zone, ptr_name = reverse
+        ptr_target = self.ptr_target_for_name(name)
+        if auto_ptr == "on" or await self.confirm(
+            "Add matching PTR record?\n\n"
+            f"Zone: {ptr_zone}\n{ptr_name} PTR {ptr_target}",
+            default_confirm=True,
+        ):
+            await self.add_ptr(name, value)
+
+    def add_record_args(self, name: str, rtype: str, value: str, ttl: str) -> list[str]:
+        args = [name, rtype, value]
+        if ttl:
+            args.append(f"--ttl={ttl}")
+        return args
+
     @work
     async def action_add(self) -> None:
         values = await self.form(
@@ -1421,70 +1440,98 @@ class SambatuiApp(App):
         if error:
             self.report_error(error)
             return
-        args = [name, rtype, value]
-        if ttl:
-            args.append(f"--ttl={ttl}")
         if not await self.confirm(
             f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}",
             default_confirm=True,
         ):
             self.notify("Add cancelled")
             return
-        if await self.do_command("add", args) == 0:
-            if rtype == "A":
-                reverse = self.reverse_record_for_ipv4(value)
-                auto_ptr = (self.val("auto_ptr") or DEFAULT_AUTO_PTR).casefold()
-                if reverse and auto_ptr != "off":
-                    ptr_zone, ptr_name = reverse
-                    ptr_target = self.ptr_target_for_name(name)
-                    if auto_ptr == "on" or await self.confirm(
-                        "Add matching PTR record?\n\n"
-                        f"Zone: {ptr_zone}\n{ptr_name} PTR {ptr_target}",
-                        default_confirm=True,
-                    ):
-                        await self.add_ptr(name, value)
+        if (
+            await self.do_command("add", self.add_record_args(name, rtype, value, ttl))
+            == 0
+        ):
+            await self.maybe_add_matching_ptr(name, rtype, value)
             await self.refresh_current_zone()
 
-    @work
-    async def action_update(self) -> None:
+    def selected_record_for_update(self) -> dict[str, str] | None:
         records = self.selected_records()
         if len(records) > 1:
             self.notify(
                 "Update works on one record only. Select one row.", severity="error"
             )
-            return
+            return None
         selected = records[0] if records else None
-        if not selected:
-            self.notify(
-                "Select a real record row first. Rows with type '-' are empty/folder nodes.",
-                severity="error",
-            )
+        if selected:
+            return selected
+        self.notify(
+            "Select a real record row first. Rows with type '-' are empty/folder nodes.",
+            severity="error",
+        )
+        return None
+
+    def update_record_fields(self, selected: dict[str, str]) -> list[FormField]:
+        return [
+            ("Record name", "name", "name, @ for zone root", selected["name"]),
+            (
+                "Current type (used to find/delete old record)",
+                "old_rtype",
+                "current type",
+                selected["rtype"],
+            ),
+            (
+                "New type",
+                "rtype",
+                "A / AAAA / CNAME / PTR / TXT / MX / SRV",
+                selected["rtype"],
+            ),
+            (
+                "Old/current DNS value (exact match required)",
+                "old_value",
+                "old/current value",
+                selected["value"],
+            ),
+            ("New DNS value", "value", "new value", selected["value"]),
+        ]
+
+    async def change_record_type(
+        self, name: str, old_rtype: str, old_value: str, rtype: str, value: str
+    ) -> None:
+        message = (
+            "Change DNS record type?\n\n"
+            f"Zone: {self.val('zone')}\n"
+            f"DELETE: {name} {old_rtype} {old_value}\n"
+            f"ADD:    {name} {rtype} {value}\n\n"
+            "If the add fails, the old record may already be deleted."
+        )
+        if not await self.confirm(message):
+            self.notify("Type change cancelled")
+            return
+        if (
+            await self.do_command("delete", [name, old_rtype, old_value]) == 0
+            and await self.do_command("add", [name, rtype, value]) == 0
+        ):
+            await self.refresh_current_zone()
+
+    async def update_record_value(
+        self, name: str, rtype: str, old_value: str, value: str
+    ) -> None:
+        if not await self.confirm(
+            f"Update DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype}\nOld: {old_value}\nNew: {value}"
+        ):
+            self.notify("Update cancelled")
+            return
+        if await self.do_command("update", [name, rtype, old_value, value]) == 0:
+            await self.refresh_current_zone()
+
+    @work
+    async def action_update(self) -> None:
+        selected = self.selected_record_for_update()
+        if selected is None:
             return
         values = await self.form(
             "Update selected DNS record",
             "To change record type (example A -> CNAME), set New type. That will DELETE the old record, then ADD the new one.",
-            [
-                ("Record name", "name", "name, @ for zone root", selected["name"]),
-                (
-                    "Current type (used to find/delete old record)",
-                    "old_rtype",
-                    "current type",
-                    selected["rtype"],
-                ),
-                (
-                    "New type",
-                    "rtype",
-                    "A / AAAA / CNAME / PTR / TXT / MX / SRV",
-                    selected["rtype"],
-                ),
-                (
-                    "Old/current DNS value (exact match required)",
-                    "old_value",
-                    "old/current value",
-                    selected["value"],
-                ),
-                ("New DNS value", "value", "new value", selected["value"]),
-            ],
+            self.update_record_fields(selected),
             "Update",
         )
         if not values:
@@ -1502,30 +1549,9 @@ class SambatuiApp(App):
             return
 
         if old_rtype != rtype:
-            message = (
-                "Change DNS record type?\n\n"
-                f"Zone: {self.val('zone')}\n"
-                f"DELETE: {name} {old_rtype} {old_value}\n"
-                f"ADD:    {name} {rtype} {value}\n\n"
-                "If the add fails, the old record may already be deleted."
-            )
-            if not await self.confirm(message):
-                self.notify("Type change cancelled")
-                return
-            if (
-                await self.do_command("delete", [name, old_rtype, old_value]) == 0
-                and await self.do_command("add", [name, rtype, value]) == 0
-            ):
-                await self.refresh_current_zone()
+            await self.change_record_type(name, old_rtype, old_value, rtype, value)
             return
-
-        if not await self.confirm(
-            f"Update DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype}\nOld: {old_value}\nNew: {value}"
-        ):
-            self.notify("Update cancelled")
-            return
-        if await self.do_command("update", [name, rtype, old_value, value]) == 0:
-            await self.refresh_current_zone()
+        await self.update_record_value(name, rtype, old_value, value)
 
     @work
     async def action_delete(self) -> None:
