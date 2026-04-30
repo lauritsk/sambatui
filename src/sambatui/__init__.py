@@ -1,6 +1,8 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from .app import SambatuiApp, main
+from .client import SambaToolClient, SambaToolConfig
+from .discovery import DiscoveredService, discover_ad_services
 from .dns import (
     parse_records,
     parse_zones,
@@ -19,7 +21,11 @@ except PackageNotFoundError:
 __all__ = [
     "__version__",
     "DnsRow",
+    "DiscoveredService",
+    "SambaToolClient",
+    "SambaToolConfig",
     "SambatuiApp",
+    "discover_ad_services",
     "main",
     "parse_records",
     "parse_zones",

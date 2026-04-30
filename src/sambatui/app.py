@@ -12,16 +12,23 @@ from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.widgets import Button, DataTable, Header, Input, Label, Static
 
+from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
+    DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
+    DEFAULT_CONFIGFILE,
     DEFAULT_KERBEROS,
+    DEFAULT_KRB5_CCACHE,
+    DEFAULT_OPTIONS,
     DEFAULT_PASSWORD,
     DEFAULT_PASSWORD_FILE,
     DEFAULT_SERVER,
     DEFAULT_USER,
     DEFAULT_ZONE,
+    password_file_warning,
     read_password_file,
 )
+from .discovery import discover_ad_services, preferred_domain_controller
 from .dns import (
     NAME_RE,
     REC_RE,
@@ -36,8 +43,12 @@ from .models import DnsRow
 from .screens import ConfirmScreen, FormField, FormScreen
 
 __all__ = [
+    "DEFAULT_AUTH",
     "DEFAULT_AUTO_PTR",
+    "DEFAULT_CONFIGFILE",
     "DEFAULT_KERBEROS",
+    "DEFAULT_KRB5_CCACHE",
+    "DEFAULT_OPTIONS",
     "DEFAULT_PASSWORD",
     "DEFAULT_PASSWORD_FILE",
     "DEFAULT_SERVER",
@@ -49,10 +60,14 @@ __all__ = [
     "DnsRow",
     "FormField",
     "FormScreen",
+    "SambaToolClient",
+    "SambaToolConfig",
     "SambatuiApp",
     "main",
     "parse_records",
     "parse_zones",
+    "password_file_warning",
+    "parse_samba_options",
     "read_password_file",
     "valid_dns_name",
     "validate_record",
@@ -95,7 +110,7 @@ class SambatuiApp(App):
     Input { width: 1fr; margin-right: 1; }
     Button { width: 1fr; margin-right: 1; }
 
-    #kerberos, #auto_ptr { width: 10; }
+    #auth, #kerberos, #auto_ptr { width: 10; }
     #zones { height: 1fr; margin-bottom: 1; }
     #records { height: 1fr; }
     #status { height: auto; margin-top: 1; color: $text-muted; }
@@ -103,6 +118,7 @@ class SambatuiApp(App):
 
     BINDINGS = [
         ("z", "load_zones", "Zones"),
+        ("c", "discover_ad", "Discover DC"),
         ("r", "refresh", "Refresh"),
         ("q", "query", "Query"),
         ("a", "add", "Add"),
@@ -145,13 +161,32 @@ class SambatuiApp(App):
                             password=True,
                             id="password",
                         )
+                        yield Input(DEFAULT_AUTH, placeholder="auth", id="auth")
                         yield Input(DEFAULT_KERBEROS, placeholder="krb", id="kerberos")
                         yield Input(
                             DEFAULT_AUTO_PTR, placeholder="ptr on/off", id="auto_ptr"
                         )
                     with Horizontal(classes="row"):
+                        yield Input(
+                            DEFAULT_KRB5_CCACHE,
+                            placeholder="krb5 ccache",
+                            id="krb5_ccache",
+                        )
+                        yield Input(
+                            DEFAULT_CONFIGFILE,
+                            placeholder="smb.conf",
+                            id="configfile",
+                        )
+                    with Horizontal(classes="row"):
                         yield Button("Load password", id="load_password")
                         yield Button("Save password", id="save_password")
+                        yield Button("Discover DCs", id="discover_ad")
+                    yield Input(
+                        DEFAULT_OPTIONS,
+                        placeholder="smb options separated by ;",
+                        id="options",
+                        classes="hidden",
+                    )
                     yield Input(
                         str(DEFAULT_PASSWORD_FILE),
                         placeholder="password file",
@@ -175,15 +210,11 @@ class SambatuiApp(App):
                 )
                 yield table
         yield Static(
-            "z zones  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select  v visual  n/t/e or click header to sort",
+            "z zones  c discover DC  r refresh  q query  a add  u update  d delete  / search  h/l focus  j/k move  Space select  v visual  n/t/e sort",
             id="keys",
         )
 
     def on_mount(self) -> None:
-        if not shutil.which("samba-tool"):
-            self.set_status("samba-tool not found in PATH")
-            self.notify("samba-tool not found in PATH", severity="error")
-            return
         self.selected_record_rows: set[int] = set()
         self.selection_anchor: int | None = None
         self.visual_selecting = False
@@ -192,10 +223,20 @@ class SambatuiApp(App):
         self.sort_reverse = False
         self.search_text = ""
         self.zones: list[str] = []
-        if self.val("password"):
+
+        if not shutil.which("samba-tool"):
+            self.set_status("samba-tool not found in PATH")
+            self.notify("samba-tool not found in PATH", severity="error")
+            return
+
+        warning = password_file_warning(self.password_file())
+        if warning:
+            self.set_status(warning)
+            self.notify(warning, severity="error")
+        elif self.val("password"):
             self.set_status(f"Password loaded from env or {DEFAULT_PASSWORD_FILE}")
         else:
-            self.set_status("Enter password or load password file")
+            self.set_status("Enter password, load password file, or use kerberos auth")
 
     def val(self, widget_id: str) -> str:
         return self.query_one(f"#{widget_id}", Input).value.strip()
@@ -207,20 +248,28 @@ class SambatuiApp(App):
     def password_file(self) -> Path:
         return Path(self.val("password_file")).expanduser()
 
-    def user_arg(self) -> str:
-        user = self.val("user")
-        password = self.val("password")
-        return f"{user}%{password}" if password else user
+    def samba_config(self) -> SambaToolConfig:
+        return SambaToolConfig(
+            server=self.val("server"),
+            user=self.val("user"),
+            password=self.val("password"),
+            auth_mode=self.val("auth") or DEFAULT_AUTH,
+            kerberos=self.val("kerberos") or DEFAULT_KERBEROS,
+            krb5_ccache=self.val("krb5_ccache"),
+            configfile=self.val("configfile"),
+            options=parse_samba_options(self.val("options")),
+        )
 
-    def auth_args(self) -> list[str]:
-        return [
-            "-U",
-            self.user_arg(),
-            f"--use-kerberos={self.val('kerberos') or 'off'}",
-        ]
+    def samba_client(self) -> SambaToolClient:
+        return SambaToolClient(self.samba_config())
 
     def load_password(self) -> None:
         path = self.password_file()
+        warning = password_file_warning(path)
+        if warning:
+            self.notify(warning, severity="error")
+            self.set_status(warning)
+            return
         password = read_password_file(path)
         if not password:
             self.notify(f"No password found in {path}", severity="error")
@@ -241,7 +290,10 @@ class SambatuiApp(App):
         ):
             self.notify("Save cancelled")
             return
+        parent_exists = path.parent.exists()
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not parent_exists:
+            path.parent.chmod(0o700)
         path.write_text(password + "\n", encoding="utf-8")
         path.chmod(0o600)
         self.set_status(f"Saved password to {path}")
@@ -261,20 +313,16 @@ class SambatuiApp(App):
             FormScreen(title, hint, fields, submit_label)
         )
 
-    def base_cmd_for_zone(self, action: str, zone: str) -> list[str]:
-        return ["samba-tool", "dns", action, self.val("server"), zone]
+    async def run_command(
+        self, client: SambaToolClient, cmd: list[str]
+    ) -> tuple[int, str]:
+        error = client.authentication_error()
+        if error:
+            self.notify(error, severity="error")
+            self.set_status(error)
+            return 2, error
 
-    def base_cmd(self, action: str) -> list[str]:
-        return self.base_cmd_for_zone(action, self.val("zone"))
-
-    async def run_command(self, cmd: list[str]) -> tuple[int, str]:
-        if not self.val("password"):
-            message = "Enter password or load password file"
-            self.notify(message, severity="error")
-            self.set_status(message)
-            return 2, message
-
-        self.set_status(f"Running: {' '.join(cmd[:5])} ...")
+        self.set_status(f"Running: {client.status_command(cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -294,19 +342,22 @@ class SambatuiApp(App):
         return code, output
 
     async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
-        return await self.run_command(self.base_cmd(action) + args + self.auth_args())
+        client = self.samba_client()
+        return await self.run_command(
+            client, client.dns_command(action, self.val("zone"), args)
+        )
 
     async def run_samba_zone(
         self, action: str, zone: str, args: list[str]
     ) -> tuple[int, str]:
+        client = self.samba_client()
         return await self.run_command(
-            self.base_cmd_for_zone(action, zone) + args + self.auth_args()
+            client, client.dns_zone_command(action, zone, args)
         )
 
     async def run_zonelist(self) -> tuple[int, str]:
-        return await self.run_command(
-            ["samba-tool", "dns", "zonelist", self.val("server")] + self.auth_args()
-        )
+        client = self.samba_client()
+        return await self.run_command(client, client.zonelist_command())
 
     def set_busy(self, busy: bool) -> None:
         for button in self.query(Button):
@@ -490,6 +541,44 @@ class SambatuiApp(App):
 
     async def action_load_zones(self) -> None:
         await self.load_zones()
+
+    @work
+    async def action_discover_ad(self) -> None:
+        values = await self.form(
+            "Discover AD domain controllers",
+            "Uses DNS SRV records. No LDAP bind or new dependency required.",
+            [("AD DNS domain", "domain", "example.com", self.val("zone"))],
+            "Discover",
+        )
+        if not values:
+            return
+        domain = values["domain"] or self.val("zone")
+        self.set_busy(True)
+        try:
+            try:
+                services = await asyncio.to_thread(discover_ad_services, domain)
+            except ValueError as exc:
+                message = str(exc)
+                self.notify(message, severity="error")
+                self.set_status(message)
+                return
+            controller = preferred_domain_controller(services)
+            if controller is None:
+                message = f"No AD SRV records found for {domain}"
+                self.notify(message, severity="error")
+                self.set_status(message)
+                return
+            self.query_one("#server", Input).value = controller.target
+            if not self.val("zone"):
+                self.query_one("#zone", Input).value = controller.domain
+            message = (
+                f"Discovered {len(services)} AD SRV record(s); "
+                f"selected {controller.target}:{controller.port}"
+            )
+            self.set_status(message)
+            self.notify(message)
+        finally:
+            self.set_busy(False)
 
     async def action_refresh(self) -> None:
         await self.refresh_current_zone()
@@ -816,6 +905,8 @@ class SambatuiApp(App):
                 self.action_extend_up()
             case "shift+down", _:
                 self.action_extend_down()
+            case _, "c":
+                self.action_discover_ad()
             case _, "j":
                 self.action_cursor_down()
             case _, "k":
@@ -854,6 +945,8 @@ class SambatuiApp(App):
                 self.save_password()
             case "load_zones":
                 await self.load_zones()
+            case "discover_ad":
+                self.action_discover_ad()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "zones":
