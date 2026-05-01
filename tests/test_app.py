@@ -707,6 +707,108 @@ def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
     asyncio.run(run_app())
 
 
+def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
+    class DirectorySearchApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.searches: list[tuple[str, str, int | None]] = []
+
+        def save_preferences(self) -> None:
+            return
+
+        async def directory_search_rows(
+            self,
+            client,
+            kind: str,
+            text: str,
+            max_entries: int | None = None,
+        ) -> list[DirectoryRow] | None:
+            self.searches.append((kind, text, max_entries))
+            if text == "alice":
+                return [
+                    DirectoryRow(
+                        dn="CN=Alice,CN=Users,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    )
+                ]
+            return [
+                DirectoryRow(
+                    dn="CN=Bob,CN=Users,DC=example,DC=com",
+                    kind="user",
+                    name="Bob",
+                    summary="bob@example.com",
+                    attributes={},
+                )
+            ]
+
+    async def run_app() -> None:
+        app = DirectorySearchApp()
+        async with app.run_test() as pilot:
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#user", Input).value = "admin@example.com"
+            app.query_one("#password", Input).value = "secret"
+            values = {
+                "kind": "users",
+                "text": "",
+                "base_dn": "DC=example,DC=com",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+                "max_rows": "200",
+            }
+
+            assert await app.run_directory_search(values)
+            search = app.query_one("#inline_search", Input)
+            records = app.query_one("#records", DataTable)
+
+            search.value = "alice"
+            await pilot.pause(0.6)
+
+            assert app.searches == [("users", "", 200), ("users", "alice", 200)]
+            assert records.row_count == 1
+            assert str(records.get_row_at(0)[1]) == "Alice"
+
+    asyncio.run(run_app())
+
+
+def test_inline_search_dns_reloads_full_zone_before_filtering() -> None:
+    class DnsSearchApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.commands: list[tuple[str, list[str]]] = []
+
+        async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
+            self.commands.append((action, args))
+            return 0, (
+                "Name=www, Records=1, Children=0\n"
+                "    A: 192.0.2.10 (flags=f0, serial=1, ttl=3600)\n"
+                "Name=db, Records=1, Children=0\n"
+                "    A: 192.0.2.20 (flags=f0, serial=1, ttl=3600)\n"
+            )
+
+    async def run_app() -> None:
+        app = DnsSearchApp()
+        async with app.run_test() as pilot:
+            app.query_one("#zone", Input).value = "example.com"
+            app.zones = ["example.com"]
+            app.populate_records(
+                [DnsRow("db", "1", "0", "A", "192.0.2.20", "3600", "raw")]
+            )
+            search = app.query_one("#inline_search", Input)
+            records = app.query_one("#records", DataTable)
+
+            search.value = "www"
+            await pilot.pause(0.6)
+
+            assert app.commands == [("query", ["@", "ALL"])]
+            assert records.row_count == 1
+            assert str(records.get_row_at(0)[1]) == "www"
+
+    asyncio.run(run_app())
+
+
 def test_inline_search_filters_dns_directory_and_smart_views() -> None:
     async def run_app() -> None:
         app = SambatuiApp()

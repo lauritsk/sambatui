@@ -159,7 +159,7 @@ Records
   Enter     Select zone or toggle record select
   q         Query records
   a/u/d     Add, update, delete records
-  /         Inline live search/filter records, LDAP rows, smart findings
+  /         Inline search source records; filters loaded smart findings
   n/t/e     Sort by name/type/value
   Space     Toggle record selection
   v/V       Visual/range select

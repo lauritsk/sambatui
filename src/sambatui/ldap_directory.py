@@ -289,7 +289,8 @@ def build_directory_filter(kind: str, text: str = "") -> str:
     text_filter = (
         f"(|(cn=*{escaped}*)(name=*{escaped}*)(sAMAccountName=*{escaped}*)"
         f"(userPrincipalName=*{escaped}*)(displayName=*{escaped}*)"
-        f"(distinguishedName=*{escaped}*))"
+        f"(mail=*{escaped}*)(proxyAddresses=*{escaped}*)"
+        f"(dNSHostName=*{escaped}*)(distinguishedName=*{escaped}*))"
     )
     return f"(&{base_filter}{text_filter})"
 
