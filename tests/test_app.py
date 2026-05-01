@@ -16,6 +16,20 @@ from sambatui.screens import ConfirmScreen, FormScreen, SmartViewPickerScreen
 from sambatui.smart_views import SmartViewRow
 
 
+SIDEBAR_BUTTON_IDS = (
+    "load_zones",
+    "refresh_zone",
+    "query_record",
+    "add_record",
+    "delete_records",
+    "ldap_search_users",
+    "ldap_search_groups",
+    "ldap_search_computers",
+    "smart_dns_health",
+    "smart_ldap_cleanup",
+)
+
+
 def test_key_hints_change_by_side_tab() -> None:
     app = SambatuiApp()
 
@@ -38,18 +52,7 @@ def test_sidebar_action_buttons_are_visible() -> None:
         async with app.run_test():
             buttons = {button.id for button in app.query(Button)}
 
-            assert {
-                "load_zones",
-                "refresh_zone",
-                "query_record",
-                "add_record",
-                "delete_records",
-                "ldap_search_users",
-                "ldap_search_groups",
-                "ldap_search_computers",
-                "smart_dns_health",
-                "smart_ldap_cleanup",
-            }.issubset(buttons)
+            assert set(SIDEBAR_BUTTON_IDS).issubset(buttons)
 
     asyncio.run(run_app())
 
@@ -83,18 +86,7 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
 
     async def run_app() -> None:
         app = ButtonApp()
-        for button_id in [
-            "load_zones",
-            "refresh_zone",
-            "query_record",
-            "add_record",
-            "delete_records",
-            "ldap_search_users",
-            "ldap_search_groups",
-            "ldap_search_computers",
-            "smart_dns_health",
-            "smart_ldap_cleanup",
-        ]:
+        for button_id in SIDEBAR_BUTTON_IDS:
             assert await app.run_sidebar_button_action(button_id)
         assert app.actions == [
             "load_zones",

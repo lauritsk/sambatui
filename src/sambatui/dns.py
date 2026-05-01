@@ -60,7 +60,7 @@ def parse_zones(output: str) -> list[str]:
     zones: list[str] = []
     seen: set[str] = set()
     for line in output.splitlines():
-        if "ZoneName" not in line and "pszZoneName" not in line:
+        if "ZoneName" not in line:
             continue
         _, sep, value = line.partition(":")
         if not sep:
@@ -100,9 +100,7 @@ def valid_dns_name(value: str, *, allow_at: bool = False) -> bool:
 def ptr_target_for_name(name: str, zone: str) -> str:
     if name == "@":
         return zone
-    if name.endswith("."):
-        return name.rstrip(".")
-    if "." in name:
+    if name.endswith(".") or "." in name:
         return name.rstrip(".")
     return f"{name}.{zone}"
 
