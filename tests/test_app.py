@@ -34,6 +34,7 @@ SIDEBAR_BUTTON_IDS = (
     "ldap_search_users",
     "ldap_search_groups",
     "ldap_search_computers",
+    "ldap_load_more",
     "smart_full_health",
     "smart_dns_health",
     "smart_ldap_cleanup",
@@ -121,6 +122,9 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
         async def action_ldap_search_kind(self, kind: str) -> None:
             self.actions.append(f"ldap:{kind}")
 
+        async def action_load_more_directory(self) -> None:
+            self.actions.append("ldap:more")
+
         async def action_smart_view_shortcut(self, shortcut: str) -> None:
             self.actions.append(f"smart:{shortcut}")
 
@@ -138,6 +142,7 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
             "ldap:users",
             "ldap:groups",
             "ldap:computers",
+            "ldap:more",
             "smart:8",
             "smart:1",
             "smart:5",
@@ -185,6 +190,64 @@ def test_ldap_search_fields_accept_default_kind() -> None:
         app = SambatuiApp()
         async with app.run_test():
             assert app.ldap_search_fields("groups")[0][3] == "groups"
+
+    asyncio.run(run_app())
+
+
+def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
+    class DirectoryApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.search_limits: list[int | None] = []
+
+        def save_preferences(self) -> None:
+            return
+
+        async def directory_search_rows(
+            self,
+            client,
+            kind: str,
+            text: str,
+            max_entries: int | None = None,
+        ) -> list[DirectoryRow] | None:
+            self.search_limits.append(max_entries)
+            count = max_entries or 0
+            return [
+                DirectoryRow(
+                    dn=f"CN=User {index},DC=example,DC=com",
+                    kind="user",
+                    name=f"User {index}",
+                    summary="",
+                    attributes={},
+                )
+                for index in range(count)
+            ]
+
+    async def run_app() -> None:
+        app = DirectoryApp()
+        async with app.run_test():
+            values = {
+                "kind": "users",
+                "text": "",
+                "base_dn": "DC=example,DC=com",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+                "max_rows": "200",
+            }
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#user", Input).value = "admin@example.com"
+            app.query_one("#password", Input).value = "secret"
+
+            assert await app.run_directory_search(values)
+            assert app.query_one("#records", DataTable).row_count == 200
+
+            assert await app.load_more_directory()
+            assert app.query_one("#records", DataTable).row_count == 400
+
+            await app.action_refresh()
+
+            assert app.search_limits == [200, 400, 400]
+            assert app.current_directory_max_rows == 400
 
     asyncio.run(run_app())
 

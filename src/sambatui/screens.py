@@ -143,6 +143,7 @@ Main tabs
   LDAP      Search AD directory over LDAP (read-only)
   Smart     Read-only DNS/LDAP hygiene findings
   L         Search LDAP from anywhere
+  m         Load 200 more rows for the last LDAP search
   S         Pick a smart view from a list
   1-8       Run smart views directly; 8 runs full health dashboard
   z         Load DNS zones

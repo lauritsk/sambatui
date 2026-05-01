@@ -318,7 +318,9 @@ class LdapDirectoryClient:
             with suppress(LDAPException):
                 connection.unbind()
 
-    def search(self, kind: str, text: str = "") -> list[DirectoryRow]:
+    def search(
+        self, kind: str, text: str = "", max_entries: int | None = None
+    ) -> list[DirectoryRow]:
         error = self.validation_error()
         if error:
             raise ValueError(error)
@@ -329,8 +331,10 @@ class LdapDirectoryClient:
         try:
             _start_tls_if_needed(connection, self.config, settings)
             _bind_connection(connection)
-            _search_connection(connection, self.config, kind, text)
-            return [entry_to_directory_row(entry, kind) for entry in connection.entries]
+            entries = _search_connection(
+                connection, self.config, kind, text, max_entries
+            )
+            return [entry_to_directory_row(entry, kind) for entry in entries]
         finally:
             with suppress(LDAPException):
                 connection.unbind()
@@ -385,24 +389,52 @@ def _bind_connection(connection: Any) -> None:
 
 
 def _search_connection(
-    connection: Any, config: LdapSearchConfig, kind: str, text: str
-) -> None:
+    connection: Any,
+    config: LdapSearchConfig,
+    kind: str,
+    text: str,
+    max_entries: int | None = None,
+) -> list[Any]:
     from ldap3 import SUBTREE
     from ldap3.core.exceptions import LDAPException
 
     search_filter = build_directory_filter(kind, text)
-    try:
-        ok = connection.search(
-            config.base_dn,
-            search_filter,
-            search_scope=SUBTREE,
-            attributes=list(DEFAULT_LDAP_ATTRIBUTES),
-            paged_size=config.page_size,
-        )
-    except LDAPException as exc:
-        raise ValueError(_ldap_exception_message(exc, "LDAP search failed")) from exc
-    if not ok:
-        raise ValueError(_ldap_result_message(connection.result, "LDAP search failed"))
+    rows: list[Any] = []
+    cookie: bytes | str | None = None
+    while True:
+        try:
+            ok = connection.search(
+                config.base_dn,
+                search_filter,
+                search_scope=SUBTREE,
+                attributes=list(DEFAULT_LDAP_ATTRIBUTES),
+                paged_size=config.page_size,
+                paged_cookie=cookie,
+            )
+        except LDAPException as exc:
+            raise ValueError(
+                _ldap_exception_message(exc, "LDAP search failed")
+            ) from exc
+        if not ok:
+            raise ValueError(
+                _ldap_result_message(connection.result, "LDAP search failed")
+            )
+        for entry in connection.entries:
+            if max_entries is not None and len(rows) >= max_entries:
+                return rows
+            rows.append(entry)
+        cookie = _paged_search_cookie(connection.result)
+        if not cookie:
+            return rows
+
+
+def _paged_search_cookie(result: Mapping[str, Any] | None) -> bytes | str | None:
+    if result is None:
+        return None
+    control = result.get("controls", {}).get("1.2.840.113556.1.4.319", {})
+    value = control.get("value", {}) if isinstance(control, Mapping) else {}
+    cookie = value.get("cookie") if isinstance(value, Mapping) else None
+    return cookie or None
 
 
 def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:

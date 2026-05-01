@@ -222,6 +222,66 @@ def test_check_connection_binds_without_search(monkeypatch: pytest.MonkeyPatch) 
     assert not searched
 
 
+def test_search_follows_paged_results_until_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PagedEntry:
+        def __init__(self, index: int) -> None:
+            self.entry_dn = f"CN=User {index},CN=Users,DC=example,DC=com"
+            self.entry_attributes_as_dict = {
+                "displayName": [f"User {index}"],
+                "objectClass": ["top", "person", "user"],
+            }
+
+    connections = []
+
+    class FakeConnection:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.entries = []
+            self.result = {}
+            self.cookies = []
+            connections.append(self)
+
+        def bind(self) -> bool:
+            return True
+
+        def search(self, *_args: object, **kwargs: object) -> bool:
+            cookie = kwargs.get("paged_cookie")
+            self.cookies.append(cookie)
+            if cookie is None:
+                self.entries = [PagedEntry(1), PagedEntry(2)]
+                next_cookie = b"next"
+            else:
+                self.entries = [PagedEntry(3), PagedEntry(4)]
+                next_cookie = b""
+            self.result = {
+                "controls": {
+                    "1.2.840.113556.1.4.319": {"value": {"cookie": next_cookie}}
+                }
+            }
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    rows = client.search("users", max_entries=3)
+
+    assert [row.name for row in rows] == ["User 1", "User 2", "User 3"]
+    assert connections[0].cookies == [None, b"next"]
+
+
 def test_search_wraps_ldap_session_termination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
