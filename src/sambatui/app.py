@@ -51,7 +51,12 @@ from .config import (
     save_user_config,
     user_config_validation_error,
 )
-from .discovery import discover_ad_services, preferred_domain_controller
+from .discovery import (
+    DiscoveredService,
+    discover_ad_services,
+    normalize_domain,
+    preferred_domain_controller,
+)
 from .dns import (
     NAME_RE,
     REC_RE,
@@ -134,12 +139,13 @@ TableRow = TypeVar("TableRow")
 
 
 KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+P palette  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  Ctrl+O connection  c discover  L search directory  S smart views  / filter  j/k move  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+P palette  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
+    "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search directory  S smart views  / filter  j/k move  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
 DNS_ACTION_BUTTONS = (
+    ("setup_wizard", "Setup wizard"),
     ("load_zones", "Load zones"),
     ("refresh_zone", "Refresh zone"),
     ("query_record", "Query"),
@@ -207,6 +213,7 @@ CHAR_ACTION_NAMES: dict[str, str] = {
     "]": "action_next_side_tab",
     "[": "action_previous_side_tab",
     " ": "action_toggle_select",
+    "w": "action_setup_wizard",
     "z": "action_load_zones",
     "c": "action_discover_ad",
     "r": "action_refresh",
@@ -233,6 +240,12 @@ CASE_SENSITIVE_ACTION_NAMES: dict[str, str] = {
 }
 PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
     ("help", "Show help", "?", "Open the keyboard shortcut and workflow help."),
+    (
+        "setup_wizard",
+        "Run first-run setup wizard",
+        "w",
+        "Enter AD domain and credentials, discover a DC, check DNS/LDAP, and load zones.",
+    ),
     (
         "connection",
         "Open connection settings",
@@ -332,6 +345,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
 )
 PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
     "help": ("action_help", ()),
+    "setup_wizard": ("action_setup_wizard", ()),
     "connection": ("action_connection", ()),
     "load_password": ("load_password", ()),
     "save_password": ("save_password", ()),
@@ -357,6 +371,7 @@ PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
 SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
     "load_password": ("load_password", ()),
     "save_password": ("save_password", ()),
+    "setup_wizard": ("action_setup_wizard", ()),
     "load_zones": ("action_load_zones", ()),
     "refresh_zone": ("action_refresh", ()),
     "query_record": ("action_query", ()),
@@ -422,6 +437,7 @@ class SambatuiApp(App):
         ("question_mark", "help", "Help"),
         ("ctrl+p", "open_command_palette", "Command palette"),
         ("ctrl+o", "connection", "Connection"),
+        ("w", "setup_wizard", "Setup wizard"),
         ("p", "load_password_file", "Load password"),
         ("P", "save_password_file", "Save password"),
         ("z", "load_zones", "Zones"),
@@ -578,7 +594,9 @@ class SambatuiApp(App):
 
         self.set_initial_connection_status()
         if self.connection_needs_setup():
-            self.set_status("Connection incomplete. Press Ctrl+O to configure.")
+            self.set_status(
+                "Connection incomplete. Press w for setup wizard or Ctrl+O."
+            )
         else:
             self.call_after_refresh(self.load_zones)
 
@@ -796,6 +814,180 @@ class SambatuiApp(App):
         action_name, args = action
         await self.invoke_action(action_name, *args)
         return True
+
+    def setup_wizard_fields(self) -> list[FormField]:
+        auth = self.val("auth") or DEFAULT_AUTH
+        kerberos = self.val("kerberos") or DEFAULT_KERBEROS
+        if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
+            kerberos = "required"
+        return [
+            (
+                "AD DNS domain — used to discover domain controllers and zones.",
+                "domain",
+                "example.com",
+                self.discovery_domain_default(),
+            ),
+            (
+                "User — DOMAIN\\user for password auth; optional with Kerberos.",
+                "user",
+                "EXAMPLE\\admin",
+                self.val("user"),
+            ),
+            (
+                "Password — hidden; leave empty for Kerberos or configured password file.",
+                "password",
+                "password",
+                self.val("password"),
+            ),
+            ("Auth mode — password or kerberos.", "auth", "password | kerberos", auth),
+            (
+                "Kerberos option — required is safest for Kerberos setup.",
+                "kerberos",
+                "required | desired | off",
+                kerberos,
+            ),
+            (
+                "LDAP encryption — password bind requires ldaps or starttls.",
+                "ldap_encryption",
+                "ldaps | starttls | off",
+                self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            ),
+            (
+                "LDAP compatibility — use on only for legacy Samba/old TLS DCs.",
+                "ldap_compatibility",
+                "on | off",
+                self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+            ),
+        ]
+
+    def setup_wizard_validation_error(self, values: dict[str, str]) -> str | None:
+        try:
+            normalize_domain(values.get("domain", ""))
+        except ValueError as exc:
+            return str(exc)
+        error = user_config_validation_error(values)
+        if error:
+            return error
+        if (values.get("auth") or DEFAULT_AUTH).casefold() != "password":
+            return None
+        if not values.get("user"):
+            return "Enter username or switch auth to kerberos."
+        if values.get("password") or read_password_file(self.password_file()):
+            return None
+        return "Enter password, load password file, or switch auth to kerberos."
+
+    async def discover_setup_services(self, domain: str) -> list[DiscoveredService]:
+        return await asyncio.to_thread(discover_ad_services, domain)
+
+    def apply_setup_wizard_values(
+        self, domain: str, server: str, values: dict[str, str]
+    ) -> None:
+        auth = values.get("auth") or DEFAULT_AUTH
+        kerberos = values.get("kerberos") or DEFAULT_KERBEROS
+        if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
+            kerberos = "required"
+        password = values.get("password") or read_password_file(self.password_file())
+        self.set_val("server", server)
+        self.set_val("zone", domain)
+        self.set_val("ldap_base", domain_to_base_dn(domain))
+        self.set_val("user", values.get("user", self.val("user")))
+        self.set_val("password", password)
+        self.set_val("auth", auth)
+        self.set_val("kerberos", kerberos)
+        self.set_val(
+            "ldap_encryption", values.get("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION
+        )
+        self.set_val(
+            "ldap_compatibility",
+            values.get("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
+        )
+        self.refresh_connection_summary()
+        self.update_records_title()
+
+    async def check_ldap_connectivity(self) -> str | None:
+        try:
+            await asyncio.to_thread(self.ldap_client().check_connection)
+        except Exception as exc:
+            return str(exc)
+        return None
+
+    def setup_check_failed(self, check: str, message: str, action: str) -> bool:
+        detail = next(
+            (line.strip() for line in message.splitlines() if line.strip()), ""
+        )
+        suffix = f": {detail}" if detail else ""
+        self.report_error(f"Setup {check} check failed{suffix} Action: {action}.")
+        return False
+
+    async def run_setup_wizard(self, values: dict[str, str]) -> bool:
+        domain = normalize_domain(values.get("domain", "")).lower()
+        async with self.busy():
+            self.set_status(f"Setup: discovering domain controllers for {domain}")
+            try:
+                services = await self.discover_setup_services(domain)
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return False
+            controller = preferred_domain_controller(services)
+            if controller is None:
+                self.report_error(f"No AD SRV records found for {domain}")
+                return False
+
+            self.apply_setup_wizard_values(domain, controller.target, values)
+            self.set_status("Setup: checking DNS zones")
+            code, output = await self.run_zonelist()
+            if code != 0:
+                return self.setup_check_failed(
+                    "DNS",
+                    output,
+                    "check credentials, DC reachability, samba-tool rights, and domain",
+                )
+            zones = parse_zones(output)
+            if not zones:
+                return self.setup_check_failed(
+                    "DNS",
+                    "no zones returned",
+                    "check DNS service health and account rights on the selected DC",
+                )
+
+            self.set_status("Setup: checking LDAP bind")
+            ldap_error = await self.check_ldap_connectivity()
+            if ldap_error:
+                return self.setup_check_failed(
+                    "LDAP",
+                    ldap_error,
+                    "check LDAP encryption, credentials, Base DN, firewall, or Kerberos ticket",
+                )
+
+            self.zones = zones
+            self.populate_zones(zones)
+            self.save_preferences()
+
+        if self.val("zone") in self.zones:
+            await self.activate_zone(self.val("zone"), save=False)
+        else:
+            self.set_status(
+                f"Setup complete: loaded {len(self.zones)} zones; select a zone and press Enter"
+            )
+        self.notify(f"Setup complete: loaded {len(self.zones)} zones")
+        return True
+
+    async def open_setup_wizard(self) -> bool:
+        values = await self.form(
+            "First-run setup wizard",
+            "Enter the AD DNS domain and required credentials. sambatui discovers a DC, checks DNS/LDAP connectivity, then loads zones.",
+            self.setup_wizard_fields(),
+            "Run checks",
+            self.setup_wizard_validation_error,
+        )
+        if values is None:
+            self.refresh_connection_summary()
+            return False
+        return await self.run_setup_wizard(values)
+
+    @work
+    async def action_setup_wizard(self) -> None:
+        await self.open_setup_wizard()
 
     async def action_load_password_file(self) -> None:
         await self.load_password()

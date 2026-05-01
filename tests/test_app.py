@@ -10,6 +10,7 @@ from sambatui.app import (
 )
 from textual.widgets import Button, DataTable, Input, Static
 
+from sambatui.discovery import DiscoveredService
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
 from sambatui.ldap_directory import DirectoryRow
 from sambatui.screens import (
@@ -24,6 +25,7 @@ from sambatui.smart_views import SmartViewRow
 
 
 SIDEBAR_BUTTON_IDS = (
+    "setup_wizard",
     "load_zones",
     "refresh_zone",
     "query_record",
@@ -98,6 +100,9 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
             super().__init__()
             self.actions: list[str] = []
 
+        async def action_setup_wizard(self) -> None:
+            self.actions.append("setup")
+
         async def action_load_zones(self) -> None:
             self.actions.append("load_zones")
 
@@ -124,6 +129,7 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
         for button_id in SIDEBAR_BUTTON_IDS:
             assert await app.run_sidebar_button_action(button_id)
         assert app.actions == [
+            "setup",
             "load_zones",
             "refresh",
             "query",
@@ -146,6 +152,9 @@ def test_command_palette_routes_to_existing_actions() -> None:
             super().__init__()
             self.actions: list[str] = []
 
+        async def action_setup_wizard(self) -> None:
+            self.actions.append("setup")
+
         async def action_connection(self) -> None:
             self.actions.append("connection")
 
@@ -160,12 +169,13 @@ def test_command_palette_routes_to_existing_actions() -> None:
 
     async def run_app() -> None:
         app = PaletteApp()
+        assert await app.run_command_palette_action("setup_wizard")
         assert await app.run_command_palette_action("connection")
         assert await app.run_command_palette_action("add_record")
         assert await app.run_command_palette_action("ldap_search_users")
         assert await app.run_command_palette_action("smart_view_1")
         assert not await app.run_command_palette_action("missing")
-        assert app.actions == ["connection", "add", "ldap:users", "smart:1"]
+        assert app.actions == ["setup", "connection", "add", "ldap:users", "smart:1"]
 
     asyncio.run(run_app())
 
@@ -202,6 +212,104 @@ def test_empty_states_explain_next_actions() -> None:
             assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
             assert "Press S" in str(records.get_row_at(0)[3])
             assert "No smart-view findings shown" in str(details.render())
+
+    asyncio.run(run_app())
+
+
+def test_setup_wizard_discovers_checks_and_loads_zones() -> None:
+    class SetupApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.saved_preferences = 0
+            self.ldap_checked = False
+
+        async def discover_setup_services(self, domain: str) -> list[DiscoveredService]:
+            assert domain == "example.com"
+            return [
+                DiscoveredService(
+                    "ldap", "example.com", "dc01.example.com", 389, 0, 100
+                )
+            ]
+
+        async def run_zonelist(self) -> tuple[int, str]:
+            return (
+                0,
+                """
+                pszZoneName : example.com
+                pszZoneName : 2.0.192.in-addr.arpa
+                """,
+            )
+
+        async def check_ldap_connectivity(self) -> str | None:
+            self.ldap_checked = True
+            return None
+
+        async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
+            assert (action, args) == ("query", ["@", "ALL"])
+            return (
+                0,
+                """
+                Name=www, Records=1, Children=0
+                  A: 192.0.2.10 (flags=f0, serial=1, ttl=3600)
+                """,
+            )
+
+        def save_preferences(self) -> None:
+            self.saved_preferences += 1
+
+    async def run_app() -> None:
+        app = SetupApp()
+        async with app.run_test():
+            values = {
+                "domain": "Example.COM.",
+                "user": r"EXAMPLE\admin",
+                "password": "secret",
+                "auth": "password",
+                "kerberos": "off",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+            }
+
+            assert await app.run_setup_wizard(values)
+
+            records = app.query_one("#records", DataTable)
+            assert app.query_one("#server", Input).value == "dc01.example.com"
+            assert app.query_one("#zone", Input).value == "example.com"
+            assert app.query_one("#ldap_base", Input).value == "DC=example,DC=com"
+            assert app.zones == ["example.com", "2.0.192.in-addr.arpa"]
+            assert app.ldap_checked
+            assert app.saved_preferences == 1
+            assert str(records.get_row_at(0)[1]) == "www"
+
+    asyncio.run(run_app())
+
+
+def test_setup_wizard_failed_check_explains_next_action() -> None:
+    class FailedSetupApp(SambatuiApp):
+        async def discover_setup_services(self, domain: str) -> list[DiscoveredService]:
+            return [DiscoveredService("ldap", domain, "dc01.example.com", 389, 0, 100)]
+
+        async def run_zonelist(self) -> tuple[int, str]:
+            return 1, "NT_STATUS_ACCESS_DENIED"
+
+    async def run_app() -> None:
+        app = FailedSetupApp()
+        async with app.run_test():
+            values = {
+                "domain": "example.com",
+                "user": r"EXAMPLE\admin",
+                "password": "secret",
+                "auth": "password",
+                "kerberos": "off",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+            }
+
+            assert not await app.run_setup_wizard(values)
+
+            status = app.query_one("#status", Static)
+            assert "Setup DNS check failed" in str(status.render())
+            assert "Action: check credentials" in str(status.render())
 
     asyncio.run(run_app())
 
@@ -609,6 +717,7 @@ def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
         async with app.run_test() as pilot:
             for key, screen_type in [
                 ("ctrl+o", FormScreen),
+                ("w", FormScreen),
                 ("c", FormScreen),
                 ("L", FormScreen),
                 ("S", SmartViewPickerScreen),

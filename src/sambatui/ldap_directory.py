@@ -303,6 +303,21 @@ class LdapDirectoryClient:
     def validation_error(self) -> str | None:
         return self.config.validation_error()
 
+    def check_connection(self) -> None:
+        error = self.validation_error()
+        if error:
+            raise ValueError(error)
+
+        from ldap3.core.exceptions import LDAPException
+
+        connection, settings = _new_ldap_connection(self.config)
+        try:
+            _start_tls_if_needed(connection, self.config, settings)
+            _bind_connection(connection)
+        finally:
+            with suppress(LDAPException):
+                connection.unbind()
+
     def search(self, kind: str, text: str = "") -> list[DirectoryRow]:
         error = self.validation_error()
         if error:
