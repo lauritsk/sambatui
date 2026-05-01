@@ -24,6 +24,7 @@ from .config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
+from .ldap_directory import DirectoryRow
 from .models import DnsRow
 from .screens import CommandPaletteChoice, FormField
 from .smart_view_catalog import SMART_VIEWS
@@ -59,6 +60,11 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "name": lambda row: row.name.casefold(),
     "type": lambda row: row.rtype.casefold(),
     "value": lambda row: row.value.casefold(),
+}
+DIRECTORY_SORT_KEYS: dict[str, Callable[[DirectoryRow], str]] = {
+    "name": lambda row: row.name.casefold(),
+    "type": lambda row: row.kind.casefold(),
+    "value": lambda row: row.summary.casefold(),
 }
 LDAP_DEFAULT_MAX_ROWS = 200
 LDAP_LOAD_MORE_ROWS = 200

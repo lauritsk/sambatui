@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import suppress
 
+from rich.text import Text
+
 from sambatui.app import (
     DnsRow,
     SambatuiApp,
@@ -1025,6 +1027,46 @@ def test_inline_search_filters_dns_directory_and_smart_views() -> None:
             await pilot.pause()
             assert records.row_count == 1
             assert str(records.get_row_at(0)[3]) == "Duplicate DNS record"
+
+    asyncio.run(run_app())
+
+
+def test_ldap_kind_header_sorts_directory_rows() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Bob,CN=Users,DC=example,DC=com",
+                        kind="user",
+                        name="Bob",
+                        summary="bob@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Ops,CN=Users,DC=example,DC=com",
+                        kind="group",
+                        name="Ops",
+                        summary="ops@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            records = app.query_one("#records", DataTable)
+            column = records.ordered_columns[2]
+
+            app.on_data_table_header_selected(
+                DataTable.HeaderSelected(records, column.key, 2, Text("Kind"))
+            )
+
+            assert [str(records.get_row_at(index)[2]) for index in range(2)] == [
+                "group",
+                "user",
+            ]
+            assert str(app.query_one("#status", Static).render()).startswith(
+                "Sorted LDAP by kind"
+            )
 
     asyncio.run(run_app())
 

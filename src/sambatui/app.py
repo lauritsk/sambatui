@@ -146,6 +146,7 @@ from .app_constants import (
     GUIDED_RECORD_TYPE_FIELDS,
     GUIDED_RECORD_TYPES,
     GUIDED_RECORD_VALUE_FIELDS,
+    DIRECTORY_SORT_KEYS,
     LDAP_DEFAULT_MAX_ROWS,
     LDAP_LOAD_MORE_ROWS,
     LDAP_MAX_ROWS,
@@ -289,6 +290,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.view_mode = "dns"
         self.sort_field = "name"
         self.sort_reverse = False
+        self.directory_sort_field = ""
+        self.directory_sort_reverse = False
         self.search_text = ""
         self._syncing_search_input = False
         self.zones: list[str] = []
@@ -1009,7 +1012,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.view_mode = "directory"
         self.set_records_columns(DIRECTORY_COLUMNS)
         self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
-        self.directory_rows = rows
+        self.directory_rows = self.sorted_directory(rows)
         self.remember_ldap_structure_rows(rows)
         self.populate_ldap_structure(self.ldap_structure_rows)
         self.refresh_directory_view()
@@ -1235,11 +1238,35 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             reverse=self.sort_reverse,
         )
 
+    def sorted_directory(self, rows: list[DirectoryRow]) -> list[DirectoryRow]:
+        if not self.directory_sort_field:
+            return rows
+        return sorted(
+            rows,
+            key=DIRECTORY_SORT_KEYS[self.directory_sort_field],
+            reverse=self.directory_sort_reverse,
+        )
+
+    def sort_directory(self, field: str) -> None:
+        if field not in DIRECTORY_SORT_KEYS:
+            return
+        if self.directory_sort_field == field:
+            self.directory_sort_reverse = not self.directory_sort_reverse
+        else:
+            self.directory_sort_field = field
+            self.directory_sort_reverse = False
+        self.directory_rows = self.sorted_directory(self.directory_rows)
+        self.refresh_directory_view()
+        direction = "desc" if self.directory_sort_reverse else "asc"
+        label = "kind" if field == "type" else "summary" if field == "value" else field
+        self.set_status(f"Sorted LDAP by {label} ({direction})")
+
     def sort_records(self, field: str) -> None:
+        if self.view_mode == "directory":
+            self.sort_directory(field)
+            return
         if self.view_mode != "dns":
-            self.set_status(
-                "Current view is read-only; sorting applies to DNS records."
-            )
+            self.set_status("Current view is read-only; sorting applies to rows.")
             return
         if self.sort_field == field:
             self.sort_reverse = not self.sort_reverse
