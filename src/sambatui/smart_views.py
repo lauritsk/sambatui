@@ -77,32 +77,50 @@ def full_health_dashboard_rows(
 
     for result in results:
         if result.error:
-            failure_rows.append(
-                SmartViewRow(
-                    severity="error",
-                    object=f"{result.source}:{result.label}",
-                    finding=f"{result.label}: Health check failed",
-                    evidence=result.error,
-                    suggested_action="Fix the connection or permissions, then rerun the dashboard.",
-                    source="dashboard",
-                )
-            )
+            failure_rows.append(dashboard_failure_row(result))
             continue
         rows = list(result.rows)
         total_findings += len(rows)
         details.extend((result, row) for row in rows)
-        summary_rows.append(
-            SmartViewRow(
-                severity="summary",
-                object=result.source,
-                finding=result.label,
-                evidence=severity_count_text(rows),
-                suggested_action="Review detailed rows below; high severity first.",
-                source="dashboard",
-            )
-        )
+        summary_rows.append(dashboard_summary_row(result, rows))
 
-    top_row = SmartViewRow(
+    top_row = dashboard_total_row(total_findings, summary_rows, failure_rows)
+    detail_rows = [
+        dashboard_detail_row(result, row) for result, row in sorted_details(details)
+    ]
+    return [top_row, *summary_rows, *failure_rows, *detail_rows]
+
+
+def dashboard_failure_row(result: SmartViewCheckResult) -> SmartViewRow:
+    return SmartViewRow(
+        severity="error",
+        object=f"{result.source}:{result.label}",
+        finding=f"{result.label}: Health check failed",
+        evidence=result.error,
+        suggested_action="Fix the connection or permissions, then rerun the dashboard.",
+        source="dashboard",
+    )
+
+
+def dashboard_summary_row(
+    result: SmartViewCheckResult, rows: Sequence[SmartViewRow]
+) -> SmartViewRow:
+    return SmartViewRow(
+        severity="summary",
+        object=result.source,
+        finding=result.label,
+        evidence=severity_count_text(rows),
+        suggested_action="Review detailed rows below; high severity first.",
+        source="dashboard",
+    )
+
+
+def dashboard_total_row(
+    total_findings: int,
+    summary_rows: Sequence[SmartViewRow],
+    failure_rows: Sequence[SmartViewRow],
+) -> SmartViewRow:
+    return SmartViewRow(
         severity="summary",
         object="Total",
         finding="Full health dashboard",
@@ -113,10 +131,6 @@ def full_health_dashboard_rows(
         suggested_action="Review failures first, then high and medium findings.",
         source="dashboard",
     )
-    detail_rows = [
-        dashboard_detail_row(result, row) for result, row in sorted_details(details)
-    ]
-    return [top_row, *summary_rows, *failure_rows, *detail_rows]
 
 
 def severity_count_text(rows: Sequence[SmartViewRow]) -> str:
@@ -170,17 +184,34 @@ def severity_rank(severity: str) -> int:
 def dns_duplicate_records(
     records_by_zone: Mapping[str, Sequence[DnsRow]],
 ) -> list[SmartViewRow]:
-    findings: list[SmartViewRow] = []
+    buckets, by_name = bucket_dns_records(records_by_zone)
+    return [
+        *duplicate_dns_record_findings(buckets),
+        *cname_conflict_findings(by_name),
+    ]
+
+
+def bucket_dns_records(
+    records_by_zone: Mapping[str, Sequence[DnsRow]],
+) -> tuple[
+    dict[tuple[str, str, str, str], list[DnsRecordRef]],
+    dict[tuple[str, str], list[DnsRecordRef]],
+]:
     buckets: dict[tuple[str, str, str, str], list[DnsRecordRef]] = defaultdict(list)
     by_name: dict[tuple[str, str], list[DnsRecordRef]] = defaultdict(list)
-
     for record in iter_dns_records(records_by_zone):
         if record.rtype == "-":
             continue
         buckets[dns_record_identity(record)].append(record)
         by_name[dns_record_name_key(record)].append(record)
+    return buckets, by_name
 
-    for (_zone, name, rtype, value), duplicates in sorted(buckets.items()):
+
+def duplicate_dns_record_findings(
+    buckets: Mapping[tuple[str, str, str, str], Sequence[DnsRecordRef]],
+) -> list[SmartViewRow]:
+    findings: list[SmartViewRow] = []
+    for (_zone, _name, rtype, value), duplicates in sorted(buckets.items()):
         if len(duplicates) < 2:
             continue
         first = duplicates[0]
@@ -194,8 +225,14 @@ def dns_duplicate_records(
                 source="dns",
             )
         )
+    return findings
 
-    for (_zone, _name), records in sorted(by_name.items()):
+
+def cname_conflict_findings(
+    records_by_name: Mapping[tuple[str, str], Sequence[DnsRecordRef]],
+) -> list[SmartViewRow]:
+    findings: list[SmartViewRow] = []
+    for (_zone, _name), records in sorted(records_by_name.items()):
         types = {record.rtype for record in records}
         if "CNAME" not in types or len(types) == 1:
             continue
@@ -210,7 +247,6 @@ def dns_duplicate_records(
                 source="dns",
             )
         )
-
     return findings
 
 
@@ -223,103 +259,132 @@ def dns_a_without_ptr(
     findings: list[SmartViewRow] = []
 
     for record in iter_dns_records(records_by_zone):
-        if record.rtype != "A":
-            continue
-        if not valid_ipv4(record.value):
-            continue
-        expected = reverse_record_for_ipv4(record.value, zones)
-        if expected is None:
-            continue
-        ptr_zone, ptr_name = expected
-        object_name = f"{record.fqdn} A {record.value}"
-        if normalize_dns_name(ptr_zone) not in zone_names:
-            findings.append(
-                SmartViewRow(
-                    severity="low",
-                    object=object_name,
-                    finding="No loaded reverse zone for A record",
-                    evidence=f"Expected PTR zone {ptr_zone} not loaded.",
-                    suggested_action="Create/load reverse zone, then add PTR if needed.",
-                    source="dns",
-                )
-            )
-            continue
-        key = (normalize_dns_name(ptr_zone), normalize_dns_name(ptr_name))
-        expected_target = normalize_dns_name(record.fqdn)
-        actual_targets = ptr_targets.get(key, set())
-        if not actual_targets:
-            findings.append(
-                SmartViewRow(
-                    severity="medium",
-                    object=object_name,
-                    finding="A record missing PTR",
-                    evidence=f"Expected {ptr_name}.{ptr_zone} PTR {record.fqdn}.",
-                    suggested_action="Add PTR or confirm host should not have reverse DNS.",
-                    source="dns",
-                    fix_action="dns_add_ptr",
-                    fix_label=f"add PTR {ptr_name}.{ptr_zone} -> {record.fqdn}",
-                    fix_zone=ptr_zone,
-                    fix_name=ptr_name,
-                    fix_rtype="PTR",
-                    fix_value=record.fqdn,
-                )
-            )
-        elif expected_target not in actual_targets:
-            findings.append(
-                SmartViewRow(
-                    severity="medium",
-                    object=object_name,
-                    finding="A record PTR points elsewhere",
-                    evidence=f"PTR target(s): {', '.join(sorted(actual_targets))}",
-                    suggested_action="Update PTR to match forward A record, or fix A record.",
-                    source="dns",
-                )
-            )
+        finding = a_record_ptr_finding(record, zones, zone_names, ptr_targets)
+        if finding is not None:
+            findings.append(finding)
     return findings
+
+
+def a_record_ptr_finding(
+    record: DnsRecordRef,
+    zones: Sequence[str],
+    zone_names: set[str],
+    ptr_targets: Mapping[tuple[str, str], set[str]],
+) -> SmartViewRow | None:
+    if record.rtype != "A" or not valid_ipv4(record.value):
+        return None
+
+    expected = reverse_record_for_ipv4(record.value, zones)
+    if expected is None:
+        return None
+
+    ptr_zone, ptr_name = expected
+    object_name = f"{record.fqdn} A {record.value}"
+    if normalize_dns_name(ptr_zone) not in zone_names:
+        return SmartViewRow(
+            severity="low",
+            object=object_name,
+            finding="No loaded reverse zone for A record",
+            evidence=f"Expected PTR zone {ptr_zone} not loaded.",
+            suggested_action="Create/load reverse zone, then add PTR if needed.",
+            source="dns",
+        )
+
+    key = (normalize_dns_name(ptr_zone), normalize_dns_name(ptr_name))
+    expected_target = normalize_dns_name(record.fqdn)
+    actual_targets = ptr_targets.get(key, set())
+    if not actual_targets:
+        return missing_ptr_finding(record, object_name, ptr_zone, ptr_name)
+    if expected_target not in actual_targets:
+        return mismatched_ptr_finding(object_name, actual_targets)
+    return None
+
+
+def missing_ptr_finding(
+    record: DnsRecordRef, object_name: str, ptr_zone: str, ptr_name: str
+) -> SmartViewRow:
+    return SmartViewRow(
+        severity="medium",
+        object=object_name,
+        finding="A record missing PTR",
+        evidence=f"Expected {ptr_name}.{ptr_zone} PTR {record.fqdn}.",
+        suggested_action="Add PTR or confirm host should not have reverse DNS.",
+        source="dns",
+        fix_action="dns_add_ptr",
+        fix_label=f"add PTR {ptr_name}.{ptr_zone} -> {record.fqdn}",
+        fix_zone=ptr_zone,
+        fix_name=ptr_name,
+        fix_rtype="PTR",
+        fix_value=record.fqdn,
+    )
+
+
+def mismatched_ptr_finding(object_name: str, actual_targets: set[str]) -> SmartViewRow:
+    return SmartViewRow(
+        severity="medium",
+        object=object_name,
+        finding="A record PTR points elsewhere",
+        evidence=f"PTR target(s): {', '.join(sorted(actual_targets))}",
+        suggested_action="Update PTR to match forward A record, or fix A record.",
+        source="dns",
+    )
 
 
 def dns_ptr_without_a(
     records_by_zone: Mapping[str, Sequence[DnsRow]],
 ) -> list[SmartViewRow]:
-    forward_a: dict[str, set[str]] = defaultdict(set)
+    forward_a = forward_a_records(records_by_zone)
     findings: list[SmartViewRow] = []
 
     for record in iter_dns_records(records_by_zone):
+        finding = ptr_record_forward_finding(record, forward_a)
+        if finding is not None:
+            findings.append(finding)
+    return findings
+
+
+def forward_a_records(
+    records_by_zone: Mapping[str, Sequence[DnsRow]],
+) -> dict[str, set[str]]:
+    forward_a: dict[str, set[str]] = defaultdict(set)
+    for record in iter_dns_records(records_by_zone):
         if record.rtype == "A" and valid_ipv4(record.value):
             forward_a[normalize_dns_name(record.fqdn)].add(record.value)
+    return forward_a
 
-    for record in iter_dns_records(records_by_zone):
-        if record.rtype != "PTR" or not is_reverse_zone(record.zone):
-            continue
-        ip_value = ipv4_from_ptr_name(record.name, record.zone)
-        if ip_value is None:
-            continue
-        target = normalize_dns_name(record.value)
-        ips = forward_a.get(target, set())
-        object_name = f"{record.name}.{record.zone} PTR {record.value}"
-        if not ips:
-            findings.append(
-                SmartViewRow(
-                    severity="medium",
-                    object=object_name,
-                    finding="PTR target missing forward A",
-                    evidence=f"No loaded A record for {record.value}.",
-                    suggested_action="Add matching A record or remove stale PTR.",
-                    source="dns",
-                )
-            )
-        elif ip_value not in ips:
-            findings.append(
-                SmartViewRow(
-                    severity="medium",
-                    object=object_name,
-                    finding="PTR does not match forward A",
-                    evidence=f"PTR IP {ip_value}; forward A IP(s): {', '.join(sorted(ips))}",
-                    suggested_action="Update PTR or forward A so both directions match.",
-                    source="dns",
-                )
-            )
-    return findings
+
+def ptr_record_forward_finding(
+    record: DnsRecordRef, forward_a: Mapping[str, set[str]]
+) -> SmartViewRow | None:
+    if record.rtype != "PTR" or not is_reverse_zone(record.zone):
+        return None
+
+    ip_value = ipv4_from_ptr_name(record.name, record.zone)
+    if ip_value is None:
+        return None
+
+    target = normalize_dns_name(record.value)
+    ips = forward_a.get(target, set())
+    object_name = f"{record.name}.{record.zone} PTR {record.value}"
+    if not ips:
+        return SmartViewRow(
+            severity="medium",
+            object=object_name,
+            finding="PTR target missing forward A",
+            evidence=f"No loaded A record for {record.value}.",
+            suggested_action="Add matching A record or remove stale PTR.",
+            source="dns",
+        )
+    if ip_value not in ips:
+        return SmartViewRow(
+            severity="medium",
+            object=object_name,
+            finding="PTR does not match forward A",
+            evidence=f"PTR IP {ip_value}; forward A IP(s): {', '.join(sorted(ips))}",
+            suggested_action="Update PTR or forward A so both directions match.",
+            source="dns",
+        )
+    return None
 
 
 def ldap_inactive_users(
@@ -359,45 +424,70 @@ def ldap_delete_candidate_users(
     never_logged_cutoff = now - timedelta(days=never_logged_days)
     findings: list[SmartViewRow] = []
     for row in rows:
-        if row.kind != "user":
-            continue
-        created = first_ad_datetime(row, "whenCreated")
-        changed = first_ad_datetime(row, "whenChanged")
-        last_logon = first_ad_datetime(row, "lastLogonTimestamp", "lastLogon")
-        is_disabled = ldap_is_disabled(row)
-        disabled_reference = changed or created
-        if is_disabled and (
-            disabled_reference is None or disabled_reference < disabled_cutoff
-        ):
-            evidence = disabled_user_evidence(changed, created, now)
-            findings.append(
-                SmartViewRow(
-                    severity="medium",
-                    object=directory_object_name(row),
-                    finding="Disabled user cleanup candidate",
-                    evidence=evidence,
-                    suggested_action="Verify retention/legal hold; delete or archive per policy.",
-                    source="ldap",
-                )
-            )
-            continue
-        if (
-            not is_disabled
-            and last_logon is None
-            and created is not None
-            and created < never_logged_cutoff
-        ):
-            findings.append(
-                SmartViewRow(
-                    severity="low",
-                    object=directory_object_name(row),
-                    finding="User never logged in",
-                    evidence=f"created {age_text(created, now)} ago; no lastLogonTimestamp.",
-                    suggested_action="Confirm onboarding status; disable/delete if abandoned.",
-                    source="ldap",
-                )
-            )
+        finding = delete_candidate_user_finding(
+            row,
+            disabled_cutoff=disabled_cutoff,
+            never_logged_cutoff=never_logged_cutoff,
+            now=now,
+        )
+        if finding is not None:
+            findings.append(finding)
     return findings
+
+
+def delete_candidate_user_finding(
+    row: DirectoryRow,
+    *,
+    disabled_cutoff: datetime,
+    never_logged_cutoff: datetime,
+    now: datetime,
+) -> SmartViewRow | None:
+    if row.kind != "user":
+        return None
+
+    created = first_ad_datetime(row, "whenCreated")
+    changed = first_ad_datetime(row, "whenChanged")
+    last_logon = first_ad_datetime(row, "lastLogonTimestamp", "lastLogon")
+    if ldap_is_disabled(row):
+        return disabled_user_cleanup_finding(
+            row, changed, created, disabled_cutoff, now
+        )
+    if last_logon is None and created is not None and created < never_logged_cutoff:
+        return never_logged_user_finding(row, created, now)
+    return None
+
+
+def disabled_user_cleanup_finding(
+    row: DirectoryRow,
+    changed: datetime | None,
+    created: datetime | None,
+    cutoff: datetime,
+    now: datetime,
+) -> SmartViewRow | None:
+    reference = changed or created
+    if reference is not None and reference >= cutoff:
+        return None
+    return SmartViewRow(
+        severity="medium",
+        object=directory_object_name(row),
+        finding="Disabled user cleanup candidate",
+        evidence=disabled_user_evidence(changed, created, now),
+        suggested_action="Verify retention/legal hold; delete or archive per policy.",
+        source="ldap",
+    )
+
+
+def never_logged_user_finding(
+    row: DirectoryRow, created: datetime, now: datetime
+) -> SmartViewRow:
+    return SmartViewRow(
+        severity="low",
+        object=directory_object_name(row),
+        finding="User never logged in",
+        evidence=f"created {age_text(created, now)} ago; no lastLogonTimestamp.",
+        suggested_action="Confirm onboarding status; disable/delete if abandoned.",
+        source="ldap",
+    )
 
 
 def disabled_user_evidence(
