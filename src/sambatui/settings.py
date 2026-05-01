@@ -177,7 +177,7 @@ class ConnectionSettings:
     def ldap_form_fields(self) -> list[FormField]:
         return [
             (
-                "LDAP base DN — used by read-only directory search.",
+                "LDAP base DN — used by directory search and LDAP edits.",
                 "ldap_base",
                 "DC=example,DC=com",
                 self.ldap_base or domain_to_base_dn(self.domain or self.zone),

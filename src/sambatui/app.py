@@ -48,6 +48,7 @@ from .dns import (
     validate_record,
 )
 from .ldap_directory import (
+    LDAP_EDITABLE_ATTRIBUTES,
     DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
@@ -1045,7 +1046,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def populate_directory(self, rows: list[DirectoryRow]) -> None:
         self.view_mode = "directory"
         self.set_records_columns(DIRECTORY_COLUMNS)
-        self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
+        self.query_one("#records_title", Label).update("Directory (LDAP)")
         self.directory_rows = self.sorted_directory(rows)
         self.remember_ldap_structure_rows(rows)
         self.populate_ldap_structure(self.ldap_structure_rows)
@@ -1561,7 +1562,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     async def open_ldap_search(self, default_kind: str = "users") -> None:
         values = await self.form(
             "Search AD directory",
-            "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; UPN usernames work best.",
+            "LDAP via ldap3. Password bind requires LDAPS/StartTLS; UPN usernames work best.",
             self.ldap_search_fields(default_kind),
             "Search",
         )
@@ -2197,6 +2198,81 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         )
         return None
 
+    def selected_directory_row(self) -> DirectoryRow | None:
+        row = self.visible_row_at(self.visible_directory(), self.records_cursor_row())
+        if row is None:
+            self.notify("Select an LDAP entry first.", severity="error")
+        return row
+
+    def ldap_editable_attributes(self, row: DirectoryRow) -> tuple[str, ...]:
+        return LDAP_EDITABLE_ATTRIBUTES.get(row.kind, ())
+
+    def ldap_attribute_value(self, row: DirectoryRow, attr: str) -> str:
+        values = row.attributes.get(attr, ())
+        return values[0] if values else ""
+
+    def ldap_edit_fields(self, row: DirectoryRow) -> list[FormField]:
+        return [
+            (
+                attr,
+                attr,
+                "new value; leave blank to delete attribute",
+                self.ldap_attribute_value(row, attr),
+            )
+            for attr in self.ldap_editable_attributes(row)
+        ]
+
+    def ldap_attribute_changes(
+        self, row: DirectoryRow, values: dict[str, str]
+    ) -> dict[str, str]:
+        return {
+            attr: values[attr]
+            for attr in self.ldap_editable_attributes(row)
+            if values[attr] != self.ldap_attribute_value(row, attr)
+        }
+
+    def ldap_edit_preview(self, row: DirectoryRow, changes: dict[str, str]) -> str:
+        lines = [
+            f"{attr}: {self.ldap_attribute_value(row, attr) or '<empty>'} -> "
+            f"{value or '<delete>'}"
+            for attr, value in changes.items()
+        ]
+        return "\n".join(["Edit LDAP entry?", "", f"DN: {row.dn}", *lines])
+
+    async def update_ldap_entry(self) -> None:
+        row = self.selected_directory_row()
+        if row is None:
+            return
+        fields = self.ldap_edit_fields(row)
+        if not fields:
+            self.notify(
+                f"No editable LDAP attributes for object type: {row.kind}.",
+                severity="error",
+            )
+            return
+        values = await self.form("Edit LDAP entry", row.dn, fields, "Preview")
+        if not values:
+            return
+        changes = self.ldap_attribute_changes(row, values)
+        if not changes:
+            self.notify("No LDAP attribute changes.")
+            return
+        if not await self.confirm(
+            self.ldap_edit_preview(row, changes), default_confirm=True
+        ):
+            self.notify("LDAP edit cancelled")
+            return
+        async with self.busy():
+            try:
+                await asyncio.to_thread(
+                    self.ldap_client().modify_attributes, row.dn, changes
+                )
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return
+        self.notify("LDAP entry updated")
+        await self.refresh_current_directory_search()
+
     def update_record_fields(self, selected: dict[str, str]) -> list[FormField]:
         return [
             ("Record name", "name", "name, @ for zone root", selected["name"]),
@@ -2253,6 +2329,9 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     @work
     async def action_update(self) -> None:
+        if self.view_mode == "directory":
+            await self.update_ldap_entry()
+            return
         selected = self.selected_record_for_update()
         if selected is None:
             return

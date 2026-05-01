@@ -187,7 +187,7 @@ class HelpScreen(FocusedModalScreen[None]):
 
 Main tabs
   DNS       Load zones, select a zone, manage records
-  LDAP      Search AD directory over LDAP (read-only)
+  LDAP      Search AD directory over LDAP; u edits allowlisted attributes
   Smart     Read-only DNS/LDAP hygiene findings
   L         Search LDAP from anywhere
   m         Load 200 more rows for the last LDAP search
@@ -202,10 +202,11 @@ Navigation
   gg/G      Top/bottom
   Ctrl+d/u  Half-page down/up
 
-Records
-  Enter     Select zone or toggle record select
+Records / directory
+  Enter     Select zone or toggle DNS record select
   q         Query records
-  a/u/d     Add, update, delete records
+  a/d       Add or delete DNS records
+  u         Update DNS record or selected LDAP attributes
   /         Inline search source records; filters loaded smart findings
   n/t/e     Sort by name/type/value
   Space     Toggle record selection
