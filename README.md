@@ -176,7 +176,11 @@ LDAP search, or running smart views.
   previewed PTR records for A-without-PTR findings. LDAP findings remain
   read-only/export-only.
 - `q`: query one name/type.
-- `a`: add record.
+- `a`: add record with a guided type picker. The add flow shows only fields
+  relevant to A, AAAA, CNAME, PTR, TXT, MX, SRV, or NS records, validates input
+  before preview, checks loaded records for duplicates, previews the exact
+  `samba-tool dns add` command, and suggests a matching PTR when a loaded
+  reverse zone matches an A-record address.
 - `u`: update selected record.
 - `d`: delete selected records.
 - `/`: focus the inline live filter for DNS records, LDAP rows, or smart-view

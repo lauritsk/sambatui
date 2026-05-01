@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from ipaddress import ip_address
+from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, TypeAlias
 from urllib.parse import urlparse
 
@@ -76,6 +78,7 @@ class ConfirmScreen(ModalScreen[bool]):
 
 
 FormField: TypeAlias = tuple[str, str, str, str]
+FormValidator: TypeAlias = Callable[[dict[str, str]], str | None]
 SmartViewChoice: TypeAlias = tuple[str, str, str, str, str]
 CommandPaletteChoice: TypeAlias = tuple[str, str, str, str]
 
@@ -374,6 +377,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
     }
     #form_title { text-style: bold; color: $accent; margin-bottom: 1; }
     #form_hint { color: $text-muted; margin-bottom: 1; }
+    #form_error { color: $error; margin-bottom: 1; }
     #form_fields { height: auto; max-height: 72%; margin-bottom: 1; }
     .hint { color: $text-muted; margin-bottom: 0; }
     .form_row { height: auto; margin-bottom: 1; }
@@ -388,12 +392,14 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
         hint: str,
         fields: list[FormField],
         submit_label: str = "Continue",
+        validator: FormValidator | None = None,
     ) -> None:
         super().__init__()
         self.form_title = title
         self.hint = hint
         self.fields = fields
         self.submit_label = submit_label
+        self.validator = validator
         self._autofilled: dict[str, str] = {}
         self._suppress_autofill = False
 
@@ -402,6 +408,8 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             yield Static(self.form_title, id="form_title")
             if self.hint:
                 yield Static(self.hint, id="form_hint")
+            if self.validator:
+                yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 for label, field_id, placeholder, value in self.fields:
                     yield Static(label, classes="hint")
@@ -452,20 +460,38 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
             self._suppress_autofill = False
         self._autofilled[field_id] = value
 
+    def validation_error(self) -> str | None:
+        if self.validator is None:
+            return None
+        return self.validator(self.form_values())
+
+    def refresh_validation(self) -> str | None:
+        error = self.validation_error()
+        with suppress(Exception):
+            self.query_one("#form_error", Static).update(error or "")
+        with suppress(Exception):
+            self.query_one("#submit", Button).disabled = error is not None
+        return error
+
     def submit(self) -> None:
+        if self.refresh_validation() is not None:
+            return
         self.dismiss(self.form_values())
 
     def on_mount(self) -> None:
         self.maybe_autofill_connection_fields()
+        self.refresh_validation()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._suppress_autofill:
             return
         field_id = str(event.input.id)
         if self._autofilled.get(field_id) == event.input.value.strip():
+            self.refresh_validation()
             return
         self._autofilled.pop(field_id, None)
         self.maybe_autofill_connection_fields()
+        self.refresh_validation()
 
     def on_key(self, event: Any) -> None:
         if isinstance(self.focused, Button) and event.key in {"enter", "space"}:

@@ -73,6 +73,7 @@ from .screens import (
     ConfirmScreen,
     FormField,
     FormScreen,
+    FormValidator,
     HelpScreen,
     SmartViewChoice,
     SmartViewPickerScreen,
@@ -151,6 +152,7 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "type": lambda row: row.rtype.casefold(),
     "value": lambda row: row.value.casefold(),
 }
+GUIDED_RECORD_TYPES = ("A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
 KEY_ACTION_NAMES: dict[str, str] = {
     "ctrl+o": "action_connection",
     "ctrl+p": "action_open_command_palette",
@@ -710,9 +712,10 @@ class SambatuiApp(App):
         hint: str,
         fields: list[FormField],
         submit_label: str = "Continue",
+        validator: FormValidator | None = None,
     ) -> dict[str, str] | None:
         return await self.push_screen_wait(
-            FormScreen(title, hint, fields, submit_label)
+            FormScreen(title, hint, fields, submit_label, validator)
         )
 
     def action_help(self) -> None:
@@ -1614,36 +1617,164 @@ class SambatuiApp(App):
             args.append(f"--ttl={ttl}")
         return args
 
+    def record_type_selection_error(self, values: dict[str, str]) -> str | None:
+        rtype = (values.get("rtype") or "").upper()
+        if rtype in GUIDED_RECORD_TYPES:
+            return None
+        return f"Choose one of: {', '.join(GUIDED_RECORD_TYPES)}."
+
+    def add_record_type_fields(self, rtype: str) -> list[FormField]:
+        rtype = rtype.upper()
+        fields: list[FormField] = [("Record name", "name", "name, @ for zone root", "")]
+        match rtype:
+            case "A":
+                fields.append(("IPv4 address", "address", "192.0.2.10", ""))
+            case "AAAA":
+                fields.append(("IPv6 address", "address", "2001:db8::10", ""))
+            case "CNAME":
+                fields.append(("Canonical target", "target", "host.example.com.", ""))
+            case "PTR":
+                fields.append(("PTR target", "target", "host.example.com.", ""))
+            case "TXT":
+                fields.append(
+                    ("TXT text", "text", "v=spf1 include:example.com ~all", "")
+                )
+            case "MX":
+                fields.extend(
+                    [
+                        ("Priority", "priority", "10", "10"),
+                        ("Mail exchanger", "target", "mail.example.com.", ""),
+                    ]
+                )
+            case "SRV":
+                fields.extend(
+                    [
+                        ("Priority", "priority", "0", "0"),
+                        ("Weight", "weight", "100", "100"),
+                        ("Port", "port", "389", ""),
+                        ("Target", "target", "dc01.example.com.", ""),
+                    ]
+                )
+            case "NS":
+                fields.append(("Name server", "target", "ns1.example.com.", ""))
+        fields.append(("TTL", "ttl", "optional seconds, e.g. 3600", ""))
+        return fields
+
+    def add_record_value_from_fields(self, rtype: str, values: dict[str, str]) -> str:
+        match rtype.upper():
+            case "A" | "AAAA":
+                return values.get("address", "")
+            case "CNAME" | "PTR" | "NS":
+                return values.get("target", "")
+            case "TXT":
+                return values.get("text", "")
+            case "MX":
+                return (
+                    f"{values.get('priority', '')} {values.get('target', '')}".strip()
+                )
+            case "SRV":
+                return " ".join(
+                    values.get(key, "")
+                    for key in ("priority", "weight", "port", "target")
+                ).strip()
+        return values.get("value", "")
+
+    def ttl_error(self, ttl: str) -> str | None:
+        if not ttl:
+            return None
+        if not ttl.isdecimal():
+            return "TTL must be whole seconds, e.g. 3600."
+        if int(ttl) <= 0:
+            return "TTL must be greater than zero."
+        return None
+
+    def duplicate_record_error(self, name: str, rtype: str, value: str) -> str | None:
+        for row in self.record_rows:
+            if row.name == name and row.rtype == rtype and row.value == value:
+                return "Duplicate record already exists in the loaded zone view."
+        return None
+
+    def guided_add_record_error(self, rtype: str, values: dict[str, str]) -> str | None:
+        name = values.get("name", "")
+        value = self.add_record_value_from_fields(rtype, values)
+        ttl = values.get("ttl", "")
+        return (
+            validate_record(name, rtype, value)
+            or self.ttl_error(ttl)
+            or self.duplicate_record_error(name, rtype.upper(), value)
+        )
+
+    def existing_reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
+        reverse = self.reverse_record_for_ipv4(ip_value)
+        if reverse is None:
+            return None
+        ptr_zone, ptr_name = reverse
+        if ptr_zone not in self.zones:
+            return None
+        return ptr_zone, ptr_name
+
+    def ptr_preview_text(self, name: str, rtype: str, value: str) -> str:
+        if rtype != "A":
+            return "PTR suggestion: not applicable."
+        reverse = self.existing_reverse_record_for_ipv4(value)
+        if reverse is None:
+            return "PTR suggestion: no loaded reverse zone matches this IPv4 address."
+        ptr_zone, ptr_name = reverse
+        ptr_target = self.ptr_target_for_name(name)
+        return f"PTR suggestion: reverse zone exists; {ptr_zone}: {ptr_name} PTR {ptr_target}"
+
+    def add_record_preview(self, name: str, rtype: str, value: str, ttl: str) -> str:
+        args = self.add_record_args(name, rtype, value, ttl)
+        client = self.samba_client()
+        command = " ".join(
+            client.redact_command(client.dns_command("add", self.val("zone"), args))
+        )
+        return (
+            "Add DNS record?\n\n"
+            f"Zone: {self.val('zone')}\n"
+            f"Record: {name} {rtype} {value}\n"
+            f"TTL: {ttl or 'default'}\n"
+            f"{self.ptr_preview_text(name, rtype, value)}\n\n"
+            f"Command preview: {command}"
+        )
+
     @work
     async def action_add(self) -> None:
-        values = await self.form(
-            "Add DNS record",
-            f"Zone: {self.val('zone')}. Examples: A=192.0.2.10, CNAME=target.example.com., PTR=host.example.com.",
+        type_values = await self.form(
+            "Add DNS record — choose type",
+            f"Zone: {self.val('zone')}. Guided flow shows fields for one record type.",
             [
-                ("Record name", "name", "name, @ for zone root", ""),
                 (
                     "Record type",
                     "rtype",
-                    "A / AAAA / CNAME / PTR / TXT / MX / SRV",
+                    "A / AAAA / CNAME / PTR / TXT / MX / SRV / NS",
                     "A",
                 ),
-                ("DNS value", "value", "value for selected type", ""),
-                ("TTL", "ttl", "optional", ""),
             ],
-            "Add",
+            "Next",
+            self.record_type_selection_error,
+        )
+        if not type_values:
+            return
+        rtype = (type_values["rtype"] or "A").upper()
+        values = await self.form(
+            f"Add {rtype} record",
+            "Invalid input is caught before confirmation. Examples are shown in each field.",
+            self.add_record_type_fields(rtype),
+            "Preview",
+            lambda form_values: self.guided_add_record_error(rtype, form_values),
         )
         if not values:
             return
         name = values["name"]
-        rtype = (values["rtype"] or "A").upper()
-        value = values["value"]
+        value = self.add_record_value_from_fields(rtype, values)
         ttl = values["ttl"]
-        error = validate_record(name, rtype, value)
+        error = self.guided_add_record_error(rtype, values)
         if error:
             self.report_error(error)
             return
         if not await self.confirm(
-            f"Add DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype} {value}\nTTL: {ttl or 'default'}",
+            self.add_record_preview(name, rtype, value, ttl),
             default_confirm=True,
         ):
             self.notify("Add cancelled")
