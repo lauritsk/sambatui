@@ -49,6 +49,15 @@ DEFAULT_LDAP_ATTRIBUTES = (
     "servicePrincipalName",
     "proxyAddresses",
 )
+LDAP_EDITABLE_ATTRIBUTES = {
+    "user": ("displayName", "mail", "description"),
+    "group": ("description", "mail"),
+    "computer": ("description",),
+    "ou": ("description",),
+}
+_ALL_LDAP_EDITABLE_ATTRIBUTES = frozenset(
+    attr for attrs in LDAP_EDITABLE_ATTRIBUTES.values() for attr in attrs
+)
 
 _KIND_FILTERS: Mapping[str, str] = {
     "users": "(&(objectCategory=person)(objectClass=user))",
@@ -252,13 +261,15 @@ def ldap_server_tls(config: LdapSearchConfig) -> LdapCompatibilityTls | None:
     return LdapCompatibilityTls()
 
 
-def ldap_connection_kwargs(config: LdapSearchConfig) -> dict[str, Any]:
+def ldap_connection_kwargs(
+    config: LdapSearchConfig, *, read_only: bool = True
+) -> dict[str, Any]:
     from ldap3 import GSSAPI, NTLM, SASL, SIMPLE
 
     common: dict[str, Any] = {
         "receive_timeout": config.timeout,
         "auto_bind": False,
-        "read_only": True,
+        "read_only": read_only,
     }
     if config.normalized_auth_mode == "kerberos":
         common.update(
@@ -334,6 +345,43 @@ class LdapDirectoryClient:
             one_level=True,
         )
 
+    def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
+        error = self.validation_error()
+        if error:
+            raise ValueError(error)
+        invalid = sorted(set(changes) - _ALL_LDAP_EDITABLE_ATTRIBUTES)
+        if invalid:
+            raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
+        if not changes:
+            return
+
+        from ldap3 import MODIFY_DELETE, MODIFY_REPLACE
+        from ldap3.core.exceptions import LDAPException
+
+        connection, settings = _new_ldap_connection(self.config, read_only=False)
+        try:
+            _start_tls_if_needed(connection, self.config, settings)
+            _bind_connection(connection)
+            ldap_changes = {
+                attr: [(MODIFY_DELETE, [])]
+                if value == ""
+                else [(MODIFY_REPLACE, [value])]
+                for attr, value in changes.items()
+            }
+            try:
+                modified = connection.modify(dn, ldap_changes)
+            except LDAPException as exc:
+                raise ValueError(
+                    _ldap_exception_message(exc, "LDAP modify failed")
+                ) from exc
+            if not modified:
+                raise ValueError(
+                    _ldap_result_message(connection.result, "LDAP modify failed")
+                )
+        finally:
+            with suppress(LDAPException):
+                connection.unbind()
+
     def _search_rows(
         self,
         search_filter: str,
@@ -365,7 +413,9 @@ class LdapDirectoryClient:
                 connection.unbind()
 
 
-def _new_ldap_connection(config: LdapSearchConfig) -> tuple[Any, LdapServerSettings]:
+def _new_ldap_connection(
+    config: LdapSearchConfig, *, read_only: bool = True
+) -> tuple[Any, LdapServerSettings]:
     from ldap3 import Connection, Server
 
     settings = parse_ldap_server(config.server, config.normalized_encryption)
@@ -377,7 +427,9 @@ def _new_ldap_connection(config: LdapSearchConfig) -> tuple[Any, LdapServerSetti
         tls=ldap_server_tls(config),
         connect_timeout=config.timeout,
     )
-    return Connection(server, **ldap_connection_kwargs(config)), settings
+    return Connection(
+        server, **ldap_connection_kwargs(config, read_only=read_only)
+    ), settings
 
 
 def _start_tls_if_needed(

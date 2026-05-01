@@ -1,7 +1,7 @@
 import ssl
 
 import pytest
-from ldap3 import GSSAPI, LEVEL, NONE, SASL
+from ldap3 import GSSAPI, LEVEL, MODIFY_DELETE, MODIFY_REPLACE, NONE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
 from sambatui.ldap_directory import (
@@ -273,6 +273,69 @@ def test_child_containers_searches_one_level(
         "(|(objectClass=organizationalUnit)(objectClass=container)(objectClass=builtinDomain))",
     )
     assert captured["search_scope"] == LEVEL
+
+
+def test_modify_attributes_replaces_and_deletes_allowed_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections = []
+
+    class FakeConnection:
+        result = {}
+
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.modified: tuple[str, object] | None = None
+            connections.append(self)
+
+        def bind(self) -> bool:
+            return True
+
+        def modify(self, dn: str, changes: object) -> bool:
+            self.modified = (dn, changes)
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    client.modify_attributes(
+        "CN=Alice,DC=example,DC=com", {"displayName": "Alice A", "mail": ""}
+    )
+
+    assert connections[0].kwargs["read_only"] is False
+    assert connections[0].modified == (
+        "CN=Alice,DC=example,DC=com",
+        {
+            "displayName": [(MODIFY_REPLACE, ["Alice A"])],
+            "mail": [(MODIFY_DELETE, [])],
+        },
+    )
+
+
+def test_modify_attributes_rejects_unlisted_attributes() -> None:
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    with pytest.raises(ValueError, match="LDAP attribute is not editable: memberOf"):
+        client.modify_attributes("CN=Alice,DC=example,DC=com", {"memberOf": "x"})
 
 
 def test_search_follows_paged_results_until_limit(

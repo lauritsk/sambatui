@@ -213,7 +213,7 @@ class AppNavigationMixin(App):
     def ensure_dns_records_view(self) -> bool:
         if self.view_mode == "dns":
             return True
-        self.set_status("Current view is read-only.")
+        self.set_status("Selection only applies to DNS records.")
         return False
 
     def action_toggle_select(self) -> None:

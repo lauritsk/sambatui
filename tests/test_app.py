@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import suppress
-from typing import cast
+from typing import Any, cast
 
 from rich.text import Text
 
@@ -21,7 +21,9 @@ from sambatui.ldap_directory import DirectoryRow, LdapDirectoryClient
 from sambatui.screens import (
     CommandPaletteScreen,
     ConfirmScreen,
+    FormField,
     FormScreen,
+    FormValidator,
     SmartViewPickerScreen,
     command_palette_choice_matches,
 )
@@ -247,6 +249,97 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
 
             assert app.search_limits == [200, 400, 400]
             assert app.current_directory_max_rows == 400
+
+    asyncio.run(run_app())
+
+
+def test_update_ldap_entry_edits_changed_allowlisted_attributes() -> None:
+    class FakeLdapClient:
+        def __init__(self, app: Any) -> None:
+            self.app = app
+
+        def modify_attributes(self, dn: str, changes: dict[str, str]) -> None:
+            self.app.modified = (dn, changes)
+
+    class LdapEditApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.modified: tuple[str, dict[str, str]] | None = None
+            self.confirm_message = ""
+            self.refreshed = False
+
+        async def form(
+            self,
+            title: str,
+            hint: str,
+            fields: list[FormField],
+            submit_label: str = "Continue",
+            validator: FormValidator | None = None,
+        ) -> dict[str, str] | None:
+            assert title == "Edit LDAP entry"
+            assert hint == "CN=Alice,DC=example,DC=com"
+            assert fields == [
+                (
+                    "displayName",
+                    "displayName",
+                    "new value; leave blank to delete attribute",
+                    "Alice",
+                ),
+                (
+                    "mail",
+                    "mail",
+                    "new value; leave blank to delete attribute",
+                    "alice@example.com",
+                ),
+                (
+                    "description",
+                    "description",
+                    "new value; leave blank to delete attribute",
+                    "same",
+                ),
+            ]
+            return {"displayName": "Alice Admin", "mail": "", "description": "same"}
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            self.confirm_message = message
+            assert default_confirm is True
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> Any:
+            return FakeLdapClient(self)
+
+        async def refresh_current_directory_search(self) -> bool:
+            self.refreshed = True
+            return True
+
+    async def run_app() -> None:
+        app = LdapEditApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={
+                            "displayName": ("Alice",),
+                            "mail": ("alice@example.com",),
+                            "description": ("same",),
+                        },
+                    )
+                ]
+            )
+
+            await app.update_ldap_entry()
+
+            assert app.modified == (
+                "CN=Alice,DC=example,DC=com",
+                {"displayName": "Alice Admin", "mail": ""},
+            )
+            assert "displayName: Alice -> Alice Admin" in app.confirm_message
+            assert "mail: alice@example.com -> <delete>" in app.confirm_message
+            assert app.refreshed
 
     asyncio.run(run_app())
 
