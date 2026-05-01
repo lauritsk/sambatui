@@ -68,6 +68,8 @@ from .ldap_directory import (
 from .models import DnsRow
 from .remediation import actionable_error, bounded_int
 from .screens import (
+    CommandPaletteChoice,
+    CommandPaletteScreen,
     ConfirmScreen,
     FormField,
     FormScreen,
@@ -123,9 +125,9 @@ TableRow = TypeVar("TableRow")
 
 
 KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / filter  Space select",
-    "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / filter results  j/k move  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
+    "dns_tab": "DNS: ? help  Ctrl+P palette  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  Ctrl+O connection  c discover  L search directory  S smart views  / filter  j/k move  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+P palette  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
 DNS_ACTION_BUTTONS = (
@@ -151,6 +153,7 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
 }
 KEY_ACTION_NAMES: dict[str, str] = {
     "ctrl+o": "action_connection",
+    "ctrl+p": "action_open_command_palette",
     "escape": "action_clear_navigation_state",
     "tab": "action_next_table",
     "shift+tab": "action_previous_table",
@@ -197,6 +200,129 @@ CASE_SENSITIVE_ACTION_NAMES: dict[str, str] = {
     "S": "action_smart_view",
     "V": "action_select_range",
 }
+PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
+    ("help", "Show help", "?", "Open the keyboard shortcut and workflow help."),
+    (
+        "connection",
+        "Open connection settings",
+        "Ctrl+O",
+        "Edit server, zone, auth, LDAP, and smart-view defaults.",
+    ),
+    (
+        "load_password",
+        "Load password file",
+        "p",
+        "Load the configured password file after checking permissions.",
+    ),
+    (
+        "save_password",
+        "Save password file",
+        "P",
+        "Write the current password field to disk with chmod 600.",
+    ),
+    (
+        "discover_ad",
+        "Discover AD domain controller",
+        "c",
+        "Find domain controllers from DNS SRV records and fill connection fields.",
+    ),
+    ("load_zones", "Load DNS zones", "z", "List DNS zones from samba-tool."),
+    (
+        "refresh",
+        "Refresh current view",
+        "r",
+        "Reload the current DNS zone or rerun the active smart view.",
+    ),
+    ("query_record", "Query DNS records", "q", "Query one DNS name and type."),
+    ("add_record", "Add DNS record", "a", "Create a DNS record in the active zone."),
+    (
+        "update_record",
+        "Update selected DNS record",
+        "u",
+        "Edit one selected DNS record, including type changes.",
+    ),
+    (
+        "delete_records",
+        "Delete selected DNS records",
+        "d",
+        "Delete selected DNS records after confirmation.",
+    ),
+    (
+        "filter_results",
+        "Filter current results",
+        "/",
+        "Focus inline search for DNS, LDAP, or smart-view rows.",
+    ),
+    (
+        "ldap_search",
+        "Search LDAP directory",
+        "L",
+        "Search AD users, groups, computers, OUs, or all entries.",
+    ),
+    (
+        "ldap_search_users",
+        "Search LDAP users",
+        "",
+        "Open LDAP search prefilled for users.",
+    ),
+    (
+        "ldap_search_groups",
+        "Search LDAP groups",
+        "",
+        "Open LDAP search prefilled for groups.",
+    ),
+    (
+        "ldap_search_computers",
+        "Search LDAP computers",
+        "",
+        "Open LDAP search prefilled for computers.",
+    ),
+    (
+        "smart_view_picker",
+        "Pick smart view",
+        "S",
+        "Choose a DNS or LDAP health view from a list.",
+    ),
+    *(
+        (
+            f"smart_view_{view.shortcut}",
+            f"Run smart view: {view.label}",
+            view.shortcut,
+            view.description,
+        )
+        for view in SMART_VIEWS
+    ),
+    (
+        "fix_smart",
+        "Fix selected smart finding",
+        "f",
+        "Apply the available guided DNS fix for the selected smart-view finding.",
+    ),
+)
+PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
+    "help": ("action_help", ()),
+    "connection": ("action_connection", ()),
+    "load_password": ("load_password", ()),
+    "save_password": ("save_password", ()),
+    "discover_ad": ("action_discover_ad", ()),
+    "load_zones": ("action_load_zones", ()),
+    "refresh": ("action_refresh", ()),
+    "query_record": ("action_query", ()),
+    "add_record": ("action_add", ()),
+    "update_record": ("action_update", ()),
+    "delete_records": ("action_delete", ()),
+    "filter_results": ("action_search", ()),
+    "ldap_search": ("action_ldap_search", ()),
+    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
+    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
+    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
+    "smart_view_picker": ("action_smart_view", ()),
+    **{
+        f"smart_view_{view.shortcut}": ("action_smart_view_shortcut", (view.shortcut,))
+        for view in SMART_VIEWS
+    },
+    "fix_smart": ("action_fix_smart", ()),
+}
 SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
     "load_password": ("load_password", ()),
     "save_password": ("save_password", ()),
@@ -234,6 +360,7 @@ __all__ = [
     "DEFAULT_ZONE",
     "NAME_RE",
     "REC_RE",
+    "CommandPaletteScreen",
     "ConfirmScreen",
     "DnsRow",
     "FormField",
@@ -261,6 +388,7 @@ class SambatuiApp(App):
 
     BINDINGS = [
         ("question_mark", "help", "Help"),
+        ("ctrl+p", "open_command_palette", "Command palette"),
         ("ctrl+o", "connection", "Connection"),
         ("p", "load_password_file", "Load password"),
         ("P", "save_password_file", "Save password"),
@@ -589,6 +717,22 @@ class SambatuiApp(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+    async def action_open_command_palette(self) -> None:
+        action_id = await self.push_screen_wait(
+            CommandPaletteScreen(list(PALETTE_ACTIONS))
+        )
+        if action_id is None:
+            return
+        await self.run_command_palette_action(action_id)
+
+    async def run_command_palette_action(self, action_id: str | None) -> bool:
+        action = PALETTE_ACTION_MAP.get(action_id or "")
+        if action is None:
+            return False
+        action_name, args = action
+        await self.invoke_action(action_name, *args)
+        return True
 
     def action_load_password_file(self) -> None:
         self.load_password()
