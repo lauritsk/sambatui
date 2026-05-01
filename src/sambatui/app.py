@@ -856,9 +856,9 @@ class SambatuiApp(App):
                 self.discovery_domain_default(),
             ),
             (
-                "User — DOMAIN\\user for password auth; optional with Kerberos.",
+                "User — DOMAIN\\user or UPN; UPN is preferred for LDAP password bind.",
                 "user",
-                "EXAMPLE\\admin",
+                "admin@example.com",
                 self.val("user"),
             ),
             (
@@ -881,7 +881,7 @@ class SambatuiApp(App):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — use on only for legacy Samba/old TLS DCs.",
+                "LDAP compatibility — only for legacy DCs; with password auth prefer UPN user.",
                 "ldap_compatibility",
                 "on | off",
                 self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
@@ -1541,7 +1541,7 @@ class SambatuiApp(App):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility",
+                "LDAP compatibility — if on with password auth, prefer UPN user",
                 "ldap_compatibility",
                 "on | off",
                 self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
@@ -1588,7 +1588,7 @@ class SambatuiApp(App):
     async def open_ldap_search(self, default_kind: str = "users") -> None:
         values = await self.form(
             "Search AD directory",
-            "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; kerberos uses current ticket.",
+            "Read-only LDAP via ldap3. Password bind requires LDAPS/StartTLS; UPN usernames work best.",
             self.ldap_search_fields(default_kind),
             "Search",
         )
