@@ -74,7 +74,9 @@ def test_sidebar_uses_current_list_widgets() -> None:
         async with app.run_test():
             assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
-            assert app.query_one("#ldap_structure", DataTable).row_count >= 5
+            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            app.populate_ldap_structure([])
+            assert app.query_one("#ldap_structure", DataTable).row_count == 5
 
     asyncio.run(run_app())
 
@@ -240,24 +242,29 @@ def test_ldap_sidebar_top_level_items_load_directory_views() -> None:
             app.query_one("#user", Input).value = "admin@example.com"
             app.query_one("#password", Input).value = "secret"
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            app.populate_ldap_structure([])
             structure = app.query_one("#ldap_structure", DataTable)
 
-            # Groups is preloaded in LDAP sidebar; activating it runs same reload path
-            # as pressing Enter/clicking a DNS zone.
-            structure.move_cursor(row=1)
+            # Root is preloaded and acts as the all-entries load/refresh action.
+            assert str(structure.get_row_at(0)[0]) == "DC=example,DC=com"
+            assert await app.activate_sidebar_selection(structure)
+            assert app.searches == [("all", "", 200)]
+
+            # Categories live below the root instead of being separate top buttons.
+            structure.move_cursor(row=2)
             assert await app.activate_sidebar_selection(structure)
 
             records = app.query_one("#records", DataTable)
-            assert app.searches == [("groups", "", 200)]
+            assert app.searches[-1] == ("groups", "", 200)
             assert app.view_mode == "directory"
             assert str(records.get_row_at(0)[1]) == "Ops"
-            assert structure.cursor_row == 1
+            assert structure.cursor_row == 2
 
             # Discovered structure rows remain actionable: clicking CN=Users filters all.
-            structure.move_cursor(row=6)
+            structure.move_cursor(row=5)
             assert await app.activate_sidebar_selection(structure)
             assert app.searches[-1] == ("all", "CN=Users", 200)
-            assert structure.cursor_row == 6
+            assert structure.cursor_row == 5
 
     asyncio.run(run_app())
 
@@ -281,7 +288,7 @@ def test_empty_states_explain_next_actions() -> None:
             assert "Press L" in str(records.get_row_at(0)[3])
             assert "No LDAP entries shown" in str(details.render())
             ldap_structure = app.query_one("#ldap_structure", DataTable)
-            assert str(ldap_structure.get_row_at(0)[0]) == "Users"
+            assert "LDAP base DN" in str(ldap_structure.get_row_at(0)[0])
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
             assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
@@ -555,9 +562,9 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
             assert "LDAP details" in str(details.render())
             assert "sAMAccountName: alice" in str(details.render())
             ldap_structure = app.query_one("#ldap_structure", DataTable)
-            assert str(ldap_structure.get_row_at(0)[0]) == "Users"
-            assert str(ldap_structure.get_row_at(5)[0]) == "DC=example,DC=com"
-            assert str(ldap_structure.get_row_at(6)[0]) == "  CN=Users"
+            assert str(ldap_structure.get_row_at(0)[0]) == "DC=example,DC=com"
+            assert str(ldap_structure.get_row_at(1)[0]) == "  Users"
+            assert str(ldap_structure.get_row_at(5)[0]) == "  CN=Users"
 
             app.populate_smart_view(
                 "DNS duplicates/conflicts",

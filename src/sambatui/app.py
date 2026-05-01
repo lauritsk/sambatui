@@ -157,12 +157,11 @@ class SidebarItem:
     action: str
 
 
-LDAP_SIDEBAR_ITEMS: tuple[SidebarItem, ...] = (
-    SidebarItem("Users", "users", "ldap_kind"),
-    SidebarItem("Groups", "groups", "ldap_kind"),
-    SidebarItem("Computers", "computers", "ldap_kind"),
-    SidebarItem("Organizational Units", "ous", "ldap_kind"),
-    SidebarItem("All LDAP entries", "all", "ldap_kind"),
+LDAP_CATEGORY_ITEMS: tuple[SidebarItem, ...] = (
+    SidebarItem("  Users", "users", "ldap_kind"),
+    SidebarItem("  Groups", "groups", "ldap_kind"),
+    SidebarItem("  Computers", "computers", "ldap_kind"),
+    SidebarItem("  Organizational Units", "ous", "ldap_kind"),
 )
 
 __all__ = [
@@ -951,18 +950,35 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.select_zone_cursor(self.val("zone"))
 
     def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
-        items = list(LDAP_SIDEBAR_ITEMS)
-        labels = ldap_structure_labels(rows, self.ldap_base_default())
-        items.extend(SidebarItem(label, label.strip(), "ldap_dn") for label in labels)
+        base_dn = self.ldap_base_default()
+        if not base_dn:
+            return [
+                SidebarItem(
+                    "No LDAP base DN — set connection or setup wizard", "", "empty"
+                )
+            ]
+
+        items = [SidebarItem(base_dn, base_dn, "ldap_root"), *LDAP_CATEGORY_ITEMS]
+        base_key = base_dn.casefold()
+        labels = ldap_structure_labels(rows, base_dn)
+        items.extend(
+            SidebarItem(label, label.strip(), "ldap_dn")
+            for label in labels
+            if label.strip().casefold() != base_key
+        )
         return items
 
     def active_ldap_sidebar_item(self) -> SidebarItem | None:
         values = self.current_directory_values
         kind = values.get("kind", "")
         text = values.get("text", "")
+        if kind == "all" and not text:
+            return SidebarItem(
+                self.ldap_base_default(), self.ldap_base_default(), "ldap_root"
+            )
         if kind == "all" and text:
             return SidebarItem(text, text, "ldap_dn")
-        if kind in {item.value for item in LDAP_SIDEBAR_ITEMS}:
+        if kind in {item.value for item in LDAP_CATEGORY_ITEMS}:
             return SidebarItem("", kind, "ldap_kind")
         return None
 
@@ -1044,6 +1060,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             return False
         if item.action == "dns_zone":
             return await self.activate_zone(item.value)
+        if item.action == "ldap_root":
+            return await self.activate_ldap_sidebar("all")
         if item.action == "ldap_kind":
             return await self.activate_ldap_sidebar(item.value)
         if item.action == "ldap_dn":
