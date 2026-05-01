@@ -10,6 +10,7 @@ from ldap3.core.exceptions import LDAPPackageUnavailableError
 
 from sambatui.client import SambaToolClient, SambaToolConfig
 from sambatui.config import (
+    DEFAULT_AUTH,
     load_user_config,
     password_file_warning,
     read_password_file,
@@ -394,7 +395,7 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
         "password_file": str(tmp_path / "pw"),
     }
     settings = ConnectionSettings.from_lookup(lambda key: values[key])
-    assert settings.summary == "dc · example.com · password auth"
+    assert settings.summary == f"dc · example.com · {DEFAULT_AUTH} auth"
     assert settings.needs_setup(lambda _path: "loaded") is False
     assert ConnectionSettings(server="", zone="z").needs_setup(lambda _path: "") is True
     assert (

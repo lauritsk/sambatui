@@ -258,6 +258,29 @@ def test_zone_activation_restores_saved_zone_and_updates_title() -> None:
     asyncio.run(run_app())
 
 
+def test_load_password_can_fix_open_permissions(tmp_path) -> None:
+    class PasswordApp(SambatuiApp):
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            self.confirm_message = message
+            return True
+
+    async def run_app() -> None:
+        path = tmp_path / "password"
+        path.write_text("secret\n", encoding="utf-8")
+        path.chmod(0o644)
+        app = PasswordApp()
+        async with app.run_test():
+            app.query_one("#password_file", Input).value = str(path)
+
+            await app.load_password()
+
+            assert app.query_one("#password", Input).value == "secret"
+            assert "chmod 600" in app.confirm_message
+            assert path.stat().st_mode & 0o077 == 0
+
+    asyncio.run(run_app())
+
+
 def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
