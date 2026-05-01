@@ -6,6 +6,7 @@ import shutil
 import socket
 from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -145,6 +146,22 @@ from .app_constants import (
 )
 
 TableRow = TypeVar("TableRow")
+
+
+@dataclass(frozen=True)
+class SidebarItem:
+    label: str
+    value: str
+    action: str
+
+
+LDAP_SIDEBAR_ITEMS: tuple[SidebarItem, ...] = (
+    SidebarItem("Users", "users", "ldap_kind"),
+    SidebarItem("Groups", "groups", "ldap_kind"),
+    SidebarItem("Computers", "computers", "ldap_kind"),
+    SidebarItem("Organizational Units", "ous", "ldap_kind"),
+    SidebarItem("All LDAP entries", "all", "ldap_kind"),
+)
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -361,6 +378,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.search_text = ""
         self._syncing_search_input = False
         self.zones: list[str] = []
+        self.sidebar_items: dict[str, list[SidebarItem]] = {}
         self.pending_g = False
 
     def initialize_view(self) -> None:
@@ -886,25 +904,36 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                     f"Loaded {len(zones)} zones; select a zone and press Enter"
                 )
 
-    def populate_zones(self, zones: list[str]) -> None:
-        table = self.query_one("#zones", DataTable)
+    def populate_sidebar_table(
+        self, table_id: str, items: Sequence[SidebarItem]
+    ) -> None:
+        table = self.query_one(f"#{table_id}", DataTable)
+        self.sidebar_items[table_id] = list(items)
         table.clear()
-        if not zones:
-            table.add_row("No zones loaded — press z to load zones")
-            return
-        for zone in zones:
-            table.add_row(zone)
+        for item in items:
+            table.add_row(item.label)
+
+    def sidebar_item_at(self, table_id: str, row_index: int) -> SidebarItem | None:
+        items = self.sidebar_items.get(table_id, [])
+        if row_index < 0 or row_index >= len(items):
+            return None
+        return items[row_index]
+
+    def populate_zones(self, zones: list[str]) -> None:
+        items = [SidebarItem(zone, zone, "dns_zone") for zone in zones] or [
+            SidebarItem("No zones loaded — press z to load zones", "", "empty")
+        ]
+        self.populate_sidebar_table("zones", items)
         self.select_zone_cursor(self.val("zone"))
 
-    def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
-        table = self.query_one("#ldap_structure", DataTable)
-        table.clear()
+    def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
+        items = list(LDAP_SIDEBAR_ITEMS)
         labels = ldap_structure_labels(rows, self.ldap_base_default())
-        if not labels:
-            table.add_row("No LDAP structure loaded — press L to search LDAP")
-            return
-        for label in labels:
-            table.add_row(label)
+        items.extend(SidebarItem(label, label.strip(), "ldap_dn") for label in labels)
+        return items
+
+    def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
+        self.populate_sidebar_table("ldap_structure", self.ldap_sidebar_items(rows))
 
     def select_zone_cursor(self, zone: str) -> None:
         if not zone or zone not in self.zones:
@@ -940,6 +969,45 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.set_status(f"Loading records for {zone}")
         await self.refresh_current_zone()
         return True
+
+    def ldap_sidebar_values(self, kind: str, text: str = "") -> dict[str, str]:
+        return {
+            "kind": kind,
+            "text": text,
+            "base_dn": self.ldap_base_default(),
+            "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            "ldap_compatibility": self.val("ldap_compatibility")
+            or DEFAULT_LDAP_COMPATIBILITY,
+            "max_rows": str(LDAP_DEFAULT_MAX_ROWS),
+        }
+
+    async def activate_ldap_sidebar(self, kind: str, text: str = "") -> bool:
+        with suppress(Exception):
+            self.query_one("#side_tabs", TabbedContent).active = "ldap_tab"
+            self.refresh_key_hints()
+        label = kind if not text else text
+        self.set_status(f"Loading LDAP {label}")
+        return await self.run_directory_search(
+            self.ldap_sidebar_values(kind, text),
+            default_kind=kind,
+            action="Loaded",
+        )
+
+    async def activate_sidebar_item(self, item: SidebarItem | None) -> bool:
+        if item is None or item.action == "empty":
+            return False
+        if item.action == "dns_zone":
+            return await self.activate_zone(item.value)
+        if item.action == "ldap_kind":
+            return await self.activate_ldap_sidebar(item.value)
+        if item.action == "ldap_dn":
+            return await self.activate_ldap_sidebar("all", item.value)
+        return False
+
+    async def activate_sidebar_selection(self, table: DataTable) -> bool:
+        return await self.activate_sidebar_item(
+            self.sidebar_item_at(str(table.id or ""), table.cursor_row)
+        )
 
     def set_records_columns(self, columns: tuple[str, ...]) -> None:
         if self.records_columns == columns:

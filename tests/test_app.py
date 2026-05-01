@@ -74,7 +74,7 @@ def test_sidebar_uses_current_list_widgets() -> None:
         async with app.run_test():
             assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
-            assert app.query_one("#ldap_structure", DataTable).row_count == 1
+            assert app.query_one("#ldap_structure", DataTable).row_count >= 5
 
     asyncio.run(run_app())
 
@@ -206,6 +206,60 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
     asyncio.run(run_app())
 
 
+def test_ldap_sidebar_top_level_items_load_directory_views() -> None:
+    class SidebarApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.searches: list[tuple[str, str, int | None]] = []
+
+        def save_preferences(self) -> None:
+            return
+
+        async def directory_search_rows(
+            self,
+            client,
+            kind: str,
+            text: str,
+            max_entries: int | None = None,
+        ) -> list[DirectoryRow] | None:
+            self.searches.append((kind, text, max_entries))
+            return [
+                DirectoryRow(
+                    dn="CN=Ops,CN=Users,DC=example,DC=com",
+                    kind="group",
+                    name="Ops",
+                    summary="",
+                    attributes={},
+                )
+            ]
+
+    async def run_app() -> None:
+        app = SidebarApp()
+        async with app.run_test():
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#user", Input).value = "admin@example.com"
+            app.query_one("#password", Input).value = "secret"
+            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            structure = app.query_one("#ldap_structure", DataTable)
+
+            # Groups is preloaded in LDAP sidebar; activating it runs same reload path
+            # as pressing Enter/clicking a DNS zone.
+            structure.move_cursor(row=1)
+            assert await app.activate_sidebar_selection(structure)
+
+            records = app.query_one("#records", DataTable)
+            assert app.searches == [("groups", "", 200)]
+            assert app.view_mode == "directory"
+            assert str(records.get_row_at(0)[1]) == "Ops"
+
+            # Discovered structure rows remain actionable: clicking CN=Users filters all.
+            structure.move_cursor(row=6)
+            assert await app.activate_sidebar_selection(structure)
+            assert app.searches[-1] == ("all", "CN=Users", 200)
+
+    asyncio.run(run_app())
+
+
 def test_empty_states_explain_next_actions() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
@@ -225,7 +279,7 @@ def test_empty_states_explain_next_actions() -> None:
             assert "Press L" in str(records.get_row_at(0)[3])
             assert "No LDAP entries shown" in str(details.render())
             ldap_structure = app.query_one("#ldap_structure", DataTable)
-            assert "LDAP structure" in str(ldap_structure.get_row_at(0)[0])
+            assert str(ldap_structure.get_row_at(0)[0]) == "Users"
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
             assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
@@ -474,8 +528,9 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
             assert "LDAP details" in str(details.render())
             assert "sAMAccountName: alice" in str(details.render())
             ldap_structure = app.query_one("#ldap_structure", DataTable)
-            assert str(ldap_structure.get_row_at(0)[0]) == "DC=example,DC=com"
-            assert str(ldap_structure.get_row_at(1)[0]) == "  CN=Users"
+            assert str(ldap_structure.get_row_at(0)[0]) == "Users"
+            assert str(ldap_structure.get_row_at(5)[0]) == "DC=example,DC=com"
+            assert str(ldap_structure.get_row_at(6)[0]) == "  CN=Users"
 
             app.populate_smart_view(
                 "DNS duplicates/conflicts",
