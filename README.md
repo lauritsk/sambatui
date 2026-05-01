@@ -156,6 +156,8 @@ LDAP search, or running smart views.
 
 ## Use
 
+- `Ctrl+P`: open a searchable command palette for common DNS, LDAP, smart-view,
+  connection, password, and help actions.
 - `z` or **Load DNS zones**: list zones, including reverse zones. If the
   saved zone is still available, its records are restored automatically.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV

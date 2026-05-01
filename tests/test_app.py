@@ -12,7 +12,13 @@ from textual.widgets import Button, DataTable, Input, Static
 
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
 from sambatui.ldap_directory import DirectoryRow
-from sambatui.screens import ConfirmScreen, FormScreen, SmartViewPickerScreen
+from sambatui.screens import (
+    CommandPaletteScreen,
+    ConfirmScreen,
+    FormScreen,
+    SmartViewPickerScreen,
+    command_palette_choice_matches,
+)
 from sambatui.smart_views import SmartViewRow
 
 
@@ -44,6 +50,33 @@ def test_actionable_error_adds_concise_remediation() -> None:
     )
     assert "run kinit" in actionable_error("Kerberos ticket expired")
     assert actionable_error("") == ""
+
+
+def test_command_palette_search_matches_label_shortcut_and_description() -> None:
+    choice = (
+        "ldap_search_users",
+        "Search LDAP users",
+        "",
+        "Open LDAP search prefilled for users.",
+    )
+
+    assert command_palette_choice_matches(choice, "ldap users")
+    assert command_palette_choice_matches(choice, "prefilled")
+    assert not command_palette_choice_matches(choice, "dns zone")
+
+
+def test_command_palette_filters_choices() -> None:
+    screen = CommandPaletteScreen(
+        [
+            ("add_record", "Add DNS record", "a", "Create a DNS record."),
+            ("ldap_search", "Search LDAP directory", "L", "Search AD entries."),
+        ]
+    )
+
+    assert [choice[0] for choice in screen.matching_choices("dns")] == ["add_record"]
+    assert [choice[0] for choice in screen.matching_choices("search")] == [
+        "ldap_search"
+    ]
 
 
 def test_sidebar_action_buttons_are_visible() -> None:
@@ -100,6 +133,36 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
             "smart:1",
             "smart:5",
         ]
+
+    asyncio.run(run_app())
+
+
+def test_command_palette_routes_to_existing_actions() -> None:
+    class PaletteApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.actions: list[str] = []
+
+        async def action_connection(self) -> None:
+            self.actions.append("connection")
+
+        async def action_add(self) -> None:
+            self.actions.append("add")
+
+        async def action_ldap_search_kind(self, kind: str) -> None:
+            self.actions.append(f"ldap:{kind}")
+
+        async def action_smart_view_shortcut(self, shortcut: str) -> None:
+            self.actions.append(f"smart:{shortcut}")
+
+    async def run_app() -> None:
+        app = PaletteApp()
+        assert await app.run_command_palette_action("connection")
+        assert await app.run_command_palette_action("add_record")
+        assert await app.run_command_palette_action("ldap_search_users")
+        assert await app.run_command_palette_action("smart_view_1")
+        assert not await app.run_command_palette_action("missing")
+        assert app.actions == ["connection", "add", "ldap:users", "smart:1"]
 
     asyncio.run(run_app())
 
