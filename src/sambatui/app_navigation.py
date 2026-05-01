@@ -14,7 +14,6 @@ from .app_constants import (
     SIDE_TAB_IDS,
 )
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
-from .ui.tables import DNS_EMPTY_STATE
 
 
 class AppNavigationMixin(App):
@@ -32,7 +31,7 @@ class AppNavigationMixin(App):
 
         def action_smart_view_shortcut(self, shortcut: str) -> Any: ...
 
-        async def activate_zone(self, zone: str) -> bool: ...
+        async def activate_sidebar_selection(self, table: DataTable) -> bool: ...
 
         def clear_record_selection(self) -> None: ...
 
@@ -121,7 +120,7 @@ class AppNavigationMixin(App):
         current_index = SIDE_TAB_IDS.index(current)
         tabs.active = SIDE_TAB_IDS[(current_index + delta) % len(SIDE_TAB_IDS)]
         self.refresh_key_hints()
-        if tabs.active == "dns_tab":
+        if tabs.active in {"dns_tab", "ldap_tab"}:
             self.action_focus_zones()
         else:
             self.action_focus_records()
@@ -316,13 +315,8 @@ class AppNavigationMixin(App):
             else:
                 self.action_toggle_select()
             return
-        if table and table.id == "zones":
-            try:
-                row = table.get_row_at(table.cursor_row)
-            except Exception:
-                return
-            if row:
-                await self.activate_zone(str(row[0]))
+        if table and table.id in {"zones", "ldap_structure"}:
+            await self.activate_sidebar_selection(table)
 
     async def on_key(self, event: Any) -> None:
         if self.handle_inline_search_key(event):
@@ -422,16 +416,9 @@ class AppNavigationMixin(App):
             self.update_details_pane()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id != "zones":
+        if event.data_table.id not in {"zones", "ldap_structure"}:
             return
-        row = event.data_table.get_row_at(event.cursor_row)
-        if not row:
-            return
-        zone = str(row[0])
-        if zone not in self.zones:
-            self.set_status(DNS_EMPTY_STATE[1])
-            return
-        await self.activate_zone(zone)
+        await self.activate_sidebar_selection(event.data_table)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         if event.data_table.id != "records":
