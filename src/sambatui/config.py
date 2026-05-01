@@ -32,8 +32,8 @@ CHOICE_VALUES = {
     "ldap_encryption": frozenset({"off", "ldaps", "starttls"}),
     "auto_ptr": frozenset({"ask", "on", "off"}),
 }
-ON_VALUES = frozenset({"1", "true", "yes", "on", "legacy", "compat", "compatibility"})
-OFF_VALUES = frozenset({"0", "false", "no", "off"})
+ON_VALUES = frozenset({"on"})
+OFF_VALUES = frozenset({"off"})
 INTEGER_RANGES = {
     "smart_days": (1, None),
     "smart_disabled_days": (1, None),

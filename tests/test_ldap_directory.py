@@ -72,17 +72,17 @@ def test_search_config_accepts_kerberos_without_password() -> None:
     )
 
 
-def test_search_config_accepts_legacy_compatibility_mode() -> None:
+def test_search_config_accepts_ldap_compatibility_on() -> None:
     config = LdapSearchConfig(
         server="dc01.example.com",
         user="EXAMPLE\\admin",
         password="secret",
         base_dn="DC=example,DC=com",
-        compatibility="legacy",
+        compatibility="on",
     )
 
     assert config.validation_error() is None
-    assert config.legacy_compatibility_enabled
+    assert config.compatibility_enabled
     assert ldap_server_get_info(config) == NONE
     tls = ldap_server_tls(config)
     assert tls is not None
@@ -146,7 +146,7 @@ def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
     assert kwargs["cred_store"] == {"ccache": "FILE:/tmp/krb5cc_test"}
 
 
-def test_search_passes_legacy_tls_to_ldap_server(
+def test_search_passes_compatibility_tls_to_ldap_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}

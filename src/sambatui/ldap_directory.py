@@ -15,11 +15,9 @@ DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
 LdapAuthMode = Literal["password", "kerberos"]
 LDAP_AUTH_MODES = frozenset({"password", "kerberos"})
 LDAP_ENCRYPTION_MODES = frozenset({"off", "ldaps", "starttls"})
-LDAP_COMPATIBILITY_ON = frozenset(
-    {"1", "true", "yes", "on", "legacy", "compat", "compatibility"}
-)
-LDAP_COMPATIBILITY_OFF = frozenset({"", "0", "false", "no", "off"})
-LEGACY_LDAP_TLS_CIPHERS = "DEFAULT:@SECLEVEL=0"
+LDAP_COMPATIBILITY_ON = frozenset({"on"})
+LDAP_COMPATIBILITY_OFF = frozenset({"", "off"})
+LDAP_COMPATIBILITY_TLS_CIPHERS = "DEFAULT:@SECLEVEL=0"
 LDAP_SEARCH_KINDS: tuple[DirectorySearchKind, ...] = (
     "users",
     "groups",
@@ -95,7 +93,7 @@ class LdapSearchConfig:
         return (self.compatibility or "off").casefold()
 
     @property
-    def legacy_compatibility_enabled(self) -> bool:
+    def compatibility_enabled(self) -> bool:
         return ldap_compatibility_enabled(self.compatibility)
 
     def validation_error(self) -> str | None:
@@ -209,24 +207,24 @@ def ldap_compatibility_enabled(value: str) -> bool:
 def ldap_server_get_info(config: LdapSearchConfig) -> str:
     from ldap3 import ALL, NONE
 
-    return NONE if config.legacy_compatibility_enabled else ALL
+    return NONE if config.compatibility_enabled else ALL
 
 
-class LegacyLdapTls(Tls):
+class LdapCompatibilityTls(Tls):
     def __init__(self) -> None:
         super().__init__(
             validate=ssl.CERT_NONE,
             version=ssl.PROTOCOL_TLS_CLIENT,
-            ciphers=LEGACY_LDAP_TLS_CIPHERS,
+            ciphers=LDAP_COMPATIBILITY_TLS_CIPHERS,
         )
 
     def wrap_socket(self, connection: Any, do_handshake: bool = False) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
-        _allow_legacy_tls_versions(context)
+        _allow_compatibility_tls_versions(context)
         with suppress(ssl.SSLError):
-            context.set_ciphers(LEGACY_LDAP_TLS_CIPHERS)
+            context.set_ciphers(LDAP_COMPATIBILITY_TLS_CIPHERS)
         connection.socket = context.wrap_socket(
             connection.socket,
             server_side=False,
@@ -234,7 +232,7 @@ class LegacyLdapTls(Tls):
         )
 
 
-def _allow_legacy_tls_versions(context: ssl.SSLContext) -> None:
+def _allow_compatibility_tls_versions(context: ssl.SSLContext) -> None:
     minimum = getattr(ssl.TLSVersion, "TLSv1", None)
     if minimum is not None:
         with warnings.catch_warnings(), suppress(ValueError, ssl.SSLError):
@@ -246,10 +244,10 @@ def _allow_legacy_tls_versions(context: ssl.SSLContext) -> None:
             context.options &= ~option
 
 
-def ldap_server_tls(config: LdapSearchConfig) -> LegacyLdapTls | None:
-    if config.normalized_encryption == "off" or not config.legacy_compatibility_enabled:
+def ldap_server_tls(config: LdapSearchConfig) -> LdapCompatibilityTls | None:
+    if config.normalized_encryption == "off" or not config.compatibility_enabled:
         return None
-    return LegacyLdapTls()
+    return LdapCompatibilityTls()
 
 
 def ldap_connection_kwargs(config: LdapSearchConfig) -> dict[str, Any]:
