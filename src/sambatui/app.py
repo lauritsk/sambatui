@@ -935,6 +935,15 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             return None
         return items[row_index]
 
+    def select_sidebar_cursor(self, table_id: str, target: SidebarItem) -> bool:
+        table = self.query_one(f"#{table_id}", DataTable)
+        for row_index, item in enumerate(self.sidebar_items.get(table_id, [])):
+            if item.action == target.action and item.value == target.value:
+                with suppress(Exception):
+                    table.move_cursor(row=row_index)
+                return True
+        return False
+
     def populate_zones(self, zones: list[str]) -> None:
         items = [SidebarItem(zone, zone, "dns_zone") for zone in zones] or [
             SidebarItem("No zones loaded — press z to load zones", "", "empty")
@@ -975,25 +984,16 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     def select_ldap_sidebar_cursor(self) -> None:
         active_item = self.active_ldap_sidebar_item()
-        if active_item is None:
-            return
-        table = self.query_one("#ldap_structure", DataTable)
-        for row_index, item in enumerate(self.sidebar_items.get("ldap_structure", [])):
-            if item.action == active_item.action and item.value == active_item.value:
-                with suppress(Exception):
-                    table.move_cursor(row=row_index)
-                return
+        if active_item is not None:
+            self.select_sidebar_cursor("ldap_structure", active_item)
 
     def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
         self.populate_sidebar_table("ldap_structure", self.ldap_sidebar_items(rows))
         self.select_ldap_sidebar_cursor()
 
     def select_zone_cursor(self, zone: str) -> None:
-        if not zone or zone not in self.zones:
-            return
-        table = self.query_one("#zones", DataTable)
-        with suppress(Exception):
-            table.move_cursor(row=self.zones.index(zone))
+        if zone:
+            self.select_sidebar_cursor("zones", SidebarItem("", zone, "dns_zone"))
 
     async def restore_active_zone_records(self) -> bool:
         zone = self.val("zone")
@@ -1488,11 +1488,14 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             ),
         ]
 
-    def apply_ldap_connection_values(self, values: dict[str, str]) -> None:
+    def apply_ldap_connection_values(
+        self, values: dict[str, str], *, refresh_sidebar: bool = True
+    ) -> None:
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
-        self.populate_ldap_structure(self.directory_rows)
+        if refresh_sidebar:
+            self.populate_ldap_structure(self.directory_rows)
         self.save_preferences()
 
     async def directory_search_rows(
@@ -1522,7 +1525,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         max_rows: int | None = None,
         action: str = "Loaded",
     ) -> bool:
-        self.apply_ldap_connection_values(values)
+        self.apply_ldap_connection_values(values, refresh_sidebar=False)
         limit = max_rows if max_rows is not None else self.ldap_search_max_rows(values)
         client = self.ldap_client(values["base_dn"])
         error = client.validation_error()
