@@ -123,8 +123,8 @@ TableRow = TypeVar("TableRow")
 
 
 KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / search  Space select",
-    "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / search results  j/k move  r refresh",
+    "dns_tab": "DNS: ? help  Ctrl+O connection  z zones  c discover  S smart  1-3 DNS smart  q query  a add  u update  d delete  / filter  Space select",
+    "ldap_tab": "LDAP: ? help  Ctrl+O connection  c discover  L search directory  S smart views  / filter results  j/k move  r refresh",
     "smart_tab": "Smart: ? help  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
@@ -362,7 +362,13 @@ class SambatuiApp(App):
                 yield Static("Ready", id="status")
 
             with Vertical(id="results", classes="panel"):
-                yield Label("Records", id="records_title", classes="section-title")
+                with Horizontal(id="records_header"):
+                    yield Label("Records", id="records_title", classes="section-title")
+                    yield Input(
+                        "",
+                        placeholder="/ search current results",
+                        id="inline_search",
+                    )
                 table = DataTable(id="records", cursor_type="row")
                 table.add_columns(*DNS_COLUMNS)
                 yield table
@@ -388,6 +394,7 @@ class SambatuiApp(App):
         self.sort_field = "name"
         self.sort_reverse = False
         self.search_text = ""
+        self._syncing_search_input = False
         self.zones: list[str] = []
         self.pending_g = False
         self.refresh_connection_summary()
@@ -1148,7 +1155,7 @@ class SambatuiApp(App):
         )
         if rows is None:
             return
-        self.search_text = ""
+        self.set_search_text("", refresh=False)
         self.populate_directory(rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
 
@@ -1286,7 +1293,7 @@ class SambatuiApp(App):
     def populate_smart_view_results(
         self, label: str, rows: list[SmartViewRow], max_rows: int
     ) -> None:
-        self.search_text = ""
+        self.set_search_text("", refresh=False)
         self.populate_smart_view(label, rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
@@ -1614,18 +1621,30 @@ class SambatuiApp(App):
             self.notify(f"Deleted with {failed} failure(s)", severity="error")
         await self.refresh_current_zone()
 
-    @work
-    async def action_search(self) -> None:
-        values = await self.form(
-            "Search records",
-            "Searches name, type, and value. Empty search clears filter.",
-            [("Search text", "search", "search text", self.search_text)],
-            "Search",
+    def sync_inline_search_input(self) -> None:
+        with suppress(Exception):
+            search = self.query_one("#inline_search", Input)
+            if search.value == self.search_text:
+                return
+            self._syncing_search_input = True
+            try:
+                search.value = self.search_text
+            finally:
+                self._syncing_search_input = False
+
+    def set_search_text(self, text: str, *, refresh: bool = True) -> None:
+        self.search_text = text
+        self.sync_inline_search_input()
+        if refresh:
+            self.refresh_current_view()
+
+    def action_search(self) -> None:
+        self.pending_g = False
+        search = self.query_one("#inline_search", Input)
+        search.focus()
+        self.set_status(
+            "Inline search: type to filter; Esc clears, Enter returns to table"
         )
-        if values is None:
-            return
-        self.search_text = values["search"]
-        self.refresh_current_view()
 
     def focused_table(self) -> DataTable | None:
         focused = self.focused
@@ -1826,6 +1845,15 @@ class SambatuiApp(App):
 
     def action_clear_navigation_state(self) -> None:
         self.pending_g = False
+        if self.focused_inline_search():
+            if self.search_text:
+                self.set_search_text("")
+                self.action_focus_records()
+                self.set_status("Search cleared")
+                return
+            self.action_focus_records()
+            self.set_status("Search closed")
+            return
         if self.visual_selecting:
             self.visual_selecting = False
             self.set_status(
@@ -1837,8 +1865,7 @@ class SambatuiApp(App):
             self.set_status("Selection cleared")
             return
         if self.search_text:
-            self.search_text = ""
-            self.refresh_current_view()
+            self.set_search_text("")
             self.set_status("Search cleared")
             return
         self.action_focus_records()
@@ -1861,12 +1888,31 @@ class SambatuiApp(App):
                 await self.activate_zone(str(row[0]))
 
     async def on_key(self, event: Any) -> None:
+        if self.handle_inline_search_key(event):
+            event.prevent_default()
+            event.stop()
+            return
         if self.should_ignore_key_event(event):
             return
         handled = await self.handle_key(event.key, getattr(event, "character", None))
         if handled:
             event.prevent_default()
             event.stop()
+
+    def focused_inline_search(self) -> bool:
+        return isinstance(self.focused, Input) and self.focused.id == "inline_search"
+
+    def handle_inline_search_key(self, event: Any) -> bool:
+        if not self.focused_inline_search():
+            return False
+        if event.key == "escape":
+            self.action_clear_navigation_state()
+            return True
+        if event.key == "enter":
+            self.action_focus_records()
+            self.set_status("Search kept; press Esc to clear it")
+            return True
+        return False
 
     def should_ignore_key_event(self, event: Any) -> bool:
         if isinstance(self.focused, Input):
@@ -1964,6 +2010,15 @@ class SambatuiApp(App):
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         await self.run_sidebar_button_action(event.button.id)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "inline_search":
+            return
+        event.stop()
+        if getattr(self, "_syncing_search_input", False):
+            return
+        self.search_text = event.value
+        self.refresh_current_view()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "records":

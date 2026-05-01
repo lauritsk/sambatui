@@ -177,7 +177,8 @@ LDAP search, or running smart views.
 - `a`: add record.
 - `u`: update selected record.
 - `d`: delete selected records.
-- `/`: search by name, type, or value.
+- `/`: focus the inline live filter for DNS records, LDAP rows, or smart-view
+  findings; `Esc` clears it.
 - `n` / `t` / `e`: sort by name/type/value.
 - `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
 - `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`:

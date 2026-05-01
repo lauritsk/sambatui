@@ -32,6 +32,9 @@ Screen { layout: vertical; }
 .action-buttons Button { margin-bottom: 1; }
 
 .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
+#records_header { height: 3; }
+#records_title { width: 1fr; }
+#inline_search { width: 36; }
 .hint { color: $text-muted; margin-bottom: 1; }
 #connection_summary { color: $text-muted; margin-bottom: 1; }
 #keys { height: 1; margin: 0 1; color: $text-muted; }
