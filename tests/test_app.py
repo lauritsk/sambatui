@@ -4,6 +4,7 @@ from sambatui.app import (
     DnsRow,
     SambatuiApp,
     actionable_error,
+    ldap_structure_labels,
     parse_records,
     parse_zones,
     validate_record,
@@ -84,18 +85,20 @@ def test_command_palette_filters_choices() -> None:
     ]
 
 
-def test_sidebar_action_buttons_are_visible() -> None:
+def test_sidebar_uses_lists_instead_of_action_buttons() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
             buttons = {button.id for button in app.query(Button)}
 
-            assert set(SIDEBAR_BUTTON_IDS).issubset(buttons)
+            assert buttons.isdisjoint(SIDEBAR_BUTTON_IDS)
+            assert app.query_one("#zones", DataTable).row_count == 1
+            assert app.query_one("#ldap_structure", DataTable).row_count == 1
 
     asyncio.run(run_app())
 
 
-def test_sidebar_buttons_route_to_existing_actions() -> None:
+def test_sidebar_action_ids_route_to_existing_actions() -> None:
     class ButtonApp(SambatuiApp):
         def __init__(self) -> None:
             super().__init__()
@@ -149,6 +152,32 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
         ]
 
     asyncio.run(run_app())
+
+
+def test_ldap_structure_labels_show_base_and_containers() -> None:
+    rows = [
+        DirectoryRow(
+            dn="CN=Alice,OU=Engineering,OU=Users,DC=example,DC=com",
+            kind="user",
+            name="Alice",
+            summary="",
+            attributes={},
+        ),
+        DirectoryRow(
+            dn="OU=Servers,DC=example,DC=com",
+            kind="ou",
+            name="Servers",
+            summary="",
+            attributes={},
+        ),
+    ]
+
+    assert ldap_structure_labels(rows, "DC=example,DC=com") == [
+        "DC=example,DC=com",
+        "  OU=Servers",
+        "  OU=Users",
+        "    OU=Engineering",
+    ]
 
 
 def test_command_palette_routes_to_existing_actions() -> None:
@@ -270,6 +299,8 @@ def test_empty_states_explain_next_actions() -> None:
             assert str(records.get_row_at(0)[1]) == "No LDAP entries shown"
             assert "Press L" in str(records.get_row_at(0)[3])
             assert "No LDAP entries shown" in str(details.render())
+            ldap_structure = app.query_one("#ldap_structure", DataTable)
+            assert "LDAP structure" in str(ldap_structure.get_row_at(0)[0])
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
             assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
@@ -517,6 +548,9 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
             )
             assert "LDAP details" in str(details.render())
             assert "sAMAccountName: alice" in str(details.render())
+            ldap_structure = app.query_one("#ldap_structure", DataTable)
+            assert str(ldap_structure.get_row_at(0)[0]) == "DC=example,DC=com"
+            assert str(ldap_structure.get_row_at(1)[0]) == "  CN=Users"
 
             app.populate_smart_view(
                 "DNS duplicates/conflicts",

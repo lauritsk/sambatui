@@ -4,7 +4,7 @@ import asyncio
 import os
 import shutil
 import socket
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TypeVar
@@ -187,7 +187,92 @@ __all__ = [
     "valid_dns_name",
     "validate_record",
     "actionable_error",
+    "ldap_structure_labels",
 ]
+
+
+def split_ldap_dn(dn: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in dn:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+        if char == ",":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            continue
+        current.append(char)
+    part = "".join(current).strip()
+    if part:
+        parts.append(part)
+    return tuple(parts)
+
+
+def _dn_suffix_index(parts: Sequence[str], suffix: Sequence[str]) -> int:
+    if not suffix or len(suffix) > len(parts):
+        return -1
+    start = len(parts) - len(suffix)
+    for offset, part in enumerate(suffix):
+        if parts[start + offset].casefold() != part.casefold():
+            return -1
+    return start
+
+
+def _trailing_dc_index(parts: Sequence[str]) -> int:
+    index = len(parts)
+    while index > 0 and parts[index - 1].casefold().startswith("dc="):
+        index -= 1
+    return index if index < len(parts) else max(len(parts) - 1, 0)
+
+
+def ldap_structure_labels(rows: Sequence[DirectoryRow], base_dn: str) -> list[str]:
+    base_parts = split_ldap_dn(base_dn)
+    nodes: dict[str, tuple[str, ...]] = {}
+
+    def add_node(parts: Sequence[str]) -> None:
+        if parts:
+            nodes[",".join(part.casefold() for part in parts)] = tuple(parts)
+
+    if base_parts:
+        add_node(base_parts)
+
+    for row in rows:
+        parts = split_ldap_dn(row.dn)
+        if not parts:
+            continue
+        base_index = _dn_suffix_index(parts, base_parts)
+        if base_index < 0:
+            base_index = _trailing_dc_index(parts)
+        add_node(parts[base_index:])
+        for index in range(base_index):
+            if index == 0 and row.kind != "ou":
+                continue
+            rdn = parts[index].casefold()
+            if rdn.startswith(("ou=", "cn=")):
+                add_node(parts[index:])
+
+    if not nodes:
+        return []
+    ordered = sorted(
+        nodes.values(),
+        key=lambda parts: tuple(part.casefold() for part in reversed(parts)),
+    )
+    shortest = min(len(parts) for parts in ordered)
+    labels: list[str] = []
+    for parts in ordered:
+        depth = max(0, len(parts) - shortest)
+        label = ",".join(parts) if depth == 0 else parts[0]
+        labels.append(f"{'  ' * depth}{label}")
+    return labels
 
 
 class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
@@ -281,6 +366,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def initialize_view(self) -> None:
         self.refresh_connection_summary()
         self.update_records_title()
+        self.populate_zones([])
+        self.populate_ldap_structure([])
         self.action_focus_records()
         self.refresh_key_hints()
         self.render_records([])
@@ -562,6 +649,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         )
         self.refresh_connection_summary()
         self.update_records_title()
+        self.populate_ldap_structure(self.directory_rows)
 
     async def check_ldap_connectivity(self) -> str | None:
         try:
@@ -808,6 +896,16 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             table.add_row(zone)
         self.select_zone_cursor(self.val("zone"))
 
+    def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
+        table = self.query_one("#ldap_structure", DataTable)
+        table.clear()
+        labels = ldap_structure_labels(rows, self.ldap_base_default())
+        if not labels:
+            table.add_row("No LDAP structure loaded — press L to search LDAP")
+            return
+        for label in labels:
+            table.add_row(label)
+
     def select_zone_cursor(self, zone: str) -> None:
         if not zone or zone not in self.zones:
             return
@@ -866,6 +964,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.set_records_columns(DIRECTORY_COLUMNS)
         self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
         self.directory_rows = rows
+        self.populate_ldap_structure(rows)
         self.refresh_directory_view()
         self.set_status(f"Loaded {len(rows)} LDAP entries")
 
@@ -1145,6 +1244,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.set_val("zone", controller.domain)
             if not self.val("ldap_base"):
                 self.set_val("ldap_base", domain_to_base_dn(controller.domain))
+            self.populate_ldap_structure(self.directory_rows)
             self.refresh_connection_summary()
             self.save_preferences()
             message = (
@@ -1209,6 +1309,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        self.populate_ldap_structure(self.directory_rows)
         self.save_preferences()
 
     async def directory_search_rows(

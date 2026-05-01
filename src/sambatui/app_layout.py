@@ -4,23 +4,9 @@ from contextlib import suppress
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import (
-    Button,
-    DataTable,
-    Input,
-    Label,
-    Static,
-    TabbedContent,
-    TabPane,
-)
+from textual.widgets import DataTable, Input, Label, Static, TabbedContent, TabPane
 
-from .app_constants import (
-    CONNECTION_STATE_INPUTS,
-    DNS_ACTION_BUTTONS,
-    KEY_HINTS,
-    LDAP_ACTION_BUTTONS,
-    SMART_ACTION_BUTTONS,
-)
+from .app_constants import CONNECTION_STATE_INPUTS, KEY_HINTS
 from .smart_view_catalog import SMART_VIEWS
 from .ui.tables import DNS_COLUMNS
 
@@ -51,20 +37,10 @@ class AppLayoutMixin(App):
             for value, input_id, is_password in CONNECTION_STATE_INPUTS:
                 yield Input(value, password=is_password, id=input_id)
 
-    def compose_action_buttons(
-        self, container_id: str, buttons: tuple[tuple[str, str], ...]
-    ) -> ComposeResult:
-        with Vertical(id=container_id, classes="action-buttons"):
-            for button_id, label in buttons:
-                yield Button(label, id=button_id)
-
     def compose_dns_tab(self) -> ComposeResult:
         with TabPane("DNS", id="dns_tab"):
             with Vertical(id="dns_panel"):
                 yield Static("DNS zones", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "dns_actions", DNS_ACTION_BUTTONS
-                )
                 zones = DataTable(id="zones", cursor_type="row")
                 zones.add_columns("DNS zones")
                 yield zones
@@ -72,23 +48,15 @@ class AppLayoutMixin(App):
     def compose_ldap_tab(self) -> ComposeResult:
         with TabPane("LDAP", id="ldap_tab"):
             with Vertical(id="ldap_panel"):
-                yield Static("LDAP directory", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "ldap_actions", LDAP_ACTION_BUTTONS
-                )
-                yield Static(
-                    "Search AD directory. Results open in the main table.",
-                    id="ldap_hint",
-                    classes="hint",
-                )
+                yield Static("LDAP structure", classes="section-title")
+                structure = DataTable(id="ldap_structure", cursor_type="row")
+                structure.add_columns("LDAP structure")
+                yield structure
 
     def compose_smart_tab(self) -> ComposeResult:
         with TabPane("Smart", id="smart_tab"):
             with Vertical(id="smart_panel"):
                 yield Static("Smart views", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "smart_actions", SMART_ACTION_BUTTONS
-                )
                 yield Static(
                     self.smart_view_hint_text(),
                     id="smart_hint",

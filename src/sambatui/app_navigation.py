@@ -80,9 +80,17 @@ class AppNavigationMixin(App):
         focused = self.focused
         return focused if isinstance(focused, DataTable) else None
 
+    def sidebar_table_id(self) -> str:
+        active = "dns_tab"
+        with suppress(Exception):
+            active = self.query_one("#side_tabs", TabbedContent).active or "dns_tab"
+        if active == "ldap_tab":
+            return "ldap_structure"
+        return "zones"
+
     def action_focus_zones(self) -> None:
         self.pending_g = False
-        self.query_one("#zones", DataTable).focus()
+        self.query_one(f"#{self.sidebar_table_id()}", DataTable).focus()
 
     def action_focus_records(self) -> None:
         self.pending_g = False
@@ -90,7 +98,7 @@ class AppNavigationMixin(App):
 
     def action_next_table(self) -> None:
         table = self.focused_table()
-        if table and table.id == "zones":
+        if table and table.id in {"zones", "ldap_structure"}:
             self.action_focus_records()
         else:
             self.action_focus_zones()
