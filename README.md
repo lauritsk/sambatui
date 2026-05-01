@@ -1,34 +1,44 @@
 # sambatui
 
-Textual terminal UI for operating Samba Active Directory DNS and browsing AD
-LDAP directory data.
+[![Check](https://github.com/lauritsk/sambatui/actions/workflows/check.yml/badge.svg)](https://github.com/lauritsk/sambatui/actions/workflows/check.yml)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 
-Use sambatui to:
+A Textual terminal UI for Samba Active Directory DNS administration and read-only
+LDAP directory browsing.
 
-- discover domain controllers from AD DNS SRV records;
-- list DNS zones and records;
-- add, update, query, sort, search, and bulk-delete DNS records;
-- create matching PTR records for A records when a reverse zone is available;
-- run DNS and LDAP hygiene smart views;
-- search AD users, groups, computers, and OUs over read-only LDAP.
+`sambatui` wraps Samba's supported `samba-tool` CLI in a keyboard-friendly TUI,
+adds safe confirmations for write operations, and provides smart views for common
+DNS and AD hygiene checks.
 
-For contributor setup, tests, releases, and repository workflow, see
-[CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
-[SECURITY.md](SECURITY.md).
+## Features
+
+- Discover domain controllers from AD DNS SRV records.
+- List DNS zones and browse records, including reverse zones.
+- Add, update, query, sort, search, and bulk-delete DNS records.
+- Create matching PTR records for A records when a reverse zone is available.
+- Run DNS hygiene checks for duplicate records, missing PTRs, and orphan PTRs.
+- Search AD users, groups, computers, and OUs over read-only LDAP.
+- Run LDAP smart views for inactive users, stale computers, cleanup candidates,
+  and users without secondary groups.
+- Use password or Kerberos authentication, with preference persistence for
+  non-secret settings.
+
+> [!IMPORTANT]
+> `sambatui` can change Samba AD DNS records. Review command previews and
+> confirmations before applying destructive actions. LDAP features are read-only.
 
 ## Requirements
 
-`sambatui` shells out to Samba's supported CLI and uses LDAP for directory
-search. A normal host install needs:
+A normal host install needs:
 
 - Python 3.14+
 - `samba-tool` in `PATH`
-- network access to the AD DNS/DC endpoint
+- network access to a Samba AD DNS/domain controller endpoint
 - credentials allowed to manage Samba AD DNS
-- Kerberos client configuration/tickets when using Kerberos auth
+- Kerberos client configuration and tickets when using Kerberos auth
 - LDAPS or StartTLS access when using LDAP directory search
 
-Useful system packages by distro:
+Useful system packages:
 
 | Distro | Packages |
 | --- | --- |
@@ -38,26 +48,30 @@ Useful system packages by distro:
 | openSUSE | `sudo zypper install samba krb5-client bind-utils` |
 | Alpine | `sudo apk add samba-dc krb5 bind-tools` |
 
-Package names vary by release. After installing, verify:
+Verify Samba tooling after installation:
 
 ```sh
 command -v samba-tool
 samba-tool --version
 ```
 
-## Install and run
+## Quick start
 
-From a source checkout:
+Run from a checkout:
 
 ```sh
 uv run sambatui
 ```
 
-After packaging/publishing:
+Or run the published package:
 
 ```sh
 uvx sambatui
-# or
+```
+
+For persistent installation:
+
+```sh
 pipx install sambatui
 sambatui
 ```
@@ -70,12 +84,11 @@ pipx install 'sambatui[kerberos]'
 
 ## Docker
 
-The Docker image is the batteries-included option. It includes `sambatui`,
-`samba-tool`, Kerberos client tools, DNS lookup tools, LDAP CLI tools, and
-`smbclient`. You still provide network access, credentials, and any local AD
-configuration.
+The Docker image includes `sambatui`, `samba-tool`, Kerberos tools, DNS lookup
+tools, LDAP CLI tools, and `smbclient`. You still provide network access,
+credentials, and any site-specific AD configuration.
 
-Password mode example:
+Password mode:
 
 ```sh
 docker run --rm -it \
@@ -86,7 +99,7 @@ docker run --rm -it \
   sambatui
 ```
 
-Kerberos mode example using host config and ticket cache:
+Kerberos mode using host config and ticket cache:
 
 ```sh
 kinit administrator@EXAMPLE.COM
@@ -103,8 +116,7 @@ docker run --rm -it \
   sambatui
 ```
 
-If your environment needs a custom Samba config, mount it and point sambatui at
-it:
+Custom Samba config:
 
 ```sh
 docker run --rm -it \
@@ -113,10 +125,9 @@ docker run --rm -it \
   sambatui
 ```
 
-## Configure
+## Configuration
 
-No organisation-specific defaults are embedded. Enter connection values in the UI
-or set environment variables:
+Enter connection values in the setup wizard or provide environment variables:
 
 ```sh
 SAMBATUI_SERVER=dc01.example.com \
@@ -124,149 +135,117 @@ SAMBATUI_ZONE=example.com \
 SAMBATUI_USER='EXAMPLE\administrator' \
 SAMBATUI_AUTH=kerberos \
 SAMBATUI_KERBEROS=required \
-uv run sambatui
+sambatui
 ```
-
-Optional variables:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
-| `SAMBATUI_USER` | Samba/LDAP username. `DOMAIN\user` works for many Samba actions; UPN form (`user@example.com`) is preferred for LDAP password bind. | empty |
-| `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects valid `klist -s` ticket | `kerberos` with ticket, else `password` |
-| `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
-| `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
-| `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
+| `SAMBATUI_USER` | Samba/LDAP username. UPN form (`user@example.com`) is preferred for LDAP password binds. | empty |
+| `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects a valid `klist -s` ticket | ticket => `kerberos`, else `password` |
+| `SAMBATUI_KERBEROS` | Value passed to `samba-tool --use-kerberos` | `off` |
+| `SAMBATUI_KRB5_CCACHE` | Kerberos credential cache for Samba/LDAP GSSAPI | empty |
+| `SAMBATUI_CONFIGFILE` | Alternate `smb.conf` passed to `samba-tool --configfile` | empty |
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
-| `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
+| `SAMBATUI_LDAP_BASE` | Base DN for LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
-| `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in LDAP compatibility mode (`on`/`off`) for servers that need relaxed TLS/schema probing | `off` |
-| `SAMBATUI_AUTO_PTR` | Matching PTR behavior after adding A records: `ask`, `on`, or `off` | `ask` |
+| `SAMBATUI_LDAP_COMPATIBILITY` | Relaxed LDAP TLS/schema probing mode for legacy servers (`on`/`off`) | `off` |
+| `SAMBATUI_AUTO_PTR` | PTR behavior after adding A records: `ask`, `on`, or `off` | `ask` |
 | `SAMBATUI_SMART_DAYS` | Default stale/inactive smart-view threshold | `90` |
-| `SAMBATUI_SMART_DISABLED_DAYS` | Default disabled-user cleanup threshold | `180` |
-| `SAMBATUI_SMART_NEVER_LOGGED_DAYS` | Default never-logged-in user threshold | `30` |
-| `SAMBATUI_SMART_MAX_ROWS` | Default smart-view row limit | `500` |
-| `SAMBATUI_PASSWORD` | Password loaded into password field | empty |
+| `SAMBATUI_SMART_DISABLED_DAYS` | Disabled-user cleanup threshold | `180` |
+| `SAMBATUI_SMART_NEVER_LOGGED_DAYS` | Never-logged-in user threshold | `30` |
+| `SAMBATUI_SMART_MAX_ROWS` | Smart-view row limit | `500` |
+| `SAMBATUI_PASSWORD` | Password loaded into the password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
-| `SAMBATUI_USER_CONFIG` | User preference file path | `~/.config/sambatui/config.toml` |
+| `SAMBATUI_USER_CONFIG` | Preference file path | `~/.config/sambatui/config.toml` |
 
-### Preference persistence
+`sambatui` stores non-secret preferences in `~/.config/sambatui/config.toml`.
+Passwords, password-file contents, and usernames are not written there.
+Precedence is environment variables, then saved preferences, then built-in
+defaults.
 
-sambatui stores non-secret preferences in `~/.config/sambatui/config.toml` so
-server, zone, auth mode, LDAP base/encryption, auto-PTR behavior, the last
-selected zone, and smart-view thresholds survive restarts. Secrets are never
-written there: passwords, password-file contents, and usernames remain runtime
-inputs only.
+## Using the TUI
 
-Precedence is: environment variables for the current process, then values saved
-in `config.toml`, then built-in defaults.
+Start with the setup wizard, then load zones or search LDAP from the command
+palette.
 
-## Use
+| Key | Action |
+| --- | --- |
+| `Ctrl+P` | Open command palette |
+| `w` | Run setup wizard |
+| `z` | Load DNS zones |
+| `c` | Discover domain controllers |
+| `L` | Search AD directory over LDAP |
+| `S` | Open smart-view picker |
+| `8` from smart views | Run full health dashboard |
+| `r` | Refresh current zone or rerun current smart view |
+| `f` | Apply a guided smart-view fix when available |
+| `q` | Query one DNS name/type |
+| `a` | Add DNS record with guided picker and command preview |
+| `u` | Update selected DNS record |
+| `d` | Delete selected DNS records |
+| `/` | Focus inline search; `Esc` clears it |
+| `n` / `t` / `e` | Sort by name, type, or value |
+| `h` / `l`, `Tab` / `Shift+Tab` | Move focus between zones and records |
+| `j` / `k`, `gg` / `G`, `PageUp` / `PageDown` | Move through tables |
+| `Space` | Toggle selected record |
+| `v`, then `j`/`k` | Visual range selection |
 
-- `Ctrl+P`: open a searchable command palette for common DNS, LDAP, smart-view,
-  connection, password, and help actions.
-- `w` or **Setup wizard**: first-run guided setup. Enter the AD DNS domain plus
-  required credentials; sambatui discovers a domain controller, fills server,
-  zone, LDAP base DN, and auth defaults, checks DNS/LDAP connectivity, then
-  loads zones.
-- `z` or **Load DNS zones**: list zones, including reverse zones. If the saved
-  zone is still available, its records are restored automatically.
-- `c` or **Discover DCs**: discover AD domain controllers via DNS SRV records
-  and populate the server field.
-- `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
-  `ous`, or `all`).
-- `S`: open the smart-view picker; number shortcuts run common smart views.
-- `8` from Smart views: run the full health dashboard.
-- `r`: refresh current zone or rerun the current DNS/full-health smart view.
-- `f`: apply a guided smart-view fix when available. LDAP findings remain
-  read-only/export-only.
-- `q`: query one name/type.
-- `a`: add a record with a guided type picker and command preview.
-- `u`: update selected record.
-- `d`: delete selected records.
-- `/`: focus inline search. `Esc` clears it.
-- `n` / `t` / `e`: sort by name/type/value.
-- `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
-- `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`: move.
-- `Enter`: activate the focused row.
-- `Space`: toggle selected record.
-- `v`, then `j`/`k`: visual range selection; `Esc` leaves visual mode, then
-  clears selection/search.
-
-Confirmations support `y` (yes), `n` or `Esc` (no). `Enter` uses the safe
+Confirmations support `y` for yes and `n` or `Esc` for no. `Enter` uses the safe
 default: yes for low-risk add confirmations, no for destructive changes,
 deletes, and secret writes.
 
-## Authentication and passwords
+## Authentication
 
 Prefer Kerberos where possible. With an existing ticket (`kinit` or system
-login), sambatui auto-detects `klist -s` and defaults auth to Kerberos unless
-`SAMBATUI_AUTH` or saved config sets an auth mode. Kerberos auth omits the
-password from `samba-tool` arguments and uses `--use-kerberos=required` unless
-overridden.
+login), `sambatui` auto-detects `klist -s` and defaults to Kerberos unless auth
+is set explicitly. Kerberos mode omits the password from `samba-tool` arguments
+and uses `--use-kerberos=required` unless overridden.
 
 Password mode remains available for environments without Kerberos tickets. The
-app cannot safely drive the interactive `samba-tool` password prompt. Provide a
-password by:
+app cannot safely drive the interactive `samba-tool` password prompt, so provide
+a password through the UI, `SAMBATUI_PASSWORD`, or a protected password file:
 
-1. Typing it into the password field.
-2. Setting `SAMBATUI_PASSWORD` for the current process.
-3. Using a password file:
+```sh
+mkdir -p ~/.config/sambatui
+printf '%s\n' 'replace-with-your-password' > ~/.config/sambatui/password
+chmod 600 ~/.config/sambatui/password
+```
 
-   ```sh
-   mkdir -p ~/.config/sambatui
-   printf '%s\n' 'replace-with-your-password' > ~/.config/sambatui/password
-   chmod 600 ~/.config/sambatui/password
-   ```
+> [!CAUTION]
+> Password mode passes credentials to `samba-tool` non-interactively. Prefer
+> Kerberos on shared systems where process arguments may be visible to other
+> users. Never commit password files or `.env` files.
 
-You can also use **Save password** / **Load password** in the app. Password
-files must be readable only by the owner (`chmod 600`) or sambatui will refuse to
-load them. Do not commit password files or `.env` files.
+## LDAP directory search
 
-Password mode passes credentials to `samba-tool` non-interactively. Prefer
-Kerberos ticket mode on shared systems where process arguments may be visible to
-other users.
+LDAP search is read-only and uses Python `ldap3` against a base DN such as
+`DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI proposes a base DN
+from the current DNS zone.
+
+- `SAMBATUI_AUTH=password` uses the configured username/password and requires
+  `ldaps` or `starttls`; cleartext simple bind is intentionally unsupported.
+- `SAMBATUI_AUTH=kerberos` uses SASL GSSAPI and the current Kerberos ticket
+  cache. Install `sambatui[kerberos]` first.
+- Set `SAMBATUI_LDAP_COMPATIBILITY=on` only for legacy servers that need relaxed
+  TLS settings or fail schema probing.
 
 ## AD discovery
 
-**Discover DCs** uses DNS SRV records already published by Active Directory:
+Domain controller discovery uses DNS SRV records already published by Active
+Directory:
 
 - `_ldap._tcp.dc._msdcs.DOMAIN`
 - `_kerberos._tcp.DOMAIN`
 
-Discovery remains DNS-only: no LDAP bind and no direct AD writes.
+Discovery is DNS-only: no LDAP bind and no AD writes.
 
-## LDAP directory search
-
-`L` opens read-only AD directory search powered by Python `ldap3`. It searches a
-base DN such as `DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI
-proposes a base DN from the current DNS zone.
-
-With `SAMBATUI_AUTH=password`, LDAP uses the configured username/password and
-requires `ldaps` or `starttls`. Cleartext simple bind is intentionally
-unsupported. Prefer a UPN-style username (`user@example.com`) for LDAP password
-binds.
-
-With `SAMBATUI_AUTH=kerberos`, LDAP uses SASL GSSAPI and the current Kerberos
-ticket cache. Install the optional extra first:
-
-```sh
-pipx install 'sambatui[kerberos]'
-kinit administrator@EXAMPLE.COM
-SAMBATUI_AUTH=kerberos sambatui
-```
-
-Set `SAMBATUI_KRB5_CCACHE` to point GSSAPI at a non-default cache. For Kerberos
-LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
-
-For LDAP servers that need relaxed TLS settings or fail schema probing, set
-`SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field in the UI.
-This mode is off by default because it relaxes TLS protocol/cipher policy for
-LDAP/StartTLS and skips LDAP schema probing.
-
-## Privacy
+## Privacy and safe examples
 
 Examples use documentation-safe values such as `example.com` and
 `dc01.example.com`. Do not put real hostnames, domains, usernames, passwords,
 network ranges, or internal notes in public issues, docs, examples, or commits.
+
+For contributor setup and release workflow, see [CONTRIBUTING.md](CONTRIBUTING.md).
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
