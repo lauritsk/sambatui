@@ -169,7 +169,7 @@ LDAP search, or running smart views.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
   `ous`, or `all`). The LDAP sidebar shows the Base DN root plus discovered real
   containers; select root to load all entries, or a container to search within
-  that subtree.
+  that subtree and reveal its immediate child containers.
 - `S` opens the smart-view picker; number shortcuts run common smart views.
 - Full health dashboard (`8` from Smart views) runs key DNS and LDAP hygiene
   checks together, shows grouped summary counts before detailed findings, and

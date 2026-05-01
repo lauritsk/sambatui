@@ -1425,6 +1425,16 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.report_error(str(exc))
                 return None
 
+    async def directory_container_rows(
+        self, client: LdapDirectoryClient
+    ) -> list[DirectoryRow]:
+        async with self.busy():
+            try:
+                return await asyncio.to_thread(client.child_containers, LDAP_MAX_ROWS)
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return []
+
     def ldap_search_max_rows(self, values: dict[str, str]) -> int:
         return bounded_int(
             values.get("max_rows", ""), LDAP_DEFAULT_MAX_ROWS, maximum=LDAP_MAX_ROWS
@@ -1450,9 +1460,11 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         rows = await self.directory_search_rows(client, kind, values["text"], limit)
         if rows is None:
             return False
+        container_rows = await self.directory_container_rows(client)
         self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
         self.current_directory_max_rows = limit
         self.set_search_text("", refresh=False)
+        self.remember_ldap_structure_rows(container_rows)
         self.populate_directory(rows)
         suffix = " — limit reached; press m to load more" if len(rows) >= limit else ""
         self.set_status(f"{action} {len(rows)} LDAP entries (limit {limit}){suffix}")

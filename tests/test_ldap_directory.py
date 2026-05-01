@@ -1,7 +1,7 @@
 import ssl
 
 import pytest
-from ldap3 import GSSAPI, NONE, SASL
+from ldap3 import GSSAPI, LEVEL, NONE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
 from sambatui.ldap_directory import (
@@ -220,6 +220,59 @@ def test_check_connection_binds_without_search(monkeypatch: pytest.MonkeyPatch) 
     client.check_connection()
 
     assert not searched
+
+
+def test_child_containers_searches_one_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class ContainerEntry:
+        entry_dn = "CN=Users,DC=example,DC=com"
+        entry_attributes_as_dict = {
+            "cn": ["Users"],
+            "objectClass": ["top", "container"],
+        }
+
+    class FakeConnection:
+        entries = [ContainerEntry()]
+        result = {}
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def bind(self) -> bool:
+            return True
+
+        def search(self, *args: object, **kwargs: object) -> bool:
+            captured["args"] = args
+            captured.update(kwargs)
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    rows = client.child_containers()
+
+    assert rows[0].dn == "CN=Users,DC=example,DC=com"
+    assert rows[0].kind == "container"
+    assert captured["args"] == (
+        "DC=example,DC=com",
+        "(|(objectClass=organizationalUnit)(objectClass=container)(objectClass=builtinDomain))",
+    )
+    assert captured["search_scope"] == LEVEL
 
 
 def test_search_follows_paged_results_until_limit(

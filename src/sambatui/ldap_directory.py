@@ -58,6 +58,8 @@ _KIND_FILTERS: Mapping[str, str] = {
     "all": "(|(&(objectCategory=person)(objectClass=user))(objectCategory=group)(objectCategory=computer)(objectClass=organizationalUnit))",
 }
 
+_CHILD_CONTAINER_FILTER = "(|(objectClass=organizationalUnit)(objectClass=container)(objectClass=builtinDomain))"
+
 _KIND_LABELS = {
     "users": "user",
     "groups": "group",
@@ -331,9 +333,35 @@ class LdapDirectoryClient:
             _start_tls_if_needed(connection, self.config, settings)
             _bind_connection(connection)
             entries = _search_connection(
-                connection, self.config, kind, text, max_entries
+                connection,
+                self.config,
+                build_directory_filter(kind, text),
+                max_entries,
             )
             return [entry_to_directory_row(entry, kind) for entry in entries]
+        finally:
+            with suppress(LDAPException):
+                connection.unbind()
+
+    def child_containers(self, max_entries: int | None = None) -> list[DirectoryRow]:
+        error = self.validation_error()
+        if error:
+            raise ValueError(error)
+
+        from ldap3.core.exceptions import LDAPException
+
+        connection, settings = _new_ldap_connection(self.config)
+        try:
+            _start_tls_if_needed(connection, self.config, settings)
+            _bind_connection(connection)
+            entries = _search_connection(
+                connection,
+                self.config,
+                _CHILD_CONTAINER_FILTER,
+                max_entries,
+                one_level=True,
+            )
+            return [entry_to_directory_row(entry, "all") for entry in entries]
         finally:
             with suppress(LDAPException):
                 connection.unbind()
@@ -390,14 +418,15 @@ def _bind_connection(connection: Any) -> None:
 def _search_connection(
     connection: Any,
     config: LdapSearchConfig,
-    kind: str,
-    text: str,
+    search_filter: str,
     max_entries: int | None = None,
+    *,
+    one_level: bool = False,
 ) -> list[Any]:
-    from ldap3 import SUBTREE
+    from ldap3 import LEVEL, SUBTREE
     from ldap3.core.exceptions import LDAPException
 
-    search_filter = build_directory_filter(kind, text)
+    search_scope = LEVEL if one_level else SUBTREE
     rows: list[Any] = []
     cookie: bytes | str | None = None
     while True:
@@ -405,7 +434,7 @@ def _search_connection(
             ok = connection.search(
                 config.base_dn,
                 search_filter,
-                search_scope=SUBTREE,
+                search_scope=search_scope,
                 attributes=list(DEFAULT_LDAP_ATTRIBUTES),
                 paged_size=config.page_size,
                 paged_cookie=cookie,
@@ -478,6 +507,8 @@ def infer_kind(attrs: Mapping[str, Sequence[str]], requested_kind: str = "all") 
         return "group"
     if "organizationalunit" in classes:
         return "ou"
+    if "container" in classes or "builtindomain" in classes:
+        return "container"
     if "user" in classes and "person" in classes:
         return "user"
     return _KIND_LABELS.get(requested_kind.casefold(), "object")
