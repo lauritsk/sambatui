@@ -1,22 +1,31 @@
 # sambatui
 
-Textual terminal UI for managing Samba services.
+Textual terminal UI for operating Samba Active Directory DNS and browsing AD
+LDAP directory data.
 
-Current functionality focuses on DNS records on Samba Active Directory domain
-controllers. It wraps `samba-tool dns` with a table UI for zones, records,
-search, sorting, bulk delete, and prompted A-record PTR creation. It also offers
-read-only LDAP directory search for AD users, groups, computers, and OUs.
+Use sambatui to:
+
+- discover domain controllers from AD DNS SRV records;
+- list DNS zones and records;
+- add, update, query, sort, search, and bulk-delete DNS records;
+- create matching PTR records for A records when a reverse zone is available;
+- run DNS and LDAP hygiene smart views;
+- search AD users, groups, computers, and OUs over read-only LDAP.
+
+For contributor setup, tests, releases, and repository workflow, see
+[CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
+[SECURITY.md](SECURITY.md).
 
 ## Requirements
 
-`sambatui` is a Python TUI that shells out to Samba's supported CLI. A regular
-host install needs:
+`sambatui` shells out to Samba's supported CLI and uses LDAP for directory
+search. A normal host install needs:
 
 - Python 3.14+
-- `samba-tool` available in `PATH`
+- `samba-tool` in `PATH`
 - network access to the AD DNS/DC endpoint
 - credentials allowed to manage Samba AD DNS
-- Kerberos client config/tickets when using Kerberos auth
+- Kerberos client configuration/tickets when using Kerberos auth
 - LDAPS or StartTLS access when using LDAP directory search
 
 Useful system packages by distro:
@@ -36,13 +45,11 @@ command -v samba-tool
 samba-tool --version
 ```
 
-## Install
+## Install and run
 
-From this checkout:
+From a source checkout:
 
 ```sh
-mise run sambatui
-# or
 uv run sambatui
 ```
 
@@ -53,8 +60,11 @@ uvx sambatui
 # or
 pipx install sambatui
 sambatui
+```
 
-# Include optional Kerberos/GSSAPI support for LDAP search:
+Install optional Kerberos/GSSAPI support for LDAP search when needed:
+
+```sh
 pipx install 'sambatui[kerberos]'
 ```
 
@@ -111,7 +121,7 @@ or set environment variables:
 ```sh
 SAMBATUI_SERVER=dc01.example.com \
 SAMBATUI_ZONE=example.com \
-SAMBATUI_USER='EXAMPLE\\administrator' \
+SAMBATUI_USER='EXAMPLE\administrator' \
 SAMBATUI_AUTH=kerberos \
 SAMBATUI_KERBEROS=required \
 uv run sambatui
@@ -123,7 +133,7 @@ Optional variables:
 | --- | --- | --- |
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
-| `SAMBATUI_USER` | Samba/LDAP username. `DOMAIN\\user` works for many Samba actions; UPN form (`user@example.com`) is preferred for LDAP password bind. | empty |
+| `SAMBATUI_USER` | Samba/LDAP username. `DOMAIN\user` works for many Samba actions; UPN form (`user@example.com`) is preferred for LDAP password bind. | empty |
 | `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects valid `klist -s` ticket | `kerberos` with ticket, else `password` |
 | `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
 | `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
@@ -150,9 +160,7 @@ written there: passwords, password-file contents, and usernames remain runtime
 inputs only.
 
 Precedence is: environment variables for the current process, then values saved
-in `config.toml`, then built-in defaults. Values changed in the UI update the
-preference file after applying connection settings, selecting a zone, discovery,
-LDAP search, or running smart views.
+in `config.toml`, then built-in defaults.
 
 ## Use
 
@@ -161,44 +169,27 @@ LDAP search, or running smart views.
 - `w` or **Setup wizard**: first-run guided setup. Enter the AD DNS domain plus
   required credentials; sambatui discovers a domain controller, fills server,
   zone, LDAP base DN, and auth defaults, checks DNS/LDAP connectivity, then
-  loads zones. Failed checks include the next corrective action.
-- `z` or **Load DNS zones**: list zones, including reverse zones. If the
-  saved zone is still available, its records are restored automatically.
-- `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
-  records and populate the server field.
+  loads zones.
+- `z` or **Load DNS zones**: list zones, including reverse zones. If the saved
+  zone is still available, its records are restored automatically.
+- `c` or **Discover DCs**: discover AD domain controllers via DNS SRV records
+  and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
-  `ous`, or `all`). The LDAP sidebar shows the Base DN root plus discovered real
-  containers; select root to load all entries, or a container to search within
-  that subtree and reveal its immediate child containers.
-- `S` opens the smart-view picker; number shortcuts run common smart views.
-- Full health dashboard (`8` from Smart views) runs key DNS and LDAP hygiene
-  checks together, shows grouped summary counts before detailed findings, and
-  keeps successful results when some checks fail.
-- Move through DNS, LDAP, or smart-view rows to update the details pane with
-  wrapped context for the focused row.
-- Select a zone: refresh records for that zone; the records title shows the
-  active zone.
-- `r`: refresh current zone (`dns query SERVER ZONE @ ALL`) or rerun the
-  current DNS/full-health smart view.
-- `f`: apply a guided smart-view fix when available. Currently this adds
-  previewed PTR records for A-without-PTR findings. LDAP findings remain
+  `ous`, or `all`).
+- `S`: open the smart-view picker; number shortcuts run common smart views.
+- `8` from Smart views: run the full health dashboard.
+- `r`: refresh current zone or rerun the current DNS/full-health smart view.
+- `f`: apply a guided smart-view fix when available. LDAP findings remain
   read-only/export-only.
 - `q`: query one name/type.
-- `a`: add record with a guided type picker. The add flow shows only fields
-  relevant to A, AAAA, CNAME, PTR, TXT, MX, SRV, or NS records, validates input
-  before preview, checks loaded records for duplicates, previews the exact
-  `samba-tool dns add` command, and suggests a matching PTR when a loaded
-  reverse zone matches an A-record address.
+- `a`: add a record with a guided type picker and command preview.
 - `u`: update selected record.
 - `d`: delete selected records.
-- `/`: focus inline search. DNS/LDAP search the source data instead of only
-  loaded rows; smart views filter loaded findings. `Esc` clears it.
+- `/`: focus inline search. `Esc` clears it.
 - `n` / `t` / `e`: sort by name/type/value.
 - `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
-- `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`:
-  move.
-- `Enter`: activate the focused row (load a zone, toggle a record selection,
-  or run an available smart-view fix).
+- `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`: move.
+- `Enter`: activate the focused row.
 - `Space`: toggle selected record.
 - `v`, then `j`/`k`: visual range selection; `Esc` leaves visual mode, then
   clears selection/search.
@@ -209,8 +200,8 @@ deletes, and secret writes.
 
 ## Authentication and passwords
 
-Prefer Kerberos where possible. With an existing ticket (`kinit` or system login),
-sambatui auto-detects `klist -s` and defaults auth to Kerberos unless
+Prefer Kerberos where possible. With an existing ticket (`kinit` or system
+login), sambatui auto-detects `klist -s` and defaults auth to Kerberos unless
 `SAMBATUI_AUTH` or saved config sets an auth mode. Kerberos auth omits the
 password from `samba-tool` arguments and uses `--use-kerberos=required` unless
 overridden.
@@ -231,11 +222,9 @@ password by:
 
 You can also use **Save password** / **Load password** in the app. Password
 files must be readable only by the owner (`chmod 600`) or sambatui will refuse to
-load them. If permissions are too open, **Load password** offers to fix them with
-`chmod 600` and then load the file. Do not commit password files or `.env`
-files.
+load them. Do not commit password files or `.env` files.
 
-Password mode still passes credentials to `samba-tool` non-interactively. Prefer
+Password mode passes credentials to `samba-tool` non-interactively. Prefer
 Kerberos ticket mode on shared systems where process arguments may be visible to
 other users.
 
@@ -257,9 +246,7 @@ proposes a base DN from the current DNS zone.
 With `SAMBATUI_AUTH=password`, LDAP uses the configured username/password and
 requires `ldaps` or `starttls`. Cleartext simple bind is intentionally
 unsupported. Prefer a UPN-style username (`user@example.com`) for LDAP password
-binds. `DOMAIN\\user` makes ldap3 use NTLM and can fail on some DCs; if LDAP
-bind or compatibility mode fails with `DOMAIN\\user`, retry with the UPN for the
-same account.
+binds.
 
 With `SAMBATUI_AUTH=kerberos`, LDAP uses SASL GSSAPI and the current Kerberos
 ticket cache. Install the optional extra first:
@@ -275,27 +262,11 @@ LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
 
 For LDAP servers that need relaxed TLS settings or fail schema probing, set
 `SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field in the UI.
-When enabling compatibility with password auth, prefer a UPN username
-(`user@example.com`) over `DOMAIN\\user`. This mode is off by default because it
-relaxes TLS protocol/cipher policy for LDAP/StartTLS and skips LDAP schema
-probing.
-
-## Development
-
-This project uses `mise` for tools/tasks and `uv` for Python dependencies.
-
-```sh
-mise trust
-mise run install
-mise run fix
-mise run lint
-mise run test
-mise run build
-mise run check
-```
+This mode is off by default because it relaxes TLS protocol/cipher policy for
+LDAP/StartTLS and skips LDAP schema probing.
 
 ## Privacy
 
-This repository should contain only generic examples (`example.com`,
-`192.0.2.0/24`) and no real hostnames, domains, usernames, passwords, network
-ranges, or internal notes.
+Examples use documentation-safe values such as `example.com` and
+`dc01.example.com`. Do not put real hostnames, domains, usernames, passwords,
+network ranges, or internal notes in public issues, docs, examples, or commits.

@@ -8,7 +8,7 @@ assignees: "@me"
 
 ## Summary
 
-<!-- What is broken? -->
+<!-- What is broken? Do not report security vulnerabilities here; use SECURITY.md. -->
 
 ## Environment
 
