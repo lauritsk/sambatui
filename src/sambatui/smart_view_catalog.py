@@ -5,6 +5,20 @@ from dataclasses import dataclass
 from .remediation import bounded_int
 
 
+FULL_HEALTH_VIEW_ID = "full_health_dashboard"
+FULL_HEALTH_DNS_VIEW_IDS = (
+    "dns_duplicates",
+    "dns_a_without_ptr",
+    "dns_ptr_without_a",
+)
+FULL_HEALTH_LDAP_VIEW_IDS = (
+    "ldap_inactive_users",
+    "ldap_stale_computers",
+    "ldap_users_without_groups",
+    "ldap_delete_candidates",
+)
+
+
 @dataclass(frozen=True)
 class SmartViewDefinition:
     view_id: str
@@ -15,10 +29,11 @@ class SmartViewDefinition:
     needs_days: bool = False
     needs_disabled_days: bool = False
     needs_never_logged_days: bool = False
+    needs_ldap_connection: bool = False
 
     @property
     def needs_ldap(self) -> bool:
-        return self.source == "LDAP"
+        return self.source == "LDAP" or self.needs_ldap_connection
 
 
 @dataclass(frozen=True)
@@ -39,6 +54,17 @@ class SmartViewOptions:
 
 
 SMART_VIEWS = (
+    SmartViewDefinition(
+        FULL_HEALTH_VIEW_ID,
+        "8",
+        "Full",
+        "Full health dashboard",
+        "Run key DNS and LDAP hygiene checks together with grouped summary counts.",
+        needs_days=True,
+        needs_disabled_days=True,
+        needs_never_logged_days=True,
+        needs_ldap_connection=True,
+    ),
     SmartViewDefinition(
         "dns_duplicates",
         "1",

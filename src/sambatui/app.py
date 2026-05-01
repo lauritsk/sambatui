@@ -82,6 +82,9 @@ from .screens import (
 )
 from .settings import ConnectionSettings
 from .smart_view_catalog import (
+    FULL_HEALTH_DNS_VIEW_IDS,
+    FULL_HEALTH_LDAP_VIEW_IDS,
+    FULL_HEALTH_VIEW_ID,
     SMART_VIEW_BY_ID,
     SMART_VIEW_BY_SHORTCUT,
     SMART_VIEW_LABELS,
@@ -90,10 +93,12 @@ from .smart_view_catalog import (
     SmartViewOptions,
 )
 from .smart_views import (
+    SmartViewCheckResult,
     SmartViewRow,
     dns_a_without_ptr,
     dns_duplicate_records,
     dns_ptr_without_a,
+    full_health_dashboard_rows,
     ldap_delete_candidate_users,
     ldap_inactive_users,
     ldap_stale_computers,
@@ -129,7 +134,7 @@ TableRow = TypeVar("TableRow")
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+P palette  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
     "ldap_tab": "LDAP: ? help  Ctrl+P palette  Ctrl+O connection  c discover  L search directory  S smart views  / filter  j/k move  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+P palette  Ctrl+O connection  S pick view  1-7 quick run  f fix DNS finding  / filter  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+P palette  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
 DNS_ACTION_BUTTONS = (
@@ -145,6 +150,7 @@ LDAP_ACTION_BUTTONS = (
     ("ldap_search_computers", "Search computers"),
 )
 SMART_ACTION_BUTTONS = (
+    ("smart_full_health", "Full health dashboard"),
     ("smart_dns_health", "DNS duplicate check"),
     ("smart_ldap_cleanup", "LDAP cleanup check"),
 )
@@ -338,6 +344,7 @@ SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
     "ldap_search_users": ("action_ldap_search_kind", ("users",)),
     "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
     "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
+    "smart_full_health": ("action_smart_view_shortcut", ("8",)),
     "smart_dns_health": ("action_smart_view_shortcut", ("1",)),
     "smart_ldap_cleanup": ("action_smart_view_shortcut", ("5",)),
 }
@@ -541,6 +548,7 @@ class SambatuiApp(App):
         self.smart_view_rows: list[SmartViewRow] = []
         self.current_smart_view_id = ""
         self.current_smart_max_rows = 500
+        self.current_smart_values: dict[str, str] = {}
         self.records_columns = DNS_COLUMNS
         self.view_mode = "dns"
         self.sort_field = "name"
@@ -1382,7 +1390,9 @@ class SambatuiApp(App):
         fields.append(self.smart_max_rows_field())
         return fields
 
-    async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
+    async def dns_records_with_failures_for_smart_view(
+        self,
+    ) -> tuple[dict[str, list[DnsRow]], list[str]] | None:
         if not self.zones:
             await self.load_zones(restore_active_zone=False)
         if not self.zones:
@@ -1390,16 +1400,25 @@ class SambatuiApp(App):
             return None
 
         records_by_zone: dict[str, list[DnsRow]] = {}
-        failed = 0
+        failures: list[str] = []
         async with self.busy():
             for zone in self.zones:
                 code, output = await self.run_samba_zone("query", zone, ["@", "ALL"])
                 if code != 0:
-                    failed += 1
+                    failures.append(f"{zone}: {output.strip() or 'query failed'}")
                     continue
                 records_by_zone[zone] = parse_records(output)
-        if failed:
-            self.notify(f"Skipped {failed} zone(s) with query errors", severity="error")
+        return records_by_zone, failures
+
+    async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
+        result = await self.dns_records_with_failures_for_smart_view()
+        if result is None:
+            return None
+        records_by_zone, failures = result
+        if failures:
+            self.notify(
+                f"Skipped {len(failures)} zone(s) with query errors", severity="error"
+            )
         return records_by_zone
 
     def dns_smart_rows(
@@ -1417,7 +1436,19 @@ class SambatuiApp(App):
 
     async def refresh_current_smart_view(self) -> None:
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
-        if view is None or view.source != "DNS":
+        if view is None:
+            self.refresh_smart_view()
+            return
+        if view.view_id == FULL_HEALTH_VIEW_ID:
+            values = getattr(self, "current_smart_values", {})
+            if not values:
+                self.refresh_smart_view()
+                return
+            await self.load_full_health_dashboard(
+                values, SmartViewOptions.from_values(values), refreshed=True
+            )
+            return
+        if view.source != "DNS":
             self.refresh_smart_view()
             return
         records_by_zone = await self.dns_records_for_smart_view()
@@ -1503,6 +1534,126 @@ class SambatuiApp(App):
             case _:
                 return []
 
+    async def dashboard_ldap_rows(
+        self, client: LdapDirectoryClient, kind: str
+    ) -> tuple[list[DirectoryRow] | None, str]:
+        async with self.busy():
+            try:
+                return await asyncio.to_thread(client.search, kind, ""), ""
+            except ValueError as exc:
+                return None, str(exc)
+
+    def dns_dashboard_results(
+        self,
+        records_by_zone: dict[str, list[DnsRow]],
+        failures: list[str],
+    ) -> list[SmartViewCheckResult]:
+        results = [
+            SmartViewCheckResult(
+                view_id=view_id,
+                label=SMART_VIEW_BY_ID[view_id].label,
+                source="DNS",
+                rows=self.dns_smart_rows(view_id, records_by_zone),
+            )
+            for view_id in FULL_HEALTH_DNS_VIEW_IDS
+        ]
+        if failures:
+            results.append(
+                SmartViewCheckResult(
+                    view_id="dns_zone_queries",
+                    label="DNS zone queries",
+                    source="DNS",
+                    error="; ".join(failures),
+                )
+            )
+        return results
+
+    def ldap_dashboard_results(
+        self,
+        user_rows: list[DirectoryRow] | None,
+        user_error: str,
+        computer_rows: list[DirectoryRow] | None,
+        computer_error: str,
+        options: SmartViewOptions,
+    ) -> list[SmartViewCheckResult]:
+        results: list[SmartViewCheckResult] = []
+        for view_id in FULL_HEALTH_LDAP_VIEW_IDS:
+            view = SMART_VIEW_BY_ID[view_id]
+            if view_id == "ldap_stale_computers":
+                rows = computer_rows
+                error = computer_error
+            else:
+                rows = user_rows
+                error = user_error
+            results.append(
+                SmartViewCheckResult(
+                    view_id=view_id,
+                    label=view.label,
+                    source="LDAP",
+                    rows=()
+                    if rows is None
+                    else self.ldap_smart_rows(view_id, rows, options),
+                    error=error,
+                )
+            )
+        return results
+
+    async def load_full_health_dashboard(
+        self,
+        values: dict[str, str],
+        options: SmartViewOptions,
+        *,
+        refreshed: bool = False,
+    ) -> None:
+        results: list[SmartViewCheckResult] = []
+        dns_result = await self.dns_records_with_failures_for_smart_view()
+        if dns_result is None:
+            for view_id in FULL_HEALTH_DNS_VIEW_IDS:
+                view = SMART_VIEW_BY_ID[view_id]
+                results.append(
+                    SmartViewCheckResult(
+                        view_id=view_id,
+                        label=view.label,
+                        source="DNS",
+                        error="DNS zones are not loaded.",
+                    )
+                )
+        else:
+            records_by_zone, failures = dns_result
+            results.extend(self.dns_dashboard_results(records_by_zone, failures))
+
+        self.apply_ldap_connection_values(values)
+        client = self.ldap_client(values["base_dn"])
+        validation_error = client.validation_error()
+        if validation_error:
+            results.extend(
+                SmartViewCheckResult(
+                    view_id=view_id,
+                    label=SMART_VIEW_BY_ID[view_id].label,
+                    source="LDAP",
+                    error=validation_error,
+                )
+                for view_id in FULL_HEALTH_LDAP_VIEW_IDS
+            )
+        else:
+            user_rows, user_error = await self.dashboard_ldap_rows(client, "users")
+            computer_rows, computer_error = await self.dashboard_ldap_rows(
+                client, "computers"
+            )
+            results.extend(
+                self.ldap_dashboard_results(
+                    user_rows, user_error, computer_rows, computer_error, options
+                )
+            )
+
+        rows = full_health_dashboard_rows(results)
+        self.populate_smart_view(
+            "Full health dashboard",
+            rows[: 1 + len(results) + options.max_rows],
+        )
+        action = "Refreshed" if refreshed else "Loaded"
+        self.notify(f"{action} full health dashboard")
+
     async def run_smart_view(self, view_id: str) -> None:
         view = SMART_VIEW_BY_ID[view_id]
         values = await self.form(
@@ -1518,6 +1669,11 @@ class SambatuiApp(App):
         self.apply_smart_view_options(view, options)
         self.current_smart_view_id = view.view_id
         self.current_smart_max_rows = options.max_rows
+        self.current_smart_values = values
+
+        if view.view_id == FULL_HEALTH_VIEW_ID:
+            await self.load_full_health_dashboard(values, options)
+            return
 
         if view.source == "DNS":
             records_by_zone = await self.dns_records_for_smart_view()

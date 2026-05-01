@@ -19,6 +19,7 @@ from sambatui.screens import (
     SmartViewPickerScreen,
     command_palette_choice_matches,
 )
+from sambatui.smart_view_catalog import SmartViewOptions
 from sambatui.smart_views import SmartViewRow
 
 
@@ -31,6 +32,7 @@ SIDEBAR_BUTTON_IDS = (
     "ldap_search_users",
     "ldap_search_groups",
     "ldap_search_computers",
+    "smart_full_health",
     "smart_dns_health",
     "smart_ldap_cleanup",
 )
@@ -130,6 +132,7 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
             "ldap:users",
             "ldap:groups",
             "ldap:computers",
+            "smart:8",
             "smart:1",
             "smart:5",
         ]
@@ -336,6 +339,88 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
             )
             assert "Smart-view details" in str(details.render())
             assert "Suggested action: Remove duplicate copies." in str(details.render())
+
+    asyncio.run(run_app())
+
+
+def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
+    class DashboardApp(SambatuiApp):
+        def save_preferences(self) -> None:
+            return
+
+        async def run_samba_zone(
+            self, action: str, zone: str, args: list[str]
+        ) -> tuple[int, str]:
+            if zone == "bad.example":
+                return 1, "access denied"
+            return (
+                0,
+                """
+  Name=www, Records=1, Children=0
+    A: 192.0.2.10 (flags=f0, serial=1, ttl=900)
+  Name=www, Records=1, Children=0
+    A: 192.0.2.10 (flags=f0, serial=1, ttl=900)
+""",
+            )
+
+        async def dashboard_ldap_rows(
+            self, client, kind: str
+        ) -> tuple[list[DirectoryRow] | None, str]:
+            if kind == "computers":
+                return None, "LDAP timeout"
+            return [
+                DirectoryRow(
+                    dn="CN=Solo,CN=Users,DC=example,DC=com",
+                    kind="user",
+                    name="Solo",
+                    summary="",
+                    attributes={
+                        "sAMAccountName": ("solo",),
+                        "userAccountControl": ("512",),
+                    },
+                )
+            ], ""
+
+    async def run_app() -> None:
+        app = DashboardApp()
+        async with app.run_test():
+            app.zones = ["example.com", "bad.example"]
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#user", Input).value = "admin"
+            app.query_one("#password", Input).value = "secret"
+            values = {
+                "days": "90",
+                "disabled_days": "180",
+                "never_logged_days": "30",
+                "max_rows": "20",
+                "base_dn": "DC=example,DC=com",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+            }
+
+            await app.load_full_health_dashboard(
+                values, SmartViewOptions.from_values(values)
+            )
+
+            records = app.query_one("#records", DataTable)
+            assert str(records.get_row_at(0)[3]) == "Full health dashboard"
+            assert "check(s) failed" in str(records.get_row_at(0)[4])
+            findings = [
+                str(records.get_row_at(index)[3]) for index in range(records.row_count)
+            ]
+            assert any("DNS zone queries" in finding for finding in findings)
+            assert any(
+                "LDAP stale computer accounts" in finding for finding in findings
+            )
+            assert any(
+                "DNS duplicates/conflicts: Duplicate DNS record" in finding
+                for finding in findings
+            )
+            assert all(
+                "Full health dashboard" in str(records.get_row_at(index)[3])
+                or str(records.get_row_at(index)[1]) in {"summary", "error"}
+                for index in range(4)
+            )
 
     asyncio.run(run_app())
 
