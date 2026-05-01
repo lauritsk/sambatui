@@ -1,6 +1,6 @@
 [project]
 name = "sambatui"
-version = "0.1.0"
+version = "0.1.1"
 description = "Textual TUI for managing Samba services"
 readme = "README.md"
 requires-python = ">=3.14"

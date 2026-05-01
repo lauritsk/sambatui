@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.1](https://github.com/lauritsk/sambatui/compare/e563a379796a4e0fe0098917be267992ee58d446..v0.1.1) - 2026-05-01
+#### Bug Fixes
+- (**release**) restore multi-arch image build - ([e563a37](https://github.com/lauritsk/sambatui/commit/e563a379796a4e0fe0098917be267992ee58d446)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.1.0](https://github.com/lauritsk/sambatui/compare/e35fba27da80ef41bf0b921a90de28e4c697d6f0..v0.1.0) - 2026-05-01
 #### Features
 - (**auth**) auto-detect kerberos setup - ([721f5c4](https://github.com/lauritsk/sambatui/commit/721f5c4b76a6bd292804c0142ecbb6e17afa8671)) - Karl Hans Laurits
