@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,37 @@ USER_CONFIG_KEYS = frozenset(
         "smart_max_rows",
     }
 )
+CHOICE_VALUES = {
+    "auth": frozenset({"password", "kerberos"}),
+    "kerberos": frozenset({"off", "desired", "required"}),
+    "ldap_encryption": frozenset({"off", "ldaps", "starttls"}),
+    "auto_ptr": frozenset({"ask", "on", "off"}),
+}
+ON_VALUES = frozenset({"1", "true", "yes", "on", "legacy", "compat", "compatibility"})
+OFF_VALUES = frozenset({"0", "false", "no", "off"})
+INTEGER_RANGES = {
+    "smart_days": (1, None),
+    "smart_disabled_days": (1, None),
+    "smart_never_logged_days": (1, None),
+    "smart_max_rows": (1, 5000),
+}
+CHOICE_LABELS = {
+    "auth": "password or kerberos",
+    "kerberos": "off, desired, or required",
+    "ldap_encryption": "off, ldaps, or starttls",
+    "auto_ptr": "ask, on, or off",
+}
+FIELD_LABELS = {
+    "auth": "Auth",
+    "kerberos": "Kerberos",
+    "ldap_encryption": "LDAP encryption",
+    "ldap_compatibility": "LDAP compatibility",
+    "auto_ptr": "Auto PTR",
+    "smart_days": "Smart days",
+    "smart_disabled_days": "Smart disabled days",
+    "smart_never_logged_days": "Smart never-logged days",
+    "smart_max_rows": "Smart max rows",
+}
 
 
 def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
@@ -32,12 +64,7 @@ def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
     except FileNotFoundError, OSError, tomllib.TOMLDecodeError:
         return {}
 
-    values: dict[str, str] = {}
-    for key, value in data.items():
-        normalized = _preference_value(value)
-        if key in USER_CONFIG_KEYS and normalized:
-            values[key] = normalized
-    return values
+    return _safe_user_config_values(data)
 
 
 def _preference_value(value: Any) -> str:
@@ -56,7 +83,7 @@ def _toml_string(value: str) -> str:
 
 
 def save_user_config(
-    values: dict[str, str], path: Path = USER_CONFIG_PATH
+    values: Mapping[str, Any], path: Path = USER_CONFIG_PATH
 ) -> dict[str, str]:
     safe_values = _safe_user_config_values(values)
     parent_exists = path.parent.exists()
@@ -72,13 +99,84 @@ def save_user_config(
     return safe_values
 
 
-def _safe_user_config_values(values: dict[str, str]) -> dict[str, str]:
+def _safe_user_config_values(values: Mapping[str, Any]) -> dict[str, str]:
     safe_values: dict[str, str] = {}
     for key, value in values.items():
-        normalized = str(value).strip()
-        if key in USER_CONFIG_KEYS and normalized:
+        normalized = _safe_user_config_value(key, value)
+        if normalized:
             safe_values[key] = normalized
     return safe_values
+
+
+def _safe_user_config_value(key: str, value: Any) -> str:
+    normalized = _preference_value(value)
+    if key not in USER_CONFIG_KEYS or not normalized:
+        return ""
+    if key == "ldap_compatibility":
+        return _normalized_on_off(normalized)
+    if key in CHOICE_VALUES:
+        choice = normalized.casefold()
+        return choice if choice in CHOICE_VALUES[key] else ""
+    if key in INTEGER_RANGES:
+        return normalized if _integer_value_error(key, normalized) is None else ""
+    return normalized
+
+
+def _normalized_on_off(value: str) -> str:
+    normalized = value.casefold()
+    if normalized in ON_VALUES:
+        return "on"
+    if normalized in OFF_VALUES:
+        return "off"
+    return ""
+
+
+def user_config_value_error(key: str, value: Any) -> str | None:
+    normalized = _preference_value(value)
+    if not normalized or key not in USER_CONFIG_KEYS | frozenset({"kerberos"}):
+        return None
+    if key == "ldap_compatibility":
+        if _normalized_on_off(normalized):
+            return None
+        return "LDAP compatibility must be on or off."
+    if key in CHOICE_VALUES:
+        if normalized.casefold() in CHOICE_VALUES[key]:
+            return None
+        return f"{FIELD_LABELS[key]} must be {CHOICE_LABELS[key]}."
+    if key in INTEGER_RANGES:
+        return _integer_value_error(key, normalized)
+    return None
+
+
+def user_config_validation_error(values: Mapping[str, Any]) -> str | None:
+    for key in (
+        "auth",
+        "kerberos",
+        "ldap_encryption",
+        "ldap_compatibility",
+        "auto_ptr",
+        "smart_days",
+        "smart_disabled_days",
+        "smart_never_logged_days",
+        "smart_max_rows",
+    ):
+        error = user_config_value_error(key, values.get(key, ""))
+        if error:
+            return error
+    return None
+
+
+def _integer_value_error(key: str, value: str) -> str | None:
+    minimum, maximum = INTEGER_RANGES[key]
+    try:
+        number = int(value)
+    except ValueError:
+        return f"{FIELD_LABELS[key]} must be a whole number."
+    if number < minimum:
+        return f"{FIELD_LABELS[key]} must be at least {minimum}."
+    if maximum is not None and number > maximum:
+        return f"{FIELD_LABELS[key]} must be at most {maximum}."
+    return None
 
 
 USER_CONFIG = load_user_config()

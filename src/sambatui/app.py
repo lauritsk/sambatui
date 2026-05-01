@@ -47,6 +47,7 @@ from .config import (
     password_file_warning,
     read_password_file,
     save_user_config,
+    user_config_validation_error,
 )
 from .discovery import discover_ad_services, preferred_domain_controller
 from .dns import (
@@ -749,6 +750,7 @@ class SambatuiApp(App):
             "These values feed samba-tool and LDAP. Press Apply to close; reopen with Ctrl+O or ? help.",
             self.connection_fields(),
             "Apply",
+            user_config_validation_error,
         )
         if values is None:
             self.refresh_connection_summary()
