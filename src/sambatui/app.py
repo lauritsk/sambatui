@@ -157,6 +157,29 @@ from .app_constants import (
 
 TableRow = TypeVar("TableRow")
 
+DIRECTORY_SORT_LABELS = {"type": "kind", "value": "summary"}
+DNS_SMART_ROW_BUILDERS = {
+    "dns_duplicates": dns_duplicate_records,
+    "dns_a_without_ptr": dns_a_without_ptr,
+    "dns_ptr_without_a": dns_ptr_without_a,
+}
+
+
+def setup_auth_values(auth: str, kerberos: str) -> tuple[str, str]:
+    if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
+        return auth, "required"
+    return auth, kerberos
+
+
+def directory_sort_label(field: str) -> str:
+    return DIRECTORY_SORT_LABELS.get(field, field)
+
+
+def ldap_limit_suffix(row_count: int, limit: int) -> str:
+    if row_count < limit:
+        return ""
+    return " — limit reached; press m to load more"
+
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -514,9 +537,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def setup_wizard_auth_defaults(self) -> tuple[str, str]:
         auth = self.val("auth") or DEFAULT_AUTH
         kerberos = self.val("kerberos") or DEFAULT_KERBEROS
-        if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
-            kerberos = "required"
-        return auth, kerberos
+        return setup_auth_values(auth, kerberos)
 
     def setup_wizard_fields(self) -> list[FormField]:
         auth, kerberos = self.setup_wizard_auth_defaults()
@@ -584,8 +605,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     ) -> None:
         auth = values.get("auth") or DEFAULT_AUTH
         kerberos = values.get("kerberos") or DEFAULT_KERBEROS
-        if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
-            kerberos = "required"
+        auth, kerberos = setup_auth_values(auth, kerberos)
         password = values.get("password") or read_password_file(self.password_file())
         self.set_val("server", server)
         self.set_val("domain", domain)
@@ -1209,9 +1229,9 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
         self.current_directory_max_rows = limit
         self.populate_directory(rows)
-        suffix = " — limit reached; press m to load more" if len(rows) >= limit else ""
         self.set_status(
-            f"Search matched {len(rows)} LDAP entries across directory (limit {limit}){suffix}"
+            f"Search matched {len(rows)} LDAP entries across directory "
+            f"(limit {limit}){ldap_limit_suffix(len(rows), limit)}"
         )
         return True
 
@@ -1258,8 +1278,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.directory_rows = self.sorted_directory(self.directory_rows)
         self.refresh_directory_view()
         direction = "desc" if self.directory_sort_reverse else "asc"
-        label = "kind" if field == "type" else "summary" if field == "value" else field
-        self.set_status(f"Sorted LDAP by {label} ({direction})")
+        self.set_status(f"Sorted LDAP by {directory_sort_label(field)} ({direction})")
 
     def sort_records(self, field: str) -> None:
         if self.view_mode == "directory":
@@ -1522,8 +1541,10 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.set_search_text("", refresh=False)
         self.remember_ldap_structure_rows(container_rows)
         self.populate_directory(rows)
-        suffix = " — limit reached; press m to load more" if len(rows) >= limit else ""
-        self.set_status(f"{action} {len(rows)} LDAP entries (limit {limit}){suffix}")
+        self.set_status(
+            f"{action} {len(rows)} LDAP entries "
+            f"(limit {limit}){ldap_limit_suffix(len(rows), limit)}"
+        )
         self.notify(f"{action} {len(rows)} LDAP entries")
         return True
 
@@ -1655,15 +1676,10 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def dns_smart_rows(
         self, view_id: str, records_by_zone: dict[str, list[DnsRow]]
     ) -> list[SmartViewRow]:
-        match view_id:
-            case "dns_duplicates":
-                return dns_duplicate_records(records_by_zone)
-            case "dns_a_without_ptr":
-                return dns_a_without_ptr(records_by_zone)
-            case "dns_ptr_without_a":
-                return dns_ptr_without_a(records_by_zone)
-            case _:
-                return []
+        builder = DNS_SMART_ROW_BUILDERS.get(view_id)
+        if builder is None:
+            return []
+        return builder(records_by_zone)
 
     async def refresh_current_smart_view(self) -> None:
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)

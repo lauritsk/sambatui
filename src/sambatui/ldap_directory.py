@@ -322,28 +322,26 @@ class LdapDirectoryClient:
     def search(
         self, kind: str, text: str = "", max_entries: int | None = None
     ) -> list[DirectoryRow]:
-        error = self.validation_error()
-        if error:
-            raise ValueError(error)
-
-        from ldap3.core.exceptions import LDAPException
-
-        connection, settings = _new_ldap_connection(self.config)
-        try:
-            _start_tls_if_needed(connection, self.config, settings)
-            _bind_connection(connection)
-            entries = _search_connection(
-                connection,
-                self.config,
-                build_directory_filter(kind, text),
-                max_entries,
-            )
-            return [entry_to_directory_row(entry, kind) for entry in entries]
-        finally:
-            with suppress(LDAPException):
-                connection.unbind()
+        return self._search_rows(
+            build_directory_filter(kind, text), kind, max_entries=max_entries
+        )
 
     def child_containers(self, max_entries: int | None = None) -> list[DirectoryRow]:
+        return self._search_rows(
+            _CHILD_CONTAINER_FILTER,
+            "all",
+            max_entries=max_entries,
+            one_level=True,
+        )
+
+    def _search_rows(
+        self,
+        search_filter: str,
+        kind: str,
+        *,
+        max_entries: int | None = None,
+        one_level: bool = False,
+    ) -> list[DirectoryRow]:
         error = self.validation_error()
         if error:
             raise ValueError(error)
@@ -357,11 +355,11 @@ class LdapDirectoryClient:
             entries = _search_connection(
                 connection,
                 self.config,
-                _CHILD_CONTAINER_FILTER,
+                search_filter,
                 max_entries,
-                one_level=True,
+                one_level=one_level,
             )
-            return [entry_to_directory_row(entry, "all") for entry in entries]
+            return [entry_to_directory_row(entry, kind) for entry in entries]
         finally:
             with suppress(LDAPException):
                 connection.unbind()
