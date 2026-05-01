@@ -13,6 +13,7 @@ USER_CONFIG_PATH = Path(
 USER_CONFIG_KEYS = frozenset(
     {
         "server",
+        "domain",
         "zone",
         "auth",
         "ldap_base",
@@ -188,6 +189,25 @@ def _default(envvar: str, key: str, fallback: str) -> str:
     return os.getenv(envvar, USER_CONFIG.get(key, fallback))
 
 
+def is_reverse_dns_zone(value: str) -> bool:
+    normalized = value.strip().rstrip(".").casefold()
+    return normalized.endswith((".in-addr.arpa", ".ip6.arpa"))
+
+
+def _default_domain() -> str:
+    configured = os.getenv("SAMBATUI_DOMAIN", USER_CONFIG.get("domain", ""))
+    if configured:
+        return configured
+    legacy_zone = USER_CONFIG.get("zone", "")
+    return "" if is_reverse_dns_zone(legacy_zone) else legacy_zone
+
+
+def _default_zone() -> str:
+    return os.getenv(
+        "SAMBATUI_ZONE", USER_CONFIG.get("last_zone") or USER_CONFIG.get("zone", "")
+    )
+
+
 def has_valid_kerberos_ticket(
     runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
 ) -> bool:
@@ -230,9 +250,8 @@ def fix_password_file_permissions(path: Path) -> None:
 
 
 DEFAULT_SERVER = _default("SAMBATUI_SERVER", "server", "")
-DEFAULT_ZONE = os.getenv(
-    "SAMBATUI_ZONE", USER_CONFIG.get("zone") or USER_CONFIG.get("last_zone", "")
-)
+DEFAULT_DOMAIN = _default_domain()
+DEFAULT_ZONE = _default_zone()
 DEFAULT_USER = os.getenv("SAMBATUI_USER", "")
 DEFAULT_AUTH = detected_default_auth()
 DEFAULT_KERBEROS = os.getenv("SAMBATUI_KERBEROS", "off")

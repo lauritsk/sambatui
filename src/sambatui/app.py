@@ -25,6 +25,7 @@ from textual.widgets import (
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
     fix_password_file_permissions,
+    is_reverse_dns_zone,
     password_file_permissions_too_open,
     password_file_warning,
     read_password_file,
@@ -119,6 +120,7 @@ from .app_constants import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
+    DEFAULT_DOMAIN,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
     DEFAULT_LDAP_BASE,
@@ -167,6 +169,7 @@ __all__ = [
     "DEFAULT_AUTH",
     "DEFAULT_AUTO_PTR",
     "DEFAULT_CONFIGFILE",
+    "DEFAULT_DOMAIN",
     "DEFAULT_KERBEROS",
     "DEFAULT_KRB5_CCACHE",
     "DEFAULT_LDAP_BASE",
@@ -420,16 +423,18 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     def preference_values(self) -> dict[str, str]:
         zone = self.val("zone")
+        domain = self.connection_domain_default()
         return {
             "server": self.val("server"),
-            "zone": zone,
+            "domain": domain,
+            "zone": domain,
+            "last_zone": zone,
             "auth": self.val("auth") or DEFAULT_AUTH,
             "ldap_base": self.val("ldap_base"),
             "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             "ldap_compatibility": self.val("ldap_compatibility")
             or DEFAULT_LDAP_COMPATIBILITY,
             "auto_ptr": self.val("auto_ptr") or DEFAULT_AUTO_PTR,
-            "last_zone": zone,
             "smart_days": self.val("smart_days") or DEFAULT_SMART_DAYS,
             "smart_disabled_days": self.val("smart_disabled_days")
             or DEFAULT_SMART_DISABLED_DAYS,
@@ -453,8 +458,17 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def connection_needs_setup(self) -> bool:
         return self.connection_settings().needs_setup(read_password_file)
 
-    def discovery_domain_default(self) -> str:
+    def normalized_domain_candidate(self, value: str) -> str:
+        if not value or is_reverse_dns_zone(value):
+            return ""
+        try:
+            return normalize_domain(value).lower()
+        except ValueError:
+            return ""
+
+    def connection_domain_default(self) -> str:
         candidates = [
+            self.val("domain"),
             self.val("zone"),
             infer_domain_from_server(self.val("server")),
             os.getenv("USERDNSDOMAIN", ""),
@@ -463,12 +477,15 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         ]
         return next(
             (
-                candidate.strip().rstrip(".").lower()
+                normalized
                 for candidate in candidates
-                if candidate.strip()
+                if (normalized := self.normalized_domain_candidate(candidate))
             ),
             "",
         )
+
+    def discovery_domain_default(self) -> str:
+        return self.connection_domain_default()
 
     def refresh_connection_summary(self) -> None:
         with suppress(Exception):
@@ -590,7 +607,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 "AD DNS domain — used to discover domain controllers and zones.",
                 "domain",
                 "example.com",
-                self.discovery_domain_default(),
+                self.connection_domain_default(),
             ),
             (
                 "User — DOMAIN\\user or UPN; UPN is preferred for LDAP password bind.",
@@ -653,6 +670,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             kerberos = "required"
         password = values.get("password") or read_password_file(self.password_file())
         self.set_val("server", server)
+        self.set_val("domain", domain)
         self.set_val("zone", domain)
         self.set_val("ldap_base", domain_to_base_dn(domain))
         self.set_val("user", values.get("user", self.val("user")))
@@ -1376,14 +1394,14 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                     "AD DNS domain",
                     "domain",
                     "example.com",
-                    default_domain or self.val("zone"),
+                    default_domain or self.connection_domain_default(),
                 )
             ],
             "Discover",
         )
         if not values:
             return False
-        domain = values["domain"] or self.val("zone")
+        domain = values["domain"] or self.connection_domain_default()
         async with self.busy():
             try:
                 services = await asyncio.to_thread(discover_ad_services, domain)
@@ -1395,6 +1413,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.report_error(f"No AD SRV records found for {domain}")
                 return False
             self.set_val("server", controller.target)
+            self.set_val("domain", controller.domain)
             if not self.val("zone"):
                 self.set_val("zone", controller.domain)
             if not self.val("ldap_base"):
@@ -1415,7 +1434,9 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         await self.open_discover_ad(self.discovery_domain_default())
 
     def ldap_base_default(self) -> str:
-        return self.val("ldap_base") or domain_to_base_dn(self.val("zone"))
+        return self.val("ldap_base") or domain_to_base_dn(
+            self.connection_domain_default() or self.val("zone")
+        )
 
     def ldap_connection_fields(self, base_dn: str) -> list[FormField]:
         return [

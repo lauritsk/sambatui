@@ -7,6 +7,7 @@ from .config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
+    DEFAULT_DOMAIN,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
     DEFAULT_LDAP_BASE,
@@ -35,6 +36,7 @@ KEY_HINTS = {
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
 CONNECTION_STATE_INPUTS = (
     (DEFAULT_SERVER, "server", False),
+    (DEFAULT_DOMAIN, "domain", False),
     (DEFAULT_ZONE, "zone", False),
     (DEFAULT_USER, "user", False),
     (DEFAULT_PASSWORD, "password", True),

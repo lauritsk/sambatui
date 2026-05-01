@@ -10,6 +10,7 @@ from .config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
+    DEFAULT_DOMAIN,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
     DEFAULT_LDAP_COMPATIBILITY,
@@ -29,6 +30,7 @@ FormField: TypeAlias = tuple[str, str, str, str]
 @dataclass(frozen=True)
 class ConnectionSettings:
     server: str = DEFAULT_SERVER
+    domain: str = DEFAULT_DOMAIN
     zone: str = DEFAULT_ZONE
     user: str = DEFAULT_USER
     password: str = DEFAULT_PASSWORD
@@ -45,22 +47,29 @@ class ConnectionSettings:
 
     @classmethod
     def from_lookup(cls, lookup: Callable[[str], str]) -> ConnectionSettings:
+        def value(key: str) -> str:
+            try:
+                return lookup(key)
+            except KeyError, LookupError:
+                return ""
+
         return cls(
-            server=lookup("server"),
-            zone=lookup("zone"),
-            user=lookup("user"),
-            password=lookup("password"),
-            auth=lookup("auth") or DEFAULT_AUTH,
-            kerberos=lookup("kerberos") or DEFAULT_KERBEROS,
-            krb5_ccache=lookup("krb5_ccache"),
-            configfile=lookup("configfile"),
-            options=lookup("options"),
-            ldap_base=lookup("ldap_base"),
-            ldap_encryption=lookup("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            ldap_compatibility=lookup("ldap_compatibility")
+            server=value("server"),
+            domain=value("domain"),
+            zone=value("zone"),
+            user=value("user"),
+            password=value("password"),
+            auth=value("auth") or DEFAULT_AUTH,
+            kerberos=value("kerberos") or DEFAULT_KERBEROS,
+            krb5_ccache=value("krb5_ccache"),
+            configfile=value("configfile"),
+            options=value("options"),
+            ldap_base=value("ldap_base"),
+            ldap_encryption=value("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
+            ldap_compatibility=value("ldap_compatibility")
             or DEFAULT_LDAP_COMPATIBILITY,
-            auto_ptr=lookup("auto_ptr") or DEFAULT_AUTO_PTR,
-            password_file=lookup("password_file") or str(DEFAULT_PASSWORD_FILE),
+            auto_ptr=value("auto_ptr") or DEFAULT_AUTO_PTR,
+            password_file=value("password_file") or str(DEFAULT_PASSWORD_FILE),
         )
 
     @property
@@ -75,7 +84,7 @@ class ConnectionSettings:
         return f"{server} · {zone} · {auth} auth"
 
     def needs_setup(self, password_loader: Callable[[Path], str]) -> bool:
-        if not self.server or not self.zone:
+        if not self.server:
             return True
         if (self.auth or DEFAULT_AUTH).casefold() != "password":
             return False
@@ -100,7 +109,9 @@ class ConnectionSettings:
             server=self.server,
             user=self.user,
             password=self.password,
-            base_dn=base_dn or self.ldap_base or domain_to_base_dn(self.zone),
+            base_dn=base_dn
+            or self.ldap_base
+            or domain_to_base_dn(self.domain or self.zone),
             encryption=self.ldap_encryption or DEFAULT_LDAP_ENCRYPTION,
             auth_mode=self.auth or DEFAULT_AUTH,
             krb5_ccache=self.krb5_ccache,
@@ -116,9 +127,15 @@ class ConnectionSettings:
                 self.server,
             ),
             (
-                "DNS zone — zone to query and edit after you select/load zones.",
-                "zone",
+                "AD DNS domain — used for setup/discovery and LDAP defaults.",
+                "domain",
                 "example.com",
+                self.domain,
+            ),
+            (
+                "DNS zone — active zone to query/edit after loading zones.",
+                "zone",
+                "example.com or 2.0.192.in-addr.arpa",
                 self.zone,
             ),
             (
@@ -171,7 +188,7 @@ class ConnectionSettings:
                 "LDAP base DN — used by read-only directory search.",
                 "ldap_base",
                 "DC=example,DC=com",
-                self.ldap_base or domain_to_base_dn(self.zone),
+                self.ldap_base or domain_to_base_dn(self.domain or self.zone),
             ),
             (
                 "LDAP encryption — password bind requires ldaps or starttls; kerberos also supports off.",

@@ -142,8 +142,9 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
     saved = save_user_config(
         {
             "server": "dc01.example.com",
+            "domain": "example.com",
             "zone": "example.com",
-            "last_zone": "example.com",
+            "last_zone": "2.0.192.in-addr.arpa",
             "auth": "kerberos",
             "ldap_base": "DC=example,DC=com",
             "ldap_encryption": "starttls",
@@ -170,10 +171,10 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
     )
     assert load_user_config(path) == {"auto_ptr": "on", "smart_days": "120"}
     path.write_text(
-        'auth = "bad"\nldap_encryption = "plain"\nsmart_max_rows = 99999\nzone = "example.com"\n',
+        'auth = "bad"\nldap_encryption = "plain"\nsmart_max_rows = 99999\ndomain = "example.com"\nzone = "example.com"\n',
         encoding="utf-8",
     )
-    assert load_user_config(path) == {"zone": "example.com"}
+    assert load_user_config(path) == {"domain": "example.com", "zone": "example.com"}
     assert save_user_config(
         {"auto_ptr": "always", "ldap_compatibility": "on", "smart_days": "0"},
         path,
@@ -380,7 +381,8 @@ def test_ldap_search_starttls_and_search_result_errors(
 def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
     values = {
         "server": "dc",
-        "zone": "example.com",
+        "domain": "example.com",
+        "zone": "2.0.192.in-addr.arpa",
         "user": "alice",
         "password": "",
         "auth": "",
@@ -395,13 +397,11 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
         "password_file": str(tmp_path / "pw"),
     }
     settings = ConnectionSettings.from_lookup(lambda key: values[key])
-    assert settings.summary == f"dc · example.com · {DEFAULT_AUTH} auth"
+    assert settings.summary == f"dc · 2.0.192.in-addr.arpa · {DEFAULT_AUTH} auth"
     assert settings.needs_setup(lambda _path: "loaded") is False
     assert ConnectionSettings(server="", zone="z").needs_setup(lambda _path: "") is True
     assert (
-        ConnectionSettings(server="s", zone="z", auth="kerberos").needs_setup(
-            lambda _path: ""
-        )
+        ConnectionSettings(server="s", auth="kerberos").needs_setup(lambda _path: "")
         is False
     )
     assert (
