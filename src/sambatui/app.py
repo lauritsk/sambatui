@@ -1034,10 +1034,10 @@ class SambatuiApp(App):
         }
 
     def selected_records(self) -> list[dict[str, str]]:
-        rows = sorted(self.selected_record_rows)
-        if not rows:
-            rows = [self.query_one("#records", DataTable).cursor_row]
-        records = [self.row_to_record(row_index) for row_index in rows]
+        row_indices = sorted(self.selected_record_rows) or [
+            self.query_one("#records", DataTable).cursor_row
+        ]
+        records = [self.row_to_record(row_index) for row_index in row_indices]
         return [record for record in records if record]
 
     def selected_record(self) -> dict[str, str] | None:
