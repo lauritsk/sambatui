@@ -277,8 +277,12 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
 
 
 def test_empty_states_explain_next_actions() -> None:
+    class EmptyStateApp(SambatuiApp):
+        def connection_domain_default(self) -> str:
+            return ""
+
     async def run_app() -> None:
-        app = SambatuiApp()
+        app = EmptyStateApp()
         async with app.run_test():
             records = app.query_one("#records", DataTable)
             details = app.query_one("#record_details", Static)
