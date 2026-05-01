@@ -1217,6 +1217,49 @@ def test_form_screen_live_validation_disables_submit() -> None:
     asyncio.run(run_app())
 
 
+def test_setup_form_suggests_upn_domain_suffix() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.push_screen(
+                FormScreen(
+                    "First-run setup wizard",
+                    "",
+                    [
+                        ("Domain", "domain", "example.com", "example.com"),
+                        ("User", "user", "admin@example.com", ""),
+                    ],
+                    "Run checks",
+                )
+            )
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, FormScreen)
+            domain = form.query_one("#domain", Input)
+            user = form.query_one("#user", Input)
+            user.focus()
+
+            user.value = "alice"
+            await pilot.pause()
+            assert getattr(user, "_suggestion") == "alice@example.com"
+            assert form.form_values()["user"] == "alice@example.com"
+
+            domain.value = "ad.example."
+            await pilot.pause()
+            assert getattr(user, "_suggestion") == "alice@ad.example"
+            assert form.form_values()["user"] == "alice@ad.example"
+
+            user.value = "alice@other.example"
+            await pilot.pause()
+            assert form.form_values()["user"] == "alice@other.example"
+
+            user.value = r"EXAMPLE\alice"
+            await pilot.pause()
+            assert form.form_values()["user"] == r"EXAMPLE\alice"
+
+    asyncio.run(run_app())
+
+
 def test_validate_record_rejects_bad_cname_ip() -> None:
     assert validate_record("alias", "CNAME", "192.0.2.10") == (
         "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
