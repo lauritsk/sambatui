@@ -599,7 +599,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — only for legacy DCs; with password auth prefer UPN user.",
+                "LDAP compatibility — only if DC needs relaxed TLS/schema; with password auth prefer UPN user.",
                 "ldap_compatibility",
                 "on | off",
                 self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
@@ -1272,7 +1272,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — if on with password auth, prefer UPN user",
+                "LDAP compatibility — only if DC needs relaxed TLS/schema; with password auth prefer UPN user",
                 "ldap_compatibility",
                 "on | off",
                 self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,

@@ -33,25 +33,6 @@ KEY_HINTS = {
     "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
-DNS_ACTION_BUTTONS = (
-    ("setup_wizard", "Setup wizard"),
-    ("load_zones", "Load zones"),
-    ("refresh_zone", "Refresh zone"),
-    ("query_record", "Query"),
-    ("add_record", "Add record"),
-    ("delete_records", "Delete selected"),
-)
-LDAP_ACTION_BUTTONS = (
-    ("ldap_search_users", "Search users"),
-    ("ldap_search_groups", "Search groups"),
-    ("ldap_search_computers", "Search computers"),
-    ("ldap_load_more", "Load more LDAP"),
-)
-SMART_ACTION_BUTTONS = (
-    ("smart_full_health", "Full health dashboard"),
-    ("smart_dns_health", "DNS duplicate check"),
-    ("smart_ldap_cleanup", "LDAP cleanup check"),
-)
 CONNECTION_STATE_INPUTS = (
     (DEFAULT_SERVER, "server", False),
     (DEFAULT_ZONE, "zone", False),
@@ -296,22 +277,4 @@ PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
         for view in SMART_VIEWS
     },
     "fix_smart": ("action_fix_smart", ()),
-}
-SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
-    "load_password": ("load_password", ()),
-    "save_password": ("save_password", ()),
-    "setup_wizard": ("action_setup_wizard", ()),
-    "load_zones": ("action_load_zones", ()),
-    "refresh_zone": ("action_refresh", ()),
-    "query_record": ("action_query", ()),
-    "add_record": ("action_add", ()),
-    "delete_records": ("action_delete", ()),
-    "discover_ad": ("action_discover_ad", ()),
-    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
-    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
-    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
-    "ldap_load_more": ("action_load_more_directory", ()),
-    "smart_full_health": ("action_smart_view_shortcut", ("8",)),
-    "smart_dns_health": ("action_smart_view_shortcut", ("1",)),
-    "smart_ldap_cleanup": ("action_smart_view_shortcut", ("5",)),
 }

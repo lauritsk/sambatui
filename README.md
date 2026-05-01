@@ -131,7 +131,7 @@ Optional variables:
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
 | `SAMBATUI_LDAP_BASE` | Base DN for read-only LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
-| `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in legacy LDAP mode (`on`/`off`) for old Samba/EL6-era servers | `off` |
+| `SAMBATUI_LDAP_COMPATIBILITY` | Opt-in LDAP compatibility mode (`on`/`off`) for servers that need relaxed TLS/schema probing | `off` |
 | `SAMBATUI_AUTO_PTR` | Matching PTR behavior after adding A records: `ask`, `on`, or `off` | `ask` |
 | `SAMBATUI_SMART_DAYS` | Default stale/inactive smart-view threshold | `90` |
 | `SAMBATUI_SMART_DISABLED_DAYS` | Default disabled-user cleanup threshold | `180` |
@@ -167,10 +167,8 @@ LDAP search, or running smart views.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
   records and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
-  `ous`, or `all`). The LDAP sidebar also has one-click searches for users,
-  groups, and computers.
-- Smart sidebar buttons run the full health dashboard, DNS duplicate checks,
-  and LDAP cleanup checks.
+  `ous`, or `all`). The LDAP sidebar shows discovered directory structure.
+- `S` opens the smart-view picker; number shortcuts run common smart views.
 - Full health dashboard (`8` from Smart views) runs key DNS and LDAP hygiene
   checks together, shows grouped summary counts before detailed findings, and
   keeps successful results when some checks fail.
@@ -257,9 +255,9 @@ proposes a base DN from the current DNS zone.
 With `SAMBATUI_AUTH=password`, LDAP uses the configured username/password and
 requires `ldaps` or `starttls`. Cleartext simple bind is intentionally
 unsupported. Prefer a UPN-style username (`user@example.com`) for LDAP password
-binds. `DOMAIN\\user` makes ldap3 use NTLM and can fail on some Samba/legacy DCs;
-if LDAP bind or compatibility mode fails with `DOMAIN\\user`, retry with the UPN
-for the same account.
+binds. `DOMAIN\\user` makes ldap3 use NTLM and can fail on some DCs; if LDAP
+bind or compatibility mode fails with `DOMAIN\\user`, retry with the UPN for the
+same account.
 
 With `SAMBATUI_AUTH=kerberos`, LDAP uses SASL GSSAPI and the current Kerberos
 ticket cache. Install the optional extra first:
@@ -273,9 +271,9 @@ SAMBATUI_AUTH=kerberos sambatui
 Set `SAMBATUI_KRB5_CCACHE` to point GSSAPI at a non-default cache. For Kerberos
 LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
 
-For old Samba/EL6-era LDAP servers that only negotiate legacy TLS or fail schema
-probing, set `SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field
-in the UI. When enabling compatibility with password auth, prefer a UPN username
+For LDAP servers that need relaxed TLS settings or fail schema probing, set
+`SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field in the UI.
+When enabling compatibility with password auth, prefer a UPN username
 (`user@example.com`) over `DOMAIN\\user`. This mode is off by default because it
 relaxes TLS protocol/cipher policy for LDAP/StartTLS and skips LDAP schema
 probing.

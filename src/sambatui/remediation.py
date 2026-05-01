@@ -52,7 +52,7 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
     ),
     (
         _contains_any("ldap encryption", "starttls", "ldaps"),
-        "use ldaps/starttls, or set LDAP compatibility on for legacy DCs",
+        "use ldaps/starttls, or set LDAP compatibility on for DCs that need relaxed TLS/schema",
     ),
     (_contains("ldap base dn"), "set Base DN like DC=example,DC=com"),
     (

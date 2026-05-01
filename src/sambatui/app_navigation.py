@@ -11,7 +11,6 @@ from .app_constants import (
     CASE_SENSITIVE_ACTION_NAMES,
     CHAR_ACTION_NAMES,
     KEY_ACTION_NAMES,
-    SIDEBAR_ACTIONS,
     SIDE_TAB_IDS,
 )
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
@@ -408,17 +407,6 @@ class AppNavigationMixin(App):
         result = getattr(self, action_name)(*args)
         if inspect.isawaitable(result):
             await result
-
-    async def run_sidebar_button_action(self, button_id: str | None) -> bool:
-        action = SIDEBAR_ACTIONS.get(button_id or "")
-        if action is None:
-            return False
-        action_name, args = action
-        await self.invoke_action(action_name, *args)
-        return True
-
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        await self.run_sidebar_button_action(event.button.id)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "inline_search":

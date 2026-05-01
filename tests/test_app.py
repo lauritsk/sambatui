@@ -25,23 +25,6 @@ from sambatui.smart_view_catalog import SmartViewOptions
 from sambatui.smart_views import SmartViewRow
 
 
-SIDEBAR_BUTTON_IDS = (
-    "setup_wizard",
-    "load_zones",
-    "refresh_zone",
-    "query_record",
-    "add_record",
-    "delete_records",
-    "ldap_search_users",
-    "ldap_search_groups",
-    "ldap_search_computers",
-    "ldap_load_more",
-    "smart_full_health",
-    "smart_dns_health",
-    "smart_ldap_cleanup",
-)
-
-
 def test_key_hints_change_by_side_tab() -> None:
     app = SambatuiApp()
 
@@ -85,71 +68,13 @@ def test_command_palette_filters_choices() -> None:
     ]
 
 
-def test_sidebar_uses_lists_instead_of_action_buttons() -> None:
+def test_sidebar_uses_current_list_widgets() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            buttons = {button.id for button in app.query(Button)}
-
-            assert buttons.isdisjoint(SIDEBAR_BUTTON_IDS)
+            assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
             assert app.query_one("#ldap_structure", DataTable).row_count == 1
-
-    asyncio.run(run_app())
-
-
-def test_sidebar_action_ids_route_to_existing_actions() -> None:
-    class ButtonApp(SambatuiApp):
-        def __init__(self) -> None:
-            super().__init__()
-            self.actions: list[str] = []
-
-        async def action_setup_wizard(self) -> None:
-            self.actions.append("setup")
-
-        async def action_load_zones(self) -> None:
-            self.actions.append("load_zones")
-
-        async def action_refresh(self) -> None:
-            self.actions.append("refresh")
-
-        async def action_query(self) -> None:
-            self.actions.append("query")
-
-        async def action_add(self) -> None:
-            self.actions.append("add")
-
-        async def action_delete(self) -> None:
-            self.actions.append("delete")
-
-        async def action_ldap_search_kind(self, kind: str) -> None:
-            self.actions.append(f"ldap:{kind}")
-
-        async def action_load_more_directory(self) -> None:
-            self.actions.append("ldap:more")
-
-        async def action_smart_view_shortcut(self, shortcut: str) -> None:
-            self.actions.append(f"smart:{shortcut}")
-
-    async def run_app() -> None:
-        app = ButtonApp()
-        for button_id in SIDEBAR_BUTTON_IDS:
-            assert await app.run_sidebar_button_action(button_id)
-        assert app.actions == [
-            "setup",
-            "load_zones",
-            "refresh",
-            "query",
-            "add",
-            "delete",
-            "ldap:users",
-            "ldap:groups",
-            "ldap:computers",
-            "ldap:more",
-            "smart:8",
-            "smart:1",
-            "smart:5",
-        ]
 
     asyncio.run(run_app())
 

@@ -175,7 +175,7 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
     )
     assert load_user_config(path) == {"zone": "example.com"}
     assert save_user_config(
-        {"auto_ptr": "always", "ldap_compatibility": "yes", "smart_days": "0"},
+        {"auto_ptr": "always", "ldap_compatibility": "on", "smart_days": "0"},
         path,
     ) == {"ldap_compatibility": "on"}
     assert user_config_validation_error({"auth": "bad"}) == (
