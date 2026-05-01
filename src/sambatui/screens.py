@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
+from textual.suggester import Suggester
 from textual.widgets import Button, DataTable, Input, Static
 
 from .ldap_directory import domain_to_base_dn
@@ -109,6 +110,24 @@ FormField: TypeAlias = tuple[str, str, str, str]
 FormValidator: TypeAlias = Callable[[dict[str, str]], str | None]
 SmartViewChoice: TypeAlias = tuple[str, str, str, str, str]
 CommandPaletteChoice: TypeAlias = tuple[str, str, str, str]
+
+
+def user_principal_name_suggestion(value: str, domain: str) -> str:
+    username = value.strip()
+    dns_domain = domain.strip().rstrip(".").lower()
+    if not username or not dns_domain or "@" in username or "\\" in username:
+        return username
+    return f"{username}@{dns_domain}"
+
+
+class UserPrincipalNameSuggester(Suggester):
+    def __init__(self, domain_provider: Callable[[], str]) -> None:
+        super().__init__(use_cache=False, case_sensitive=True)
+        self.domain_provider = domain_provider
+
+    async def get_suggestion(self, value: str) -> str | None:
+        suggestion = user_principal_name_suggestion(value, self.domain_provider())
+        return suggestion if suggestion != value.strip() else None
 
 
 def command_palette_choice_matches(choice: CommandPaletteChoice, query: str) -> bool:
@@ -451,6 +470,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
                             value=value,
                             placeholder=placeholder,
                             password=field_id == "password",
+                            suggester=self.input_suggester(field_id),
                             id=field_id,
                         )
             with Horizontal(id="form_buttons"):
@@ -461,7 +481,40 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
         values = {}
         for _, field_id, _, _ in self.fields:
             values[field_id] = self.query_one(f"#{field_id}", Input).value.strip()
+        if self.should_suggest_upn_domain():
+            values["user"] = user_principal_name_suggestion(
+                values.get("user", ""), values.get("domain", "")
+            )
         return values
+
+    def field_ids(self) -> set[str]:
+        return {field_id for _, field_id, _, _ in self.fields}
+
+    def should_suggest_upn_domain(self) -> bool:
+        return self.form_title == "First-run setup wizard" and {
+            "domain",
+            "user",
+        }.issubset(self.field_ids())
+
+    def upn_domain(self) -> str:
+        return self.query_one("#domain", Input).value.strip()
+
+    def input_suggester(self, field_id: str) -> Suggester | None:
+        if field_id == "user" and self.should_suggest_upn_domain():
+            return UserPrincipalNameSuggester(self.upn_domain)
+        return None
+
+    def refresh_upn_suggestion(self) -> None:
+        if not self.should_suggest_upn_domain():
+            return
+        with suppress(Exception):
+            user_input = self.query_one("#user", Input)
+            suggestion = user_principal_name_suggestion(
+                user_input.value, self.upn_domain()
+            )
+            user_input._suggestion = (
+                suggestion if suggestion != user_input.value.strip() else ""
+            )
 
     def maybe_autofill_connection_fields(self) -> None:
         field_ids = {field_id for _, field_id, _, _ in self.fields}
@@ -513,6 +566,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
 
     def on_mount(self) -> None:
         self.maybe_autofill_connection_fields()
+        self.refresh_upn_suggestion()
         self.refresh_validation()
         self.focus_first_control()
 
@@ -521,10 +575,12 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
             return
         field_id = str(event.input.id)
         if self._autofilled.get(field_id) == event.input.value.strip():
+            self.refresh_upn_suggestion()
             self.refresh_validation()
             return
         self._autofilled.pop(field_id, None)
         self.maybe_autofill_connection_fields()
+        self.refresh_upn_suggestion()
         self.refresh_validation()
 
     def on_key(self, event: Any) -> None:
