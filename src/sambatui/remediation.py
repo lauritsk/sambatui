@@ -20,6 +20,10 @@ def _contains(term: str) -> Callable[[str], bool]:
     return lambda message: term in message
 
 
+def _contains_any(*terms: str) -> Callable[[str], bool]:
+    return lambda message: any(term in message for term in terms)
+
+
 ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
     (
         _contains("samba-tool not found"),
@@ -43,13 +47,11 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
         "press Ctrl+O and set Kerberos to off, desired, or required",
     ),
     (
-        lambda message: any(term in message for term in ("kerberos", "kdc", "krb5")),
+        _contains_any("kerberos", "kdc", "krb5"),
         "run kinit, set krb5 ccache, or switch auth to password",
     ),
     (
-        lambda message: any(
-            term in message for term in ("ldap encryption", "starttls", "ldaps")
-        ),
+        _contains_any("ldap encryption", "starttls", "ldaps"),
         "use ldaps/starttls, or set LDAP compatibility on for legacy DCs",
     ),
     (_contains("ldap base dn"), "set Base DN like DC=example,DC=com"),
@@ -70,7 +72,7 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
         "press z to load zones, or Ctrl+O to fix server/auth",
     ),
     (
-        lambda message: any(term in message for term in _NETWORK_ERROR_TERMS),
+        _contains_any(*_NETWORK_ERROR_TERMS),
         "check DC/server, DNS, VPN/firewall; Ctrl+O edits connection",
     ),
 )

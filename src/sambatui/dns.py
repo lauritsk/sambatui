@@ -85,16 +85,15 @@ def valid_dns_name(value: str, *, allow_at: bool = False) -> bool:
     except dns.exception.DNSException, UnicodeError, ValueError:
         return False
 
-    for label in text.split("."):
-        if not label or not label.isascii():
-            return False
-        if len(label) > 63:
-            return False
-        if label[0] not in _LABEL_EDGE_CHARS or label[-1] not in _LABEL_EDGE_CHARS:
-            return False
-        if any(char not in _LABEL_CHARS for char in label):
-            return False
-    return True
+    return all(_valid_dns_label(label) for label in text.split("."))
+
+
+def _valid_dns_label(label: str) -> bool:
+    if not label or not label.isascii() or len(label) > 63:
+        return False
+    if label[0] not in _LABEL_EDGE_CHARS or label[-1] not in _LABEL_EDGE_CHARS:
+        return False
+    return all(char in _LABEL_CHARS for char in label)
 
 
 def ptr_target_for_name(name: str, zone: str) -> str:
@@ -145,13 +144,8 @@ def reverse_record_for_ipv4(
     zones: list[str] = [
         zone.rstrip(".") for zone in reverse_zones if zone.endswith(".in-addr.arpa")
     ]
-    matching_zones: list[str] = [
-        zone
-        for zone in zones
-        if reverse_name == zone or reverse_name.endswith(f".{zone}")
-    ]
-    if matching_zones:
-        best_zone = max(matching_zones, key=lambda zone: len(zone))
+    best_zone = best_matching_reverse_zone(reverse_name, zones)
+    if best_zone:
         ptr_name = (
             "@" if reverse_name == best_zone else reverse_name[: -(len(best_zone) + 1)]
         )
@@ -159,6 +153,15 @@ def reverse_record_for_ipv4(
 
     labels = reverse_name.split(".")
     return ".".join(labels[1:]), labels[0]
+
+
+def best_matching_reverse_zone(reverse_name: str, zones: Iterable[str]) -> str:
+    matching_zones = [
+        zone
+        for zone in zones
+        if reverse_name == zone or reverse_name.endswith(f".{zone}")
+    ]
+    return max(matching_zones, key=lambda zone: len(zone), default="")
 
 
 def validate_record(
@@ -206,17 +209,18 @@ def _record_value_error(rtype: str, value: str) -> str | None:
 def _dns_name_record_error(rtype: str, value: str) -> str | None:
     if not valid_dns_name(value):
         return f"{rtype} value must be a DNS name, e.g. host.example.com."
-    if rtype == "CNAME":
-        try:
-            ipaddress.ip_address(value.rstrip("."))
-        except ValueError:
-            pass
-        else:
-            return (
-                "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
-            )
+    if rtype == "CNAME" and _is_ip_address(value):
+        return "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
     _parse_rdata(rtype, value)
     return None
+
+
+def _is_ip_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value.rstrip("."))
+    except ValueError:
+        return False
+    return True
 
 
 def _srv_record_error(value: str) -> str | None:

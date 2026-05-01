@@ -56,6 +56,17 @@ FIELD_LABELS = {
     "smart_never_logged_days": "Smart never-logged days",
     "smart_max_rows": "Smart max rows",
 }
+VALIDATED_USER_CONFIG_KEYS = (
+    "auth",
+    "kerberos",
+    "ldap_encryption",
+    "ldap_compatibility",
+    "auto_ptr",
+    "smart_days",
+    "smart_disabled_days",
+    "smart_never_logged_days",
+    "smart_max_rows",
+)
 
 
 def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
@@ -149,17 +160,7 @@ def user_config_value_error(key: str, value: Any) -> str | None:
 
 
 def user_config_validation_error(values: Mapping[str, Any]) -> str | None:
-    for key in (
-        "auth",
-        "kerberos",
-        "ldap_encryption",
-        "ldap_compatibility",
-        "auto_ptr",
-        "smart_days",
-        "smart_disabled_days",
-        "smart_never_logged_days",
-        "smart_max_rows",
-    ):
+    for key in VALIDATED_USER_CONFIG_KEYS:
         error = user_config_value_error(key, values.get(key, ""))
         if error:
             return error
