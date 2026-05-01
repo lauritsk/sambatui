@@ -140,7 +140,7 @@ TableRow = TypeVar("TableRow")
 
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search directory  S smart views  / filter  j/k move  r refresh",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  m load more  S smart  / filter  j/k move  r refresh",
     "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
@@ -156,6 +156,7 @@ LDAP_ACTION_BUTTONS = (
     ("ldap_search_users", "Search users"),
     ("ldap_search_groups", "Search groups"),
     ("ldap_search_computers", "Search computers"),
+    ("ldap_load_more", "Load more LDAP"),
 )
 SMART_ACTION_BUTTONS = (
     ("smart_full_health", "Full health dashboard"),
@@ -187,6 +188,9 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "type": lambda row: row.rtype.casefold(),
     "value": lambda row: row.value.casefold(),
 }
+LDAP_DEFAULT_MAX_ROWS = 200
+LDAP_LOAD_MORE_ROWS = 200
+LDAP_MAX_ROWS = 5000
 GUIDED_RECORD_TYPES = ("A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
 GUIDED_RECORD_TYPE_FIELDS: dict[str, tuple[FormField, ...]] = {
     "A": (("IPv4 address", "address", "192.0.2.10", ""),),
@@ -250,6 +254,7 @@ CHAR_ACTION_NAMES: dict[str, str] = {
     "u": "action_update",
     "d": "action_delete",
     "f": "action_fix_smart",
+    "m": "action_load_more_directory",
     "v": "action_visual_select",
     "j": "action_cursor_down",
     "k": "action_cursor_up",
@@ -350,6 +355,12 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "Open LDAP search prefilled for computers.",
     ),
     (
+        "ldap_load_more",
+        "Load more LDAP entries",
+        "m",
+        "Rerun the last LDAP search with 200 more rows.",
+    ),
+    (
         "smart_view_picker",
         "Pick smart view",
         "S",
@@ -389,6 +400,7 @@ PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
     "ldap_search_users": ("action_ldap_search_kind", ("users",)),
     "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
     "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
+    "ldap_load_more": ("action_load_more_directory", ()),
     "smart_view_picker": ("action_smart_view", ()),
     **{
         f"smart_view_{view.shortcut}": ("action_smart_view_shortcut", (view.shortcut,))
@@ -409,6 +421,7 @@ SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
     "ldap_search_users": ("action_ldap_search_kind", ("users",)),
     "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
     "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
+    "ldap_load_more": ("action_load_more_directory", ()),
     "smart_full_health": ("action_smart_view_shortcut", ("8",)),
     "smart_dns_health": ("action_smart_view_shortcut", ("1",)),
     "smart_ldap_cleanup": ("action_smart_view_shortcut", ("5",)),
@@ -501,6 +514,7 @@ class SambatuiApp(App):
         ("G", "cursor_bottom", "Bottom"),
         ("enter", "activate_row", "Activate"),
         ("f", "fix_smart", "Fix smart finding"),
+        ("m", "load_more_directory", "Load more LDAP"),
         ("slash", "search", "Search"),
         ("n", "sort_name", "Sort name"),
         ("t", "sort_type", "Sort type"),
@@ -634,6 +648,8 @@ class SambatuiApp(App):
         self.visual_selecting = False
         self.record_rows: list[DnsRow] = []
         self.directory_rows: list[DirectoryRow] = []
+        self.current_directory_values: dict[str, str] = {}
+        self.current_directory_max_rows = LDAP_DEFAULT_MAX_ROWS
         self.smart_view_rows: list[SmartViewRow] = []
         self.current_smart_view_id = ""
         self.current_smart_max_rows = 500
@@ -1566,7 +1582,12 @@ class SambatuiApp(App):
             ),
             ("Search text", "text", "name, login, mail, DN fragment", ""),
             *self.ldap_connection_fields(self.ldap_base_default()),
-            ("Max rows", "max_rows", "200", "200"),
+            (
+                "Max rows",
+                "max_rows",
+                str(LDAP_DEFAULT_MAX_ROWS),
+                str(self.current_directory_max_rows),
+            ),
         ]
 
     def apply_ldap_connection_values(self, values: dict[str, str]) -> None:
@@ -1576,14 +1597,52 @@ class SambatuiApp(App):
         self.save_preferences()
 
     async def directory_search_rows(
-        self, client: LdapDirectoryClient, kind: str, text: str
+        self,
+        client: LdapDirectoryClient,
+        kind: str,
+        text: str,
+        max_entries: int | None = None,
     ) -> list[DirectoryRow] | None:
         async with self.busy():
             try:
-                return await asyncio.to_thread(client.search, kind, text)
+                return await asyncio.to_thread(client.search, kind, text, max_entries)
             except ValueError as exc:
                 self.report_error(str(exc))
                 return None
+
+    def ldap_search_max_rows(self, values: dict[str, str]) -> int:
+        return bounded_int(
+            values.get("max_rows", ""), LDAP_DEFAULT_MAX_ROWS, maximum=LDAP_MAX_ROWS
+        )
+
+    async def run_directory_search(
+        self,
+        values: dict[str, str],
+        *,
+        default_kind: str = "users",
+        max_rows: int | None = None,
+        action: str = "Loaded",
+    ) -> bool:
+        self.apply_ldap_connection_values(values)
+        limit = max_rows if max_rows is not None else self.ldap_search_max_rows(values)
+        client = self.ldap_client(values["base_dn"])
+        error = client.validation_error()
+        if error:
+            self.report_error(error)
+            return False
+
+        kind = values["kind"] or default_kind
+        rows = await self.directory_search_rows(client, kind, values["text"], limit)
+        if rows is None:
+            return False
+        self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
+        self.current_directory_max_rows = limit
+        self.set_search_text("", refresh=False)
+        self.populate_directory(rows)
+        suffix = " — limit reached; press m to load more" if len(rows) >= limit else ""
+        self.set_status(f"{action} {len(rows)} LDAP entries (limit {limit}){suffix}")
+        self.notify(f"{action} {len(rows)} LDAP entries")
+        return True
 
     async def open_ldap_search(self, default_kind: str = "users") -> None:
         values = await self.form(
@@ -1594,23 +1653,33 @@ class SambatuiApp(App):
         )
         if not values:
             return
+        await self.run_directory_search(values, default_kind=default_kind)
 
-        self.apply_ldap_connection_values(values)
-        max_rows = bounded_int(values["max_rows"], 200, maximum=1000)
-        client = self.ldap_client(values["base_dn"])
-        error = client.validation_error()
-        if error:
-            self.report_error(error)
-            return
-
-        rows = await self.directory_search_rows(
-            client, values["kind"] or default_kind, values["text"]
+    async def refresh_current_directory_search(self) -> bool:
+        if not self.current_directory_values:
+            self.set_status("No LDAP search to refresh. Press L to search directory.")
+            return False
+        return await self.run_directory_search(
+            self.current_directory_values,
+            max_rows=self.current_directory_max_rows,
+            action="Refreshed",
         )
-        if rows is None:
-            return
-        self.set_search_text("", refresh=False)
-        self.populate_directory(rows[:max_rows])
-        self.notify(f"Loaded {min(len(rows), max_rows)} LDAP entries")
+
+    async def load_more_directory(self) -> bool:
+        if not self.current_directory_values:
+            self.set_status("No LDAP search to extend. Press L to search directory.")
+            return False
+        max_rows = min(
+            self.current_directory_max_rows + LDAP_LOAD_MORE_ROWS, LDAP_MAX_ROWS
+        )
+        if max_rows == self.current_directory_max_rows:
+            self.set_status(f"LDAP row limit already at {LDAP_MAX_ROWS}.")
+            return False
+        return await self.run_directory_search(
+            self.current_directory_values,
+            max_rows=max_rows,
+            action="Loaded",
+        )
 
     @work
     async def action_ldap_search(self) -> None:
@@ -1619,6 +1688,10 @@ class SambatuiApp(App):
     @work
     async def action_ldap_search_kind(self, kind: str) -> None:
         await self.open_ldap_search(kind)
+
+    @work
+    async def action_load_more_directory(self) -> None:
+        await self.load_more_directory()
 
     def smart_view_choices(self) -> list[SmartViewChoice]:
         return [
@@ -2008,6 +2081,9 @@ class SambatuiApp(App):
     async def action_refresh(self) -> None:
         if self.view_mode == "smart":
             await self.refresh_current_smart_view()
+            return
+        if self.view_mode == "directory":
+            await self.refresh_current_directory_search()
             return
         await self.refresh_current_zone()
 
