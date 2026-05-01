@@ -1488,8 +1488,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         async with self.busy():
             try:
                 return await asyncio.to_thread(client.child_containers, LDAP_MAX_ROWS)
-            except ValueError as exc:
-                self.report_error(str(exc))
+            except ValueError:
                 return []
 
     def ldap_search_max_rows(self, values: dict[str, str]) -> int:
