@@ -477,16 +477,17 @@ def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:
 def normalize_entry_attributes(
     attributes: Mapping[str, Any],
 ) -> dict[str, tuple[str, ...]]:
-    normalized: dict[str, tuple[str, ...]] = {}
-    for key, value in attributes.items():
-        if isinstance(value, (list, tuple, set)):
-            values = tuple(str(item) for item in value if item is not None)
-        elif value is None:
-            values = ()
-        else:
-            values = (str(value),)
-        normalized[str(key)] = values
-    return normalized
+    return {
+        str(key): normalize_attribute_values(value) for key, value in attributes.items()
+    }
+
+
+def normalize_attribute_values(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(str(item) for item in value if item is not None)
+    return (str(value),)
 
 
 def first_attr(attrs: Mapping[str, Sequence[str]], *names: str) -> str:

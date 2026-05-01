@@ -181,6 +181,20 @@ def ldap_limit_suffix(row_count: int, limit: int) -> str:
     return " — limit reached; press m to load more"
 
 
+def next_sort_state(
+    current_field: str, current_reverse: bool, requested_field: str
+) -> tuple[str, bool]:
+    if current_field == requested_field:
+        return requested_field, not current_reverse
+    return requested_field, False
+
+
+def sort_direction(reverse: bool) -> str:
+    if reverse:
+        return "desc"
+    return "asc"
+
+
 __all__ = [
     "DEFAULT_AUTH",
     "DEFAULT_AUTO_PTR",
@@ -1270,14 +1284,12 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def sort_directory(self, field: str) -> None:
         if field not in DIRECTORY_SORT_KEYS:
             return
-        if self.directory_sort_field == field:
-            self.directory_sort_reverse = not self.directory_sort_reverse
-        else:
-            self.directory_sort_field = field
-            self.directory_sort_reverse = False
+        self.directory_sort_field, self.directory_sort_reverse = next_sort_state(
+            self.directory_sort_field, self.directory_sort_reverse, field
+        )
         self.directory_rows = self.sorted_directory(self.directory_rows)
         self.refresh_directory_view()
-        direction = "desc" if self.directory_sort_reverse else "asc"
+        direction = sort_direction(self.directory_sort_reverse)
         self.set_status(f"Sorted LDAP by {directory_sort_label(field)} ({direction})")
 
     def sort_records(self, field: str) -> None:
@@ -1287,14 +1299,12 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         if self.view_mode != "dns":
             self.set_status("Current view is read-only; sorting applies to rows.")
             return
-        if self.sort_field == field:
-            self.sort_reverse = not self.sort_reverse
-        else:
-            self.sort_field = field
-            self.sort_reverse = False
+        self.sort_field, self.sort_reverse = next_sort_state(
+            self.sort_field, self.sort_reverse, field
+        )
         self.record_rows = self.sorted_records(self.record_rows)
         self.refresh_record_view()
-        direction = "desc" if self.sort_reverse else "asc"
+        direction = sort_direction(self.sort_reverse)
         self.set_status(f"Sorted by {field} ({direction}); selection cleared")
 
     def set_record_selected(self, row_index: int, selected: bool) -> None:
@@ -2179,9 +2189,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 "Update works on one record only. Select one row.", severity="error"
             )
             return None
-        selected = records[0] if records else None
-        if selected:
-            return selected
+        if records:
+            return records[0]
         self.notify(
             "Select a real record row first. Rows with type '-' are empty/folder nodes.",
             severity="error",

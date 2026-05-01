@@ -533,8 +533,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
                 self._suppress_autofill = False
 
     def maybe_autofill_connection_fields(self) -> None:
-        field_ids = {field_id for _, field_id, _, _ in self.fields}
-        if not {"server", "zone", "ldap_base"}.issubset(field_ids):
+        if not {"server", "zone", "ldap_base"}.issubset(self.field_ids()):
             return
 
         server = self.query_one("#server", Input).value.strip()
@@ -575,6 +574,10 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
             self.query_one("#submit", Button).disabled = error is not None
         return error
 
+    def refresh_form_feedback(self) -> None:
+        self.refresh_upn_suggestion()
+        self.refresh_validation()
+
     def submit(self) -> None:
         if self.refresh_validation() is not None:
             return
@@ -582,27 +585,22 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
 
     def on_mount(self) -> None:
         self.maybe_autofill_connection_fields()
-        self.refresh_upn_suggestion()
-        self.refresh_validation()
+        self.refresh_form_feedback()
         self.focus_first_control()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._suppress_autofill:
             return
         field_id = str(event.input.id)
-        if self._autofilled.get(field_id) == event.input.value.strip():
-            self.refresh_upn_suggestion()
-            self.refresh_validation()
-            return
-        self._autofilled.pop(field_id, None)
-        self.maybe_autofill_connection_fields()
-        self.refresh_upn_suggestion()
-        self.refresh_validation()
+        if self._autofilled.get(field_id) != event.input.value.strip():
+            self._autofilled.pop(field_id, None)
+            self.maybe_autofill_connection_fields()
+        self.refresh_form_feedback()
 
     def on_input_blurred(self, event: Input.Blurred) -> None:
         if event.input.id == "user":
             self.accept_upn_suggestion()
-            self.refresh_validation()
+            self.refresh_form_feedback()
 
     def on_key(self, event: Any) -> None:
         if isinstance(self.focused, Button) and event.key in {"enter", "space"}:
