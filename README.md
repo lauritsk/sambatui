@@ -165,13 +165,17 @@ LDAP search, or running smart views.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
   `ous`, or `all`). The LDAP sidebar also has one-click searches for users,
   groups, and computers.
-- Smart sidebar buttons run common DNS duplicate and LDAP cleanup checks.
+- Smart sidebar buttons run the full health dashboard, DNS duplicate checks,
+  and LDAP cleanup checks.
+- Full health dashboard (`8` from Smart views) runs key DNS and LDAP hygiene
+  checks together, shows grouped summary counts before detailed findings, and
+  keeps successful results when some checks fail.
 - Move through DNS, LDAP, or smart-view rows to update the details pane with
   wrapped context for the focused row.
 - Select a zone: refresh records for that zone; the records title shows the
   active zone.
 - `r`: refresh current zone (`dns query SERVER ZONE @ ALL`) or rerun the
-  current smart view.
+  current DNS/full-health smart view.
 - `f`: apply a guided smart-view fix when available. Currently this adds
   previewed PTR records for A-without-PTR findings. LDAP findings remain
   read-only/export-only.

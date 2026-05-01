@@ -6,9 +6,12 @@ from sambatui.ldap_directory import DirectoryRow
 from sambatui.models import DnsRow
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
+    SmartViewCheckResult,
+    SmartViewRow,
     dns_a_without_ptr,
     dns_duplicate_records,
     dns_ptr_without_a,
+    full_health_dashboard_rows,
     ldap_delete_candidate_users,
     ldap_inactive_users,
     ldap_stale_computers,
@@ -47,6 +50,62 @@ def directory_row(
 def filetime_for(value: datetime) -> str:
     ad_epoch = datetime(1601, 1, 1, tzinfo=UTC)
     return str(int((value - ad_epoch).total_seconds() * 10_000_000))
+
+
+def test_full_health_dashboard_rows_show_summary_failures_then_details() -> None:
+    high = SmartViewRow(
+        severity="high",
+        object="example.com:alias",
+        finding="CNAME conflicts with other records",
+        evidence="Types on same name: A, CNAME",
+        suggested_action="Keep CNAME alone.",
+        source="dns",
+    )
+    low = SmartViewRow(
+        severity="low",
+        object="solo",
+        finding="User has no secondary groups",
+        evidence="memberOf empty",
+        suggested_action="Review groups.",
+        source="ldap",
+    )
+
+    rows = full_health_dashboard_rows(
+        [
+            SmartViewCheckResult(
+                "dns_duplicates", "DNS duplicates/conflicts", "DNS", [high]
+            ),
+            SmartViewCheckResult(
+                "ldap_users_without_groups",
+                "LDAP users with no secondary groups",
+                "LDAP",
+                [low],
+            ),
+            SmartViewCheckResult(
+                "ldap_stale_computers",
+                "LDAP stale computer accounts",
+                "LDAP",
+                error="LDAP timeout",
+            ),
+        ]
+    )
+
+    assert rows[0].finding == "Full health dashboard"
+    assert rows[0].evidence == "2 finding(s); 2 check(s) succeeded; 1 check(s) failed."
+    assert [row.severity for row in rows[:4]] == [
+        "summary",
+        "summary",
+        "summary",
+        "error",
+    ]
+    assert (
+        rows[4].finding
+        == "DNS duplicates/conflicts: CNAME conflicts with other records"
+    )
+    assert (
+        rows[5].finding
+        == "LDAP users with no secondary groups: User has no secondary groups"
+    )
 
 
 def test_dns_duplicate_records_flags_identical_records_and_cname_conflicts() -> None:

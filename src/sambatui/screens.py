@@ -143,7 +143,7 @@ Main tabs
   Smart     Read-only DNS/LDAP hygiene findings
   L         Search LDAP from anywhere
   S         Pick a smart view from a list
-  1-7       Run smart views directly
+  1-8       Run smart views directly; 8 runs full health dashboard
   z         Load DNS zones
 
 Navigation
@@ -211,7 +211,7 @@ class SmartViewPickerScreen(ModalScreen[str | None]):
         with Vertical(id="smart_view_dialog"):
             yield Static("Smart views", id="smart_view_title")
             yield Static(
-                "Pick a read-only hygiene view. Keys 1-7 run views directly; Enter selects.",
+                "Pick a read-only hygiene view. Keys 1-8 run views directly; Enter selects.",
                 id="smart_view_hint",
             )
             table = DataTable(id="smart_view_table", cursor_type="row")
