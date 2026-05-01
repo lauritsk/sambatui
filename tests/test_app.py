@@ -66,19 +66,19 @@ def test_sidebar_buttons_route_to_existing_actions() -> None:
         async def action_refresh(self) -> None:
             self.actions.append("refresh")
 
-        def action_query(self) -> None:
+        async def action_query(self) -> None:
             self.actions.append("query")
 
-        def action_add(self) -> None:
+        async def action_add(self) -> None:
             self.actions.append("add")
 
-        def action_delete(self) -> None:
+        async def action_delete(self) -> None:
             self.actions.append("delete")
 
-        def action_ldap_search_kind(self, kind: str) -> None:
+        async def action_ldap_search_kind(self, kind: str) -> None:
             self.actions.append(f"ldap:{kind}")
 
-        def action_smart_view_shortcut(self, shortcut: str) -> None:
+        async def action_smart_view_shortcut(self, shortcut: str) -> None:
             self.actions.append(f"smart:{shortcut}")
 
     async def run_app() -> None:

@@ -191,6 +191,27 @@ CHAR_ACTION_NAMES: dict[str, str] = {
     "t": "action_sort_type",
     "e": "action_sort_value",
 }
+CASE_SENSITIVE_ACTION_NAMES: dict[str, str] = {
+    "P": "save_password",
+    "L": "action_ldap_search",
+    "S": "action_smart_view",
+    "V": "action_select_range",
+}
+SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
+    "load_password": ("load_password", ()),
+    "save_password": ("save_password", ()),
+    "load_zones": ("action_load_zones", ()),
+    "refresh_zone": ("action_refresh", ()),
+    "query_record": ("action_query", ()),
+    "add_record": ("action_add", ()),
+    "delete_records": ("action_delete", ()),
+    "discover_ad": ("action_discover_ad", ()),
+    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
+    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
+    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
+    "smart_dns_health": ("action_smart_view_shortcut", ("1",)),
+    "smart_ldap_cleanup": ("action_smart_view_shortcut", ("5",)),
+}
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -1923,7 +1944,7 @@ class SambatuiApp(App):
         char_lower = char.casefold() if char else ""
         if char_lower != "g":
             self.pending_g = False
-        if self.handle_case_sensitive_key(char, char_lower):
+        if await self.handle_case_sensitive_key(char):
             return True
         if self.handle_smart_view_shortcut(char_lower):
             return True
@@ -1934,20 +1955,12 @@ class SambatuiApp(App):
         self.pending_g = False
         return False
 
-    def handle_case_sensitive_key(self, char: str | None, char_lower: str) -> bool:
-        if char == "P" and char_lower == "p":
-            self.save_password()
-            return True
-        if char == "L" and char_lower == "l":
-            self.action_ldap_search()
-            return True
-        if char == "S" and char_lower == "s":
-            self.action_smart_view()
-            return True
-        if char == "V" and char_lower == "v":
-            self.action_select_range()
-            return True
-        return False
+    async def handle_case_sensitive_key(self, char: str | None) -> bool:
+        action_name = CASE_SENSITIVE_ACTION_NAMES.get(char or "")
+        if action_name is None:
+            return False
+        await self.invoke_action(action_name)
+        return True
 
     def handle_smart_view_shortcut(self, char_lower: str) -> bool:
         if char_lower not in SMART_VIEW_BY_SHORTCUT:
@@ -1971,41 +1984,20 @@ class SambatuiApp(App):
         action_name = KEY_ACTION_NAMES.get(key) or CHAR_ACTION_NAMES.get(char_lower)
         if action_name is None:
             return False
-        result = getattr(self, action_name)()
-        if inspect.isawaitable(result):
-            await result
+        await self.invoke_action(action_name)
         return True
 
+    async def invoke_action(self, action_name: str, *args: Any) -> None:
+        result = getattr(self, action_name)(*args)
+        if inspect.isawaitable(result):
+            await result
+
     async def run_sidebar_button_action(self, button_id: str | None) -> bool:
-        match button_id:
-            case "load_password":
-                self.load_password()
-            case "save_password":
-                self.save_password()
-            case "load_zones":
-                await self.action_load_zones()
-            case "refresh_zone":
-                await self.action_refresh()
-            case "query_record":
-                self.action_query()
-            case "add_record":
-                self.action_add()
-            case "delete_records":
-                self.action_delete()
-            case "discover_ad":
-                self.action_discover_ad()
-            case "ldap_search_users":
-                self.action_ldap_search_kind("users")
-            case "ldap_search_groups":
-                self.action_ldap_search_kind("groups")
-            case "ldap_search_computers":
-                self.action_ldap_search_kind("computers")
-            case "smart_dns_health":
-                self.action_smart_view_shortcut("1")
-            case "smart_ldap_cleanup":
-                self.action_smart_view_shortcut("5")
-            case _:
-                return False
+        action = SIDEBAR_ACTIONS.get(button_id or "")
+        if action is None:
+            return False
+        action_name, args = action
+        await self.invoke_action(action_name, *args)
         return True
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
