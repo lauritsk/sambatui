@@ -14,6 +14,7 @@ from sambatui.config import (
     password_file_warning,
     read_password_file,
     save_user_config,
+    user_config_validation_error,
 )
 from sambatui.dns import (
     parse_records,
@@ -167,6 +168,21 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     assert load_user_config(path) == {"auto_ptr": "on", "smart_days": "120"}
+    path.write_text(
+        'auth = "bad"\nldap_encryption = "plain"\nsmart_max_rows = 99999\nzone = "example.com"\n',
+        encoding="utf-8",
+    )
+    assert load_user_config(path) == {"zone": "example.com"}
+    assert save_user_config(
+        {"auto_ptr": "always", "ldap_compatibility": "yes", "smart_days": "0"},
+        path,
+    ) == {"ldap_compatibility": "on"}
+    assert user_config_validation_error({"auth": "bad"}) == (
+        "Auth must be password or kerberos."
+    )
+    assert user_config_validation_error({"smart_max_rows": "5001"}) == (
+        "Smart max rows must be at most 5000."
+    )
     path.write_text("invalid =", encoding="utf-8")
     assert load_user_config(path) == {}
     assert load_user_config(tmp_path / "missing.toml") == {}
