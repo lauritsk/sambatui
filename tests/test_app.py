@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 
 from sambatui.app import (
     DnsRow,
@@ -213,9 +214,17 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
         def __init__(self) -> None:
             super().__init__()
             self.searches: list[tuple[str, str, int | None]] = []
+            self.sidebar_cursor_rows: list[int] = []
 
         def save_preferences(self) -> None:
             return
+
+        def populate_ldap_structure(self, rows) -> None:
+            super().populate_ldap_structure(rows)
+            with suppress(Exception):
+                self.sidebar_cursor_rows.append(
+                    self.query_one("#ldap_structure", DataTable).cursor_row
+                )
 
         async def directory_search_rows(
             self,
@@ -257,10 +266,12 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert str(structure.get_row_at(1)[0]) == "  CN=Users"
 
             # Discovered structure rows remain actionable; no synthetic Users/Groups rows.
+            app.sidebar_cursor_rows.clear()
             structure.move_cursor(row=1)
             assert await app.activate_sidebar_selection(structure)
             assert app.searches[-1] == ("all", "CN=Users", 200)
             assert structure.cursor_row == 1
+            assert app.sidebar_cursor_rows == [1]
 
     asyncio.run(run_app())
 
