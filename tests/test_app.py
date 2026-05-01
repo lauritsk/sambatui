@@ -570,6 +570,91 @@ def test_validate_record_accepts_documentation_examples() -> None:
     assert validate_record("@", "MX", "10 mail.example.com.") is None
 
 
+def test_guided_add_record_fields_are_type_specific() -> None:
+    app = SambatuiApp()
+
+    a_fields = {field_id for _, field_id, _, _ in app.add_record_type_fields("A")}
+    srv_fields = {field_id for _, field_id, _, _ in app.add_record_type_fields("SRV")}
+
+    assert a_fields == {"name", "address", "ttl"}
+    assert srv_fields == {"name", "priority", "weight", "port", "target", "ttl"}
+
+
+def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
+    app = SambatuiApp()
+    app.record_rows = [DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw")]
+
+    assert (
+        app.guided_add_record_error(
+            "A", {"name": "www", "address": "192.0.2.10", "ttl": ""}
+        )
+        == "Duplicate record already exists in the loaded zone view."
+    )
+    assert (
+        app.guided_add_record_error(
+            "A", {"name": "www", "address": "192.0.2.11", "ttl": "bad"}
+        )
+        == "TTL must be whole seconds, e.g. 3600."
+    )
+    assert (
+        app.guided_add_record_error(
+            "MX",
+            {"name": "@", "priority": "10", "target": "mail.example.com.", "ttl": ""},
+        )
+        is None
+    )
+
+
+def test_guided_add_preview_includes_command_and_ptr_suggestion() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#zone", Input).value = "example.com"
+            app.query_one("#user", Input).value = "admin"
+            app.query_one("#password", Input).value = "secret"
+            app.zones = ["example.com", "2.0.192.in-addr.arpa"]
+
+            preview = app.add_record_preview("www", "A", "192.0.2.10", "300")
+
+            assert "Record: www A 192.0.2.10" in preview
+            assert "2.0.192.in-addr.arpa: 10 PTR www.example.com" in preview
+            assert "Command preview: samba-tool dns add dc01.example.com" in preview
+            assert "admin%******" in preview
+
+    asyncio.run(run_app())
+
+
+def test_form_screen_live_validation_disables_submit() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.push_screen(
+                FormScreen(
+                    "Validate",
+                    "",
+                    [("Value", "value", "ok", "bad")],
+                    "Save",
+                    lambda values: "Bad value" if values["value"] == "bad" else None,
+                )
+            )
+            await pilot.pause()
+            submit = app.screen.query_one("#submit", Button)
+            error = app.screen.query_one("#form_error", Static)
+            value = app.screen.query_one("#value", Input)
+
+            assert submit.disabled
+            assert str(error.render()) == "Bad value"
+
+            value.value = "ok"
+            await pilot.pause()
+
+            assert not submit.disabled
+            assert str(error.render()) == ""
+
+    asyncio.run(run_app())
+
+
 def test_validate_record_rejects_bad_cname_ip() -> None:
     assert validate_record("alias", "CNAME", "192.0.2.10") == (
         "CNAME value must be a hostname, not an IP address. Use A/AAAA for IPs."
