@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import shutil
 import socket
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from textual import work
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.app import App
 from textual.coordinate import Coordinate
 from textual.widgets import (
     Button,
@@ -21,29 +19,10 @@ from textual.widgets import (
     Label,
     Static,
     TabbedContent,
-    TabPane,
 )
 
 from .client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .config import (
-    DEFAULT_AUTH,
-    DEFAULT_AUTO_PTR,
-    DEFAULT_CONFIGFILE,
-    DEFAULT_KERBEROS,
-    DEFAULT_KRB5_CCACHE,
-    DEFAULT_LDAP_BASE,
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
-    DEFAULT_OPTIONS,
-    DEFAULT_PASSWORD,
-    DEFAULT_PASSWORD_FILE,
-    DEFAULT_SERVER,
-    DEFAULT_SMART_DAYS,
-    DEFAULT_SMART_DISABLED_DAYS,
-    DEFAULT_SMART_MAX_ROWS,
-    DEFAULT_SMART_NEVER_LOGGED_DAYS,
-    DEFAULT_USER,
-    DEFAULT_ZONE,
     fix_password_file_permissions,
     password_file_permissions_too_open,
     password_file_warning,
@@ -76,7 +55,6 @@ from .ldap_directory import (
 from .models import DnsRow
 from .remediation import actionable_error, bounded_int
 from .screens import (
-    CommandPaletteChoice,
     CommandPaletteScreen,
     ConfirmScreen,
     FormField,
@@ -134,298 +112,39 @@ from .ui.tables import (
     smart_result_values,
     smart_search_values,
 )
+from .app_layout import AppLayoutMixin
+from .app_navigation import AppNavigationMixin
+from .app_constants import (
+    DEFAULT_AUTH,
+    DEFAULT_AUTO_PTR,
+    DEFAULT_CONFIGFILE,
+    DEFAULT_KERBEROS,
+    DEFAULT_KRB5_CCACHE,
+    DEFAULT_LDAP_BASE,
+    DEFAULT_LDAP_COMPATIBILITY,
+    DEFAULT_LDAP_ENCRYPTION,
+    DEFAULT_OPTIONS,
+    DEFAULT_PASSWORD,
+    DEFAULT_PASSWORD_FILE,
+    DEFAULT_SERVER,
+    DEFAULT_SMART_DAYS,
+    DEFAULT_SMART_DISABLED_DAYS,
+    DEFAULT_SMART_MAX_ROWS,
+    DEFAULT_SMART_NEVER_LOGGED_DAYS,
+    DEFAULT_USER,
+    DEFAULT_ZONE,
+    GUIDED_RECORD_TYPE_FIELDS,
+    GUIDED_RECORD_TYPES,
+    GUIDED_RECORD_VALUE_FIELDS,
+    LDAP_DEFAULT_MAX_ROWS,
+    LDAP_LOAD_MORE_ROWS,
+    LDAP_MAX_ROWS,
+    PALETTE_ACTION_MAP,
+    PALETTE_ACTIONS,
+    RECORD_SORT_KEYS,
+)
 
 TableRow = TypeVar("TableRow")
-
-
-KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / filter",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  m load more  S smart  / filter  j/k move  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
-}
-SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
-DNS_ACTION_BUTTONS = (
-    ("setup_wizard", "Setup wizard"),
-    ("load_zones", "Load zones"),
-    ("refresh_zone", "Refresh zone"),
-    ("query_record", "Query"),
-    ("add_record", "Add record"),
-    ("delete_records", "Delete selected"),
-)
-LDAP_ACTION_BUTTONS = (
-    ("ldap_search_users", "Search users"),
-    ("ldap_search_groups", "Search groups"),
-    ("ldap_search_computers", "Search computers"),
-    ("ldap_load_more", "Load more LDAP"),
-)
-SMART_ACTION_BUTTONS = (
-    ("smart_full_health", "Full health dashboard"),
-    ("smart_dns_health", "DNS duplicate check"),
-    ("smart_ldap_cleanup", "LDAP cleanup check"),
-)
-CONNECTION_STATE_INPUTS = (
-    (DEFAULT_SERVER, "server", False),
-    (DEFAULT_ZONE, "zone", False),
-    (DEFAULT_USER, "user", False),
-    (DEFAULT_PASSWORD, "password", True),
-    (DEFAULT_AUTH, "auth", False),
-    (DEFAULT_KERBEROS, "kerberos", False),
-    (DEFAULT_KRB5_CCACHE, "krb5_ccache", False),
-    (DEFAULT_CONFIGFILE, "configfile", False),
-    (DEFAULT_OPTIONS, "options", False),
-    (DEFAULT_LDAP_BASE, "ldap_base", False),
-    (DEFAULT_LDAP_ENCRYPTION, "ldap_encryption", False),
-    (DEFAULT_LDAP_COMPATIBILITY, "ldap_compatibility", False),
-    (DEFAULT_AUTO_PTR, "auto_ptr", False),
-    (DEFAULT_SMART_DAYS, "smart_days", False),
-    (DEFAULT_SMART_DISABLED_DAYS, "smart_disabled_days", False),
-    (DEFAULT_SMART_NEVER_LOGGED_DAYS, "smart_never_logged_days", False),
-    (DEFAULT_SMART_MAX_ROWS, "smart_max_rows", False),
-    (str(DEFAULT_PASSWORD_FILE), "password_file", False),
-)
-RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
-    "name": lambda row: row.name.casefold(),
-    "type": lambda row: row.rtype.casefold(),
-    "value": lambda row: row.value.casefold(),
-}
-LDAP_DEFAULT_MAX_ROWS = 200
-LDAP_LOAD_MORE_ROWS = 200
-LDAP_MAX_ROWS = 5000
-GUIDED_RECORD_TYPES = ("A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
-GUIDED_RECORD_TYPE_FIELDS: dict[str, tuple[FormField, ...]] = {
-    "A": (("IPv4 address", "address", "192.0.2.10", ""),),
-    "AAAA": (("IPv6 address", "address", "2001:db8::10", ""),),
-    "CNAME": (("Canonical target", "target", "host.example.com.", ""),),
-    "PTR": (("PTR target", "target", "host.example.com.", ""),),
-    "TXT": (("TXT text", "text", "v=spf1 include:example.com ~all", ""),),
-    "MX": (
-        ("Priority", "priority", "10", "10"),
-        ("Mail exchanger", "target", "mail.example.com.", ""),
-    ),
-    "SRV": (
-        ("Priority", "priority", "0", "0"),
-        ("Weight", "weight", "100", "100"),
-        ("Port", "port", "389", ""),
-        ("Target", "target", "dc01.example.com.", ""),
-    ),
-    "NS": (("Name server", "target", "ns1.example.com.", ""),),
-}
-GUIDED_RECORD_VALUE_FIELDS = {
-    "A": ("address",),
-    "AAAA": ("address",),
-    "CNAME": ("target",),
-    "PTR": ("target",),
-    "NS": ("target",),
-    "TXT": ("text",),
-    "MX": ("priority", "target"),
-    "SRV": ("priority", "weight", "port", "target"),
-}
-KEY_ACTION_NAMES: dict[str, str] = {
-    "ctrl+o": "action_connection",
-    "ctrl+p": "action_open_command_palette",
-    "escape": "action_clear_navigation_state",
-    "tab": "action_next_table",
-    "shift+tab": "action_previous_table",
-    "space": "action_toggle_select",
-    "ctrl+space": "action_toggle_select",
-    "shift+up": "action_extend_up",
-    "shift+down": "action_extend_down",
-    "ctrl+d": "action_cursor_half_page_down",
-    "ctrl+u": "action_cursor_half_page_up",
-    "pagedown": "action_cursor_page_down",
-    "pageup": "action_cursor_page_up",
-    "home": "action_cursor_top",
-    "end": "action_cursor_bottom",
-    "slash": "action_search",
-    "enter": "action_activate_row",
-}
-CHAR_ACTION_NAMES: dict[str, str] = {
-    "?": "action_help",
-    "p": "load_password",
-    "]": "action_next_side_tab",
-    "[": "action_previous_side_tab",
-    " ": "action_toggle_select",
-    "w": "action_setup_wizard",
-    "z": "action_load_zones",
-    "c": "action_discover_ad",
-    "r": "action_refresh",
-    "q": "action_query",
-    "a": "action_add",
-    "u": "action_update",
-    "d": "action_delete",
-    "f": "action_fix_smart",
-    "m": "action_load_more_directory",
-    "v": "action_visual_select",
-    "j": "action_cursor_down",
-    "k": "action_cursor_up",
-    "h": "action_focus_zones",
-    "l": "action_focus_records",
-    "/": "action_search",
-    "n": "action_sort_name",
-    "t": "action_sort_type",
-    "e": "action_sort_value",
-}
-CASE_SENSITIVE_ACTION_NAMES: dict[str, str] = {
-    "P": "save_password",
-    "L": "action_ldap_search",
-    "S": "action_smart_view",
-    "V": "action_select_range",
-}
-PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
-    ("help", "Show help", "?", "Open the keyboard shortcut and workflow help."),
-    (
-        "setup_wizard",
-        "Run first-run setup wizard",
-        "w",
-        "Enter AD domain and credentials, discover a DC, check DNS/LDAP, and load zones.",
-    ),
-    (
-        "connection",
-        "Open connection settings",
-        "Ctrl+O",
-        "Edit server, zone, auth, LDAP, and smart-view defaults.",
-    ),
-    (
-        "load_password",
-        "Load password file",
-        "p",
-        "Load the configured password file after checking permissions.",
-    ),
-    (
-        "save_password",
-        "Save password file",
-        "P",
-        "Write the current password field to disk with chmod 600.",
-    ),
-    (
-        "discover_ad",
-        "Discover AD domain controller",
-        "c",
-        "Find domain controllers from DNS SRV records and fill connection fields.",
-    ),
-    ("load_zones", "Load DNS zones", "z", "List DNS zones from samba-tool."),
-    (
-        "refresh",
-        "Refresh current view",
-        "r",
-        "Reload the current DNS zone or rerun the active smart view.",
-    ),
-    ("query_record", "Query DNS records", "q", "Query one DNS name and type."),
-    ("add_record", "Add DNS record", "a", "Create a DNS record in the active zone."),
-    (
-        "update_record",
-        "Update selected DNS record",
-        "u",
-        "Edit one selected DNS record, including type changes.",
-    ),
-    (
-        "delete_records",
-        "Delete selected DNS records",
-        "d",
-        "Delete selected DNS records after confirmation.",
-    ),
-    (
-        "filter_results",
-        "Filter current results",
-        "/",
-        "Focus inline search for DNS, LDAP, or smart-view rows.",
-    ),
-    (
-        "ldap_search",
-        "Search LDAP directory",
-        "L",
-        "Search AD users, groups, computers, OUs, or all entries.",
-    ),
-    (
-        "ldap_search_users",
-        "Search LDAP users",
-        "",
-        "Open LDAP search prefilled for users.",
-    ),
-    (
-        "ldap_search_groups",
-        "Search LDAP groups",
-        "",
-        "Open LDAP search prefilled for groups.",
-    ),
-    (
-        "ldap_search_computers",
-        "Search LDAP computers",
-        "",
-        "Open LDAP search prefilled for computers.",
-    ),
-    (
-        "ldap_load_more",
-        "Load more LDAP entries",
-        "m",
-        "Rerun the last LDAP search with 200 more rows.",
-    ),
-    (
-        "smart_view_picker",
-        "Pick smart view",
-        "S",
-        "Choose a DNS or LDAP health view from a list.",
-    ),
-    *(
-        (
-            f"smart_view_{view.shortcut}",
-            f"Run smart view: {view.label}",
-            view.shortcut,
-            view.description,
-        )
-        for view in SMART_VIEWS
-    ),
-    (
-        "fix_smart",
-        "Fix selected smart finding",
-        "f",
-        "Apply the available guided DNS fix for the selected smart-view finding.",
-    ),
-)
-PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
-    "help": ("action_help", ()),
-    "setup_wizard": ("action_setup_wizard", ()),
-    "connection": ("action_connection", ()),
-    "load_password": ("load_password", ()),
-    "save_password": ("save_password", ()),
-    "discover_ad": ("action_discover_ad", ()),
-    "load_zones": ("action_load_zones", ()),
-    "refresh": ("action_refresh", ()),
-    "query_record": ("action_query", ()),
-    "add_record": ("action_add", ()),
-    "update_record": ("action_update", ()),
-    "delete_records": ("action_delete", ()),
-    "filter_results": ("action_search", ()),
-    "ldap_search": ("action_ldap_search", ()),
-    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
-    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
-    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
-    "ldap_load_more": ("action_load_more_directory", ()),
-    "smart_view_picker": ("action_smart_view", ()),
-    **{
-        f"smart_view_{view.shortcut}": ("action_smart_view_shortcut", (view.shortcut,))
-        for view in SMART_VIEWS
-    },
-    "fix_smart": ("action_fix_smart", ()),
-}
-SIDEBAR_ACTIONS: dict[str, tuple[str, tuple[Any, ...]]] = {
-    "load_password": ("load_password", ()),
-    "save_password": ("save_password", ()),
-    "setup_wizard": ("action_setup_wizard", ()),
-    "load_zones": ("action_load_zones", ()),
-    "refresh_zone": ("action_refresh", ()),
-    "query_record": ("action_query", ()),
-    "add_record": ("action_add", ()),
-    "delete_records": ("action_delete", ()),
-    "discover_ad": ("action_discover_ad", ()),
-    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
-    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
-    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
-    "ldap_load_more": ("action_load_more_directory", ()),
-    "smart_full_health": ("action_smart_view_shortcut", ("8",)),
-    "smart_dns_health": ("action_smart_view_shortcut", ("1",)),
-    "smart_ldap_cleanup": ("action_smart_view_shortcut", ("5",)),
-}
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -471,7 +190,7 @@ __all__ = [
 ]
 
 
-class SambatuiApp(App):
+class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     CSS = APP_CSS
 
     BINDINGS = [
@@ -521,110 +240,6 @@ class SambatuiApp(App):
         ("e", "sort_value", "Sort value"),
         ("ctrl+q", "quit", "Quit"),
     ]
-
-    def smart_view_hint_text(self) -> str:
-        lines = ["Press S to pick a view, or press a number:"]
-        for view in SMART_VIEWS:
-            lines.append(f"  {view.shortcut}  {view.label}")
-        return "\n".join(lines)
-
-    def keys_hint_for_tab(self, tab_id: str | None) -> str:
-        return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
-
-    def active_side_tab_id(self) -> str:
-        with suppress(Exception):
-            return str(self.query_one("#side_tabs", TabbedContent).active or "dns_tab")
-        return "dns_tab"
-
-    def refresh_key_hints(self) -> None:
-        with suppress(Exception):
-            self.query_one("#keys", Static).update(
-                self.keys_hint_for_tab(self.active_side_tab_id())
-            )
-
-    def compose_connection_state(self) -> ComposeResult:
-        with Vertical(id="connection_state"):
-            for value, input_id, is_password in CONNECTION_STATE_INPUTS:
-                yield Input(value, password=is_password, id=input_id)
-
-    def compose_action_buttons(
-        self, container_id: str, buttons: tuple[tuple[str, str], ...]
-    ) -> ComposeResult:
-        with Vertical(id=container_id, classes="action-buttons"):
-            for button_id, label in buttons:
-                yield Button(label, id=button_id)
-
-    def compose_dns_tab(self) -> ComposeResult:
-        with TabPane("DNS", id="dns_tab"):
-            with Vertical(id="dns_panel"):
-                yield Static("DNS zones", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "dns_actions", DNS_ACTION_BUTTONS
-                )
-                zones = DataTable(id="zones", cursor_type="row")
-                zones.add_columns("DNS zones")
-                yield zones
-
-    def compose_ldap_tab(self) -> ComposeResult:
-        with TabPane("LDAP", id="ldap_tab"):
-            with Vertical(id="ldap_panel"):
-                yield Static("LDAP directory", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "ldap_actions", LDAP_ACTION_BUTTONS
-                )
-                yield Static(
-                    "Search AD directory. Results open in the main table.",
-                    id="ldap_hint",
-                    classes="hint",
-                )
-
-    def compose_smart_tab(self) -> ComposeResult:
-        with TabPane("Smart", id="smart_tab"):
-            with Vertical(id="smart_panel"):
-                yield Static("Smart views", classes="section-title")
-                yield from self.compose_action_buttons(
-                    "smart_actions", SMART_ACTION_BUTTONS
-                )
-                yield Static(
-                    self.smart_view_hint_text(),
-                    id="smart_hint",
-                    classes="hint",
-                )
-
-    def compose_sidebar(self) -> ComposeResult:
-        with Vertical(id="sidebar", classes="panel"):
-            yield Static("Connection: not checked", id="connection_summary")
-            with TabbedContent(id="side_tabs"):
-                yield from self.compose_dns_tab()
-                yield from self.compose_ldap_tab()
-                yield from self.compose_smart_tab()
-            yield Static("Ready", id="status")
-
-    def compose_results_panel(self) -> ComposeResult:
-        with Vertical(id="results", classes="panel"):
-            with Horizontal(id="records_header"):
-                yield Label("Records", id="records_title", classes="section-title")
-                yield Input(
-                    "",
-                    placeholder="/ search current results",
-                    id="inline_search",
-                )
-            table = DataTable(id="records", cursor_type="row")
-            table.add_columns(*DNS_COLUMNS)
-            yield table
-            yield Static(
-                "Details\nNo row selected.",
-                id="record_details",
-                classes="hint",
-                markup=False,
-            )
-
-    def compose(self) -> ComposeResult:
-        yield from self.compose_connection_state()
-        with Horizontal(id="main"):
-            yield from self.compose_sidebar()
-            yield from self.compose_results_panel()
-        yield Static(self.keys_hint_for_tab("dns_tab"), id="keys")
 
     def on_mount(self) -> None:
         self.initialize_state()
@@ -2384,403 +1999,6 @@ class SambatuiApp(App):
         if failed:
             self.notify(f"Deleted with {failed} failure(s)", severity="error")
         await self.refresh_current_zone()
-
-    def sync_inline_search_input(self) -> None:
-        with suppress(Exception):
-            search = self.query_one("#inline_search", Input)
-            if search.value == self.search_text:
-                return
-            self._syncing_search_input = True
-            try:
-                search.value = self.search_text
-            finally:
-                self._syncing_search_input = False
-
-    def set_search_text(self, text: str, *, refresh: bool = True) -> None:
-        self.search_text = text
-        self.sync_inline_search_input()
-        if refresh:
-            self.refresh_current_view()
-
-    def action_search(self) -> None:
-        self.pending_g = False
-        search = self.query_one("#inline_search", Input)
-        search.focus()
-        self.set_status(
-            "Inline search: type to filter; Esc clears, Enter returns to table"
-        )
-
-    def focused_table(self) -> DataTable | None:
-        focused = self.focused
-        return focused if isinstance(focused, DataTable) else None
-
-    def action_focus_zones(self) -> None:
-        self.pending_g = False
-        self.query_one("#zones", DataTable).focus()
-
-    def action_focus_records(self) -> None:
-        self.pending_g = False
-        self.query_one("#records", DataTable).focus()
-
-    def action_next_table(self) -> None:
-        table = self.focused_table()
-        if table and table.id == "zones":
-            self.action_focus_records()
-        else:
-            self.action_focus_zones()
-
-    def action_previous_table(self) -> None:
-        table = self.focused_table()
-        if table and table.id == "records":
-            self.action_focus_zones()
-        else:
-            self.action_focus_records()
-
-    def action_next_side_tab(self) -> None:
-        self.switch_side_tab(1)
-
-    def action_previous_side_tab(self) -> None:
-        self.switch_side_tab(-1)
-
-    def switch_side_tab(self, delta: int) -> None:
-        tabs = self.query_one("#side_tabs", TabbedContent)
-        current = tabs.active if tabs.active in SIDE_TAB_IDS else "dns_tab"
-        current_index = SIDE_TAB_IDS.index(current)
-        tabs.active = SIDE_TAB_IDS[(current_index + delta) % len(SIDE_TAB_IDS)]
-        self.refresh_key_hints()
-        if tabs.active == "dns_tab":
-            self.action_focus_zones()
-        else:
-            self.action_focus_records()
-
-    def on_tabbed_content_tab_activated(
-        self, event: TabbedContent.TabActivated
-    ) -> None:
-        if event.tabbed_content.id == "side_tabs":
-            self.refresh_key_hints()
-
-    def action_sort_name(self) -> None:
-        self.sort_records("name")
-
-    def action_sort_type(self) -> None:
-        self.sort_records("type")
-
-    def action_sort_value(self) -> None:
-        self.sort_records("value")
-
-    def update_visual_selection(self) -> None:
-        if not self.visual_selecting or self.selection_anchor is None:
-            return
-        table = self.query_one("#records", DataTable)
-        if self.focused_table() is table:
-            self.select_record_range(self.selection_anchor, table.cursor_row)
-
-    def active_table(self) -> DataTable:
-        return self.focused_table() or self.query_one("#records", DataTable)
-
-    def page_rows(self, table: DataTable) -> int:
-        height = getattr(table.size, "height", 0)
-        return max(1, height - 3) if height else 10
-
-    def move_cursor_by(self, delta: int) -> None:
-        table = self.active_table()
-        if not table.row_count:
-            return
-        row = max(0, min(table.cursor_row + delta, table.row_count - 1))
-        table.move_cursor(row=row)
-        self.update_visual_selection()
-        self.update_details_pane()
-
-    def action_cursor_down(self) -> None:
-        self.pending_g = False
-        self.move_cursor_by(1)
-
-    def action_cursor_up(self) -> None:
-        self.pending_g = False
-        self.move_cursor_by(-1)
-
-    def action_cursor_page_down(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(self.page_rows(table))
-
-    def action_cursor_page_up(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(-self.page_rows(table))
-
-    def action_cursor_half_page_down(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(max(1, self.page_rows(table) // 2))
-
-    def action_cursor_half_page_up(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(-max(1, self.page_rows(table) // 2))
-
-    def action_cursor_top(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        table.move_cursor(row=0)
-        self.update_visual_selection()
-        self.update_details_pane()
-
-    def action_cursor_bottom(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        if table.row_count:
-            table.move_cursor(row=table.row_count - 1)
-            self.update_visual_selection()
-            self.update_details_pane()
-
-    def ensure_dns_records_view(self) -> bool:
-        if self.view_mode == "dns":
-            return True
-        self.set_status("Current view is read-only.")
-        return False
-
-    def action_toggle_select(self) -> None:
-        self.pending_g = False
-        table = self.focused_table() or self.query_one("#records", DataTable)
-        if table.id != "records" or not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
-            return
-        row_index = table.cursor_row
-        self.selection_anchor = (
-            row_index if self.selection_anchor is None else self.selection_anchor
-        )
-        self.set_record_selected(row_index, row_index not in self.selected_record_rows)
-        self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
-
-    def action_visual_select(self) -> None:
-        self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
-            return
-        if self.visual_selecting:
-            self.visual_selecting = False
-            self.set_status(
-                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
-            )
-            return
-        self.visual_selecting = True
-        self.selection_anchor = table.cursor_row
-        self.select_record_range(table.cursor_row, table.cursor_row)
-        self.set_status("Visual selection on: use j/k, then d to delete selected")
-
-    def action_select_range(self) -> None:
-        self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
-            return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
-        self.select_record_range(self.selection_anchor, table.cursor_row)
-
-    def action_extend_up(self) -> None:
-        self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not self.ensure_dns_records_view():
-            return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
-        self.move_cursor_by(-1)
-        self.select_record_range(self.selection_anchor, table.cursor_row)
-
-    def action_extend_down(self) -> None:
-        self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not self.ensure_dns_records_view():
-            return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
-        self.move_cursor_by(1)
-        self.select_record_range(self.selection_anchor, table.cursor_row)
-
-    def action_clear_navigation_state(self) -> None:
-        self.pending_g = False
-        if self.focused_inline_search():
-            if self.search_text:
-                self.set_search_text("")
-                self.action_focus_records()
-                self.set_status("Search cleared")
-                return
-            self.action_focus_records()
-            self.set_status("Search closed")
-            return
-        if self.visual_selecting:
-            self.visual_selecting = False
-            self.set_status(
-                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
-            )
-            return
-        if self.selected_record_rows:
-            self.clear_record_selection()
-            self.set_status("Selection cleared")
-            return
-        if self.search_text:
-            self.set_search_text("")
-            self.set_status("Search cleared")
-            return
-        self.action_focus_records()
-
-    async def action_activate_row(self) -> None:
-        self.pending_g = False
-        table = self.focused_table()
-        if table and table.id == "records":
-            if self.view_mode == "smart":
-                self.action_fix_smart()
-            else:
-                self.action_toggle_select()
-            return
-        if table and table.id == "zones":
-            try:
-                row = table.get_row_at(table.cursor_row)
-            except Exception:
-                return
-            if row:
-                await self.activate_zone(str(row[0]))
-
-    async def on_key(self, event: Any) -> None:
-        if self.handle_inline_search_key(event):
-            event.prevent_default()
-            event.stop()
-            return
-        if self.should_ignore_key_event(event):
-            return
-        handled = await self.handle_key(event.key, getattr(event, "character", None))
-        if handled:
-            event.prevent_default()
-            event.stop()
-
-    def focused_inline_search(self) -> bool:
-        return isinstance(self.focused, Input) and self.focused.id == "inline_search"
-
-    def handle_inline_search_key(self, event: Any) -> bool:
-        if not self.focused_inline_search():
-            return False
-        if event.key == "escape":
-            self.action_clear_navigation_state()
-            return True
-        if event.key == "enter":
-            self.action_focus_records()
-            self.set_status("Search kept; press Esc to clear it")
-            return True
-        return False
-
-    def should_ignore_key_event(self, event: Any) -> bool:
-        if isinstance(self.focused, Input):
-            return True
-        return isinstance(self.focused, Button) and event.key in {"enter", "space"}
-
-    async def handle_key(self, key: str, char: str | None) -> bool:
-        char_lower = char.casefold() if char else ""
-        if char_lower != "g":
-            self.pending_g = False
-        if await self.handle_case_sensitive_key(char):
-            return True
-        if self.handle_smart_view_shortcut(char_lower):
-            return True
-        if self.handle_g_key(char, char_lower):
-            return True
-        if await self.handle_mapped_key(key, char_lower):
-            return True
-        self.pending_g = False
-        return False
-
-    async def handle_case_sensitive_key(self, char: str | None) -> bool:
-        action_name = CASE_SENSITIVE_ACTION_NAMES.get(char or "")
-        if action_name is None:
-            return False
-        await self.invoke_action(action_name)
-        return True
-
-    def handle_smart_view_shortcut(self, char_lower: str) -> bool:
-        if char_lower not in SMART_VIEW_BY_SHORTCUT:
-            return False
-        self.action_smart_view_shortcut(char_lower)
-        return True
-
-    def handle_g_key(self, char: str | None, char_lower: str) -> bool:
-        if char_lower != "g":
-            return False
-        if char == "G":
-            self.action_cursor_bottom()
-        elif self.pending_g:
-            self.action_cursor_top()
-        else:
-            self.pending_g = True
-            self.set_status("g pressed: press g again for top; G goes bottom")
-        return True
-
-    async def handle_mapped_key(self, key: str, char_lower: str) -> bool:
-        action_name = KEY_ACTION_NAMES.get(key) or CHAR_ACTION_NAMES.get(char_lower)
-        if action_name is None:
-            return False
-        await self.invoke_action(action_name)
-        return True
-
-    async def invoke_action(self, action_name: str, *args: Any) -> None:
-        result = getattr(self, action_name)(*args)
-        if inspect.isawaitable(result):
-            await result
-
-    async def run_sidebar_button_action(self, button_id: str | None) -> bool:
-        action = SIDEBAR_ACTIONS.get(button_id or "")
-        if action is None:
-            return False
-        action_name, args = action
-        await self.invoke_action(action_name, *args)
-        return True
-
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        await self.run_sidebar_button_action(event.button.id)
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id != "inline_search":
-            return
-        event.stop()
-        if getattr(self, "_syncing_search_input", False):
-            return
-        self.search_text = event.value
-        self.refresh_current_view()
-
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id == "records":
-            self.update_details_pane()
-
-    async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id != "zones":
-            return
-        row = event.data_table.get_row_at(event.cursor_row)
-        if not row:
-            return
-        zone = str(row[0])
-        if zone not in self.zones:
-            self.set_status(DNS_EMPTY_STATE[1])
-            return
-        await self.activate_zone(zone)
-
-    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
-        if event.data_table.id != "records":
-            return
-        match event.column_index:
-            case 1:
-                self.sort_records("name")
-            case 2:
-                self.sort_records("type")
-            case 3:
-                self.sort_records("value")
 
 
 def main() -> None:
