@@ -349,6 +349,7 @@ def test_setup_wizard_discovers_checks_and_loads_zones() -> None:
 
             records = app.query_one("#records", DataTable)
             assert app.query_one("#server", Input).value == "dc01.example.com"
+            assert app.query_one("#domain", Input).value == "example.com"
             assert app.query_one("#zone", Input).value == "example.com"
             assert app.query_one("#ldap_base", Input).value == "DC=example,DC=com"
             assert app.zones == ["example.com", "2.0.192.in-addr.arpa"]
@@ -385,6 +386,27 @@ def test_setup_wizard_failed_check_explains_next_action() -> None:
             status = app.query_one("#status", Static)
             assert "Setup DNS check failed" in str(status.render())
             assert "Action: check credentials" in str(status.render())
+
+    asyncio.run(run_app())
+
+
+def test_reverse_zone_does_not_become_setup_domain_default() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.query_one("#domain", Input).value = ""
+            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
+            app.query_one("#server", Input).value = "dc01.example.com"
+
+            assert app.connection_domain_default() == "example.com"
+
+            app.query_one("#domain", Input).value = "ad.example.com"
+            prefs = app.preference_values()
+
+            assert prefs["domain"] == "ad.example.com"
+            assert prefs["zone"] == "ad.example.com"
+            assert prefs["last_zone"] == "2.0.192.in-addr.arpa"
+            assert app.ldap_base_default() == "DC=ad,DC=example,DC=com"
 
     asyncio.run(run_app())
 
@@ -469,7 +491,8 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
         app = SambatuiApp()
         async with app.run_test():
             app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#zone", Input).value = "example.com"
+            app.query_one("#domain", Input).value = "example.com"
+            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
             app.query_one("#user", Input).value = "admin"
             app.query_one("#password", Input).value = "secret"
             app.query_one("#auth", Input).value = "kerberos"
@@ -480,7 +503,9 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
             prefs = app.preference_values()
 
             assert prefs["server"] == "dc01.example.com"
-            assert prefs["last_zone"] == "example.com"
+            assert prefs["domain"] == "example.com"
+            assert prefs["zone"] == "example.com"
+            assert prefs["last_zone"] == "2.0.192.in-addr.arpa"
             assert prefs["auto_ptr"] == "off"
             assert prefs["smart_days"] == "120"
             assert "password" not in prefs
