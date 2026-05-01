@@ -3,7 +3,7 @@ from __future__ import annotations
 from ipaddress import ip_address
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any, TypeAlias
+from typing import Any, Generic, TypeAlias, TypeVar
 from urllib.parse import urlparse
 
 from textual.app import ComposeResult
@@ -14,7 +14,31 @@ from textual.widgets import Button, DataTable, Input, Static
 from .ldap_directory import domain_to_base_dn
 
 
-class ConfirmScreen(ModalScreen[bool]):
+ScreenResult = TypeVar("ScreenResult")
+
+
+class FocusedModalScreen(ModalScreen[ScreenResult], Generic[ScreenResult]):
+    BINDINGS = [
+        ("tab", "modal_focus_next", "Next field"),
+        ("shift+tab", "modal_focus_previous", "Previous field"),
+    ]
+
+    def action_modal_focus_next(self) -> None:
+        self.focus_next()
+
+    def action_modal_focus_previous(self) -> None:
+        self.focus_previous()
+
+    def focus_first_control(self) -> None:
+        for widget in self.walk_children():
+            if isinstance(widget, (Input, DataTable, Button)) and not getattr(
+                widget, "disabled", False
+            ):
+                widget.focus()
+                return
+
+
+class ConfirmScreen(FocusedModalScreen[bool]):
     CSS = """
     ConfirmScreen { align: center middle; }
     #confirm_dialog {
@@ -65,6 +89,10 @@ class ConfirmScreen(ModalScreen[bool]):
             return self.default_confirm
         return None
 
+    def on_mount(self) -> None:
+        button_id = "confirm" if self.default_confirm else "deny"
+        self.query_one(f"#{button_id}", Button).focus()
+
     def on_key(self, event: Any) -> None:
         decision = self.key_decision(event.key, getattr(event, "character", None))
         if decision is None:
@@ -113,7 +141,7 @@ def infer_domain_from_server(server: str) -> str:
     return ".".join(labels[1:])
 
 
-class HelpScreen(ModalScreen[None]):
+class HelpScreen(FocusedModalScreen[None]):
     CSS = """
     HelpScreen { align: center middle; }
     #help_dialog {
@@ -177,6 +205,9 @@ App
             with Horizontal(id="help_buttons"):
                 yield Button("Close", id="close", variant="primary")
 
+    def on_mount(self) -> None:
+        self.query_one("#close", Button).focus()
+
     def on_key(self, event: Any) -> None:
         if event.key in {"escape", "enter"}:
             event.prevent_default()
@@ -187,7 +218,7 @@ App
         self.dismiss(None)
 
 
-class SmartViewPickerScreen(ModalScreen[str | None]):
+class SmartViewPickerScreen(FocusedModalScreen[str | None]):
     CSS = """
     SmartViewPickerScreen { align: center middle; }
     #smart_view_dialog {
@@ -269,7 +300,7 @@ class SmartViewPickerScreen(ModalScreen[str | None]):
         self.dismiss_selected()
 
 
-class CommandPaletteScreen(ModalScreen[str | None]):
+class CommandPaletteScreen(FocusedModalScreen[str | None]):
     CSS = """
     CommandPaletteScreen { align: center middle; }
     #command_palette_dialog {
@@ -366,7 +397,7 @@ class CommandPaletteScreen(ModalScreen[str | None]):
         self.dismiss_selected()
 
 
-class FormScreen(ModalScreen[dict[str, str] | None]):
+class FormScreen(FocusedModalScreen[dict[str, str] | None]):
     CSS = """
     FormScreen { align: center middle; }
     #form_dialog {
@@ -483,6 +514,7 @@ class FormScreen(ModalScreen[dict[str, str] | None]):
     def on_mount(self) -> None:
         self.maybe_autofill_connection_fields()
         self.refresh_validation()
+        self.focus_first_control()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._suppress_autofill:

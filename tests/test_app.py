@@ -969,6 +969,33 @@ def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
     asyncio.run(run_app())
 
 
+def test_modal_tab_stays_inside_foreground_popup() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.query_one("#records", DataTable).focus()
+            await pilot.press("w")
+            for _ in range(10):
+                await pilot.pause()
+                if isinstance(app.screen, FormScreen):
+                    break
+
+            assert isinstance(app.screen, FormScreen)
+            focused = app.screen.focused
+            assert focused is not None
+            assert str(focused.id) == "domain"
+
+            await pilot.press("tab")
+            await pilot.pause()
+
+            focused = app.screen.focused
+            assert focused is not None
+            assert str(focused.id) == "user"
+            assert not app.query_one("#zones", DataTable).has_focus
+
+    asyncio.run(run_app())
+
+
 def test_parse_zones_deduplicates_zone_names() -> None:
     output = """
         pszZoneName                 : example.com
