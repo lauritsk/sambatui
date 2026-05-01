@@ -507,31 +507,43 @@ def ldap_stale_computers(
     cutoff = now - timedelta(days=days)
     findings: list[SmartViewRow] = []
     for row in rows:
-        if row.kind != "computer" or ldap_is_disabled(row):
-            continue
-        last_logon = first_ad_datetime(row, "lastLogonTimestamp", "lastLogon")
-        created = first_ad_datetime(row, "whenCreated")
-        if last_logon is not None and last_logon >= cutoff:
-            continue
-        if last_logon is None and (created is None or created >= cutoff):
-            continue
-        host = first_attr(row.attributes, "dNSHostName") or row.name
-        evidence = (
-            f"lastLogonTimestamp {age_text(last_logon, now)} ago"
-            if last_logon is not None
-            else f"created {age_text(created, now)} ago; no lastLogonTimestamp"
-        )
-        findings.append(
-            SmartViewRow(
-                severity="medium",
-                object=host,
-                finding="Stale computer account",
-                evidence=evidence,
-                suggested_action="Confirm device retired; disable/delete and clean DNS if stale.",
-                source="ldap",
-            )
-        )
+        finding = stale_computer_finding(row, cutoff=cutoff, now=now)
+        if finding is not None:
+            findings.append(finding)
     return findings
+
+
+def stale_computer_finding(
+    row: DirectoryRow, *, cutoff: datetime, now: datetime
+) -> SmartViewRow | None:
+    if row.kind != "computer" or ldap_is_disabled(row):
+        return None
+
+    last_logon = first_ad_datetime(row, "lastLogonTimestamp", "lastLogon")
+    created = first_ad_datetime(row, "whenCreated")
+    if last_logon is not None and last_logon >= cutoff:
+        return None
+    if last_logon is None and (created is None or created >= cutoff):
+        return None
+
+    host = first_attr(row.attributes, "dNSHostName") or row.name
+    evidence = stale_computer_evidence(last_logon, created, now)
+    return SmartViewRow(
+        severity="medium",
+        object=host,
+        finding="Stale computer account",
+        evidence=evidence,
+        suggested_action="Confirm device retired; disable/delete and clean DNS if stale.",
+        source="ldap",
+    )
+
+
+def stale_computer_evidence(
+    last_logon: datetime | None, created: datetime | None, now: datetime
+) -> str:
+    if last_logon is not None:
+        return f"lastLogonTimestamp {age_text(last_logon, now)} ago"
+    return f"created {age_text(created, now)} ago; no lastLogonTimestamp"
 
 
 def ldap_users_without_groups(rows: Sequence[DirectoryRow]) -> list[SmartViewRow]:

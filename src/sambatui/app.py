@@ -188,6 +188,34 @@ RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "value": lambda row: row.value.casefold(),
 }
 GUIDED_RECORD_TYPES = ("A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
+GUIDED_RECORD_TYPE_FIELDS: dict[str, tuple[FormField, ...]] = {
+    "A": (("IPv4 address", "address", "192.0.2.10", ""),),
+    "AAAA": (("IPv6 address", "address", "2001:db8::10", ""),),
+    "CNAME": (("Canonical target", "target", "host.example.com.", ""),),
+    "PTR": (("PTR target", "target", "host.example.com.", ""),),
+    "TXT": (("TXT text", "text", "v=spf1 include:example.com ~all", ""),),
+    "MX": (
+        ("Priority", "priority", "10", "10"),
+        ("Mail exchanger", "target", "mail.example.com.", ""),
+    ),
+    "SRV": (
+        ("Priority", "priority", "0", "0"),
+        ("Weight", "weight", "100", "100"),
+        ("Port", "port", "389", ""),
+        ("Target", "target", "dc01.example.com.", ""),
+    ),
+    "NS": (("Name server", "target", "ns1.example.com.", ""),),
+}
+GUIDED_RECORD_VALUE_FIELDS = {
+    "A": ("address",),
+    "AAAA": ("address",),
+    "CNAME": ("target",),
+    "PTR": ("target",),
+    "NS": ("target",),
+    "TXT": ("text",),
+    "MX": ("priority", "target"),
+    "SRV": ("priority", "weight", "port", "target"),
+}
 KEY_ACTION_NAMES: dict[str, str] = {
     "ctrl+o": "action_connection",
     "ctrl+p": "action_open_command_palette",
@@ -2029,60 +2057,19 @@ class SambatuiApp(App):
         return f"Choose one of: {', '.join(GUIDED_RECORD_TYPES)}."
 
     def add_record_type_fields(self, rtype: str) -> list[FormField]:
-        rtype = rtype.upper()
-        fields: list[FormField] = [("Record name", "name", "name, @ for zone root", "")]
-        match rtype:
-            case "A":
-                fields.append(("IPv4 address", "address", "192.0.2.10", ""))
-            case "AAAA":
-                fields.append(("IPv6 address", "address", "2001:db8::10", ""))
-            case "CNAME":
-                fields.append(("Canonical target", "target", "host.example.com.", ""))
-            case "PTR":
-                fields.append(("PTR target", "target", "host.example.com.", ""))
-            case "TXT":
-                fields.append(
-                    ("TXT text", "text", "v=spf1 include:example.com ~all", "")
-                )
-            case "MX":
-                fields.extend(
-                    [
-                        ("Priority", "priority", "10", "10"),
-                        ("Mail exchanger", "target", "mail.example.com.", ""),
-                    ]
-                )
-            case "SRV":
-                fields.extend(
-                    [
-                        ("Priority", "priority", "0", "0"),
-                        ("Weight", "weight", "100", "100"),
-                        ("Port", "port", "389", ""),
-                        ("Target", "target", "dc01.example.com.", ""),
-                    ]
-                )
-            case "NS":
-                fields.append(("Name server", "target", "ns1.example.com.", ""))
-        fields.append(("TTL", "ttl", "optional seconds, e.g. 3600", ""))
-        return fields
+        return [
+            ("Record name", "name", "name, @ for zone root", ""),
+            *GUIDED_RECORD_TYPE_FIELDS.get(rtype.upper(), ()),
+            ("TTL", "ttl", "optional seconds, e.g. 3600", ""),
+        ]
 
     def add_record_value_from_fields(self, rtype: str, values: dict[str, str]) -> str:
-        match rtype.upper():
-            case "A" | "AAAA":
-                return values.get("address", "")
-            case "CNAME" | "PTR" | "NS":
-                return values.get("target", "")
-            case "TXT":
-                return values.get("text", "")
-            case "MX":
-                return (
-                    f"{values.get('priority', '')} {values.get('target', '')}".strip()
-                )
-            case "SRV":
-                return " ".join(
-                    values.get(key, "")
-                    for key in ("priority", "weight", "port", "target")
-                ).strip()
-        return values.get("value", "")
+        value_fields = GUIDED_RECORD_VALUE_FIELDS.get(rtype.upper())
+        if value_fields is None:
+            return values.get("value", "")
+        if len(value_fields) == 1:
+            return values.get(value_fields[0], "")
+        return " ".join(values.get(key, "") for key in value_fields).strip()
 
     def ttl_error(self, ttl: str) -> str | None:
         if not ttl:
