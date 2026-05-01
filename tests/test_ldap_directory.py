@@ -187,6 +187,41 @@ def test_search_passes_legacy_tls_to_ldap_server(
     assert captured["tls"] is not None
 
 
+def test_check_connection_binds_without_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    searched = False
+
+    class FakeConnection:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def bind(self) -> bool:
+            return True
+
+        def search(self, *_args: object, **_kwargs: object) -> bool:
+            nonlocal searched
+            searched = True
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    client.check_connection()
+
+    assert not searched
+
+
 def test_search_wraps_ldap_session_termination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

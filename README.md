@@ -158,6 +158,10 @@ LDAP search, or running smart views.
 
 - `Ctrl+P`: open a searchable command palette for common DNS, LDAP, smart-view,
   connection, password, and help actions.
+- `w` or **Setup wizard**: first-run guided setup. Enter the AD DNS domain plus
+  required credentials; sambatui discovers a domain controller, fills server,
+  zone, LDAP base DN, and auth defaults, checks DNS/LDAP connectivity, then
+  loads zones. Failed checks include the next corrective action.
 - `z` or **Load DNS zones**: list zones, including reverse zones. If the
   saved zone is still available, its records are restored automatically.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
