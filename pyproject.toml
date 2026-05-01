@@ -41,6 +41,9 @@ build-backend = "uv_build"
 omit = [
   "src/sambatui/__main__.py",
   "src/sambatui/app.py",
+  "src/sambatui/app_constants.py",
+  "src/sambatui/app_layout.py",
+  "src/sambatui/app_navigation.py",
   "src/sambatui/screens.py",
   "src/sambatui/ui/*",
 ]
