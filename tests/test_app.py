@@ -216,6 +216,9 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
                 for index in range(count)
             ]
 
+        async def directory_container_rows(self, client) -> list[DirectoryRow]:
+            return []
+
     async def run_app() -> None:
         app = DirectoryApp()
         async with app.run_test():
@@ -272,7 +275,10 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
         ) -> list[DirectoryRow] | None:
             self.searches.append((kind, text, max_entries))
             self.search_bases.append(client.config.base_dn)
-            if client.config.base_dn == "CN=Users,DC=example,DC=com":
+            if client.config.base_dn in {
+                "CN=Users,DC=example,DC=com",
+                "OU=Departments,DC=example,DC=com",
+            }:
                 return []
             return [
                 DirectoryRow(
@@ -283,6 +289,36 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
                     attributes={},
                 )
             ]
+
+        async def directory_container_rows(self, client) -> list[DirectoryRow]:
+            containers = {
+                "DC=example,DC=com": [
+                    DirectoryRow(
+                        dn="CN=Users,DC=example,DC=com",
+                        kind="container",
+                        name="Users",
+                        summary="",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="OU=Departments,DC=example,DC=com",
+                        kind="ou",
+                        name="Departments",
+                        summary="",
+                        attributes={},
+                    ),
+                ],
+                "OU=Departments,DC=example,DC=com": [
+                    DirectoryRow(
+                        dn="OU=Engineering,OU=Departments,DC=example,DC=com",
+                        kind="ou",
+                        name="Engineering",
+                        summary="",
+                        attributes={},
+                    )
+                ],
+            }
+            return containers.get(client.config.base_dn, [])
 
     async def run_app() -> None:
         app = SidebarApp()
@@ -303,8 +339,9 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             records = app.query_one("#records", DataTable)
             assert app.view_mode == "directory"
             assert str(records.get_row_at(0)[1]) == "Ops"
-            assert structure.row_count == 2
+            assert structure.row_count == 3
             assert str(structure.get_row_at(1)[0]) == "  CN=Users"
+            assert str(structure.get_row_at(2)[0]) == "  OU=Departments"
 
             # Discovered structure rows remain actionable; no synthetic Users/Groups rows.
             app.sidebar_cursor_rows.clear()
@@ -316,9 +353,17 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == (
                 "No LDAP entries shown"
             )
-            assert structure.row_count == 2
+            assert structure.row_count == 3
             assert structure.cursor_row == 1
             assert app.sidebar_cursor_rows == [1]
+
+            app.sidebar_cursor_rows.clear()
+            structure.move_cursor(row=2)
+            assert await app.activate_sidebar_selection(structure)
+            assert app.search_bases[-1] == "OU=Departments,DC=example,DC=com"
+            assert str(structure.get_row_at(3)[0]) == "    OU=Engineering"
+            assert structure.cursor_row == 2
+            assert app.sidebar_cursor_rows == [2]
 
     asyncio.run(run_app())
 
@@ -834,6 +879,9 @@ def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
                     attributes={},
                 )
             ]
+
+        async def directory_container_rows(self, client) -> list[DirectoryRow]:
+            return []
 
     async def run_app() -> None:
         app = DirectorySearchApp()

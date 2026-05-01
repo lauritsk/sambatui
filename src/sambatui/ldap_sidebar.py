@@ -78,7 +78,7 @@ def ldap_structure_nodes(
             base_index = _trailing_dc_index(parts)
         add_node(parts[base_index:])
         for index in range(base_index):
-            if index == 0 and row.kind != "ou":
+            if index == 0 and row.kind not in {"ou", "container"}:
                 continue
             rdn = parts[index].casefold()
             if rdn.startswith(("ou=", "cn=")):
