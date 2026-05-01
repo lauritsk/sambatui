@@ -39,6 +39,10 @@ class AppNavigationMixin(App):
 
         def refresh_key_hints(self) -> None: ...
 
+        def refresh_inline_search_scope(
+            self, search_text: str, view_mode: str
+        ) -> Any: ...
+
         def select_record_range(self, start: int, end: int) -> None: ...
 
         def set_record_selected(self, row_index: int, selected: bool) -> None: ...
@@ -71,7 +75,7 @@ class AppNavigationMixin(App):
         search = self.query_one("#inline_search", Input)
         search.focus()
         self.set_status(
-            "Inline search: type to filter; Esc clears, Enter returns to table"
+            "Inline search: LDAP/DNS searches source data; smart views filter loaded findings"
         )
 
     def focused_table(self) -> DataTable | None:
@@ -410,6 +414,7 @@ class AppNavigationMixin(App):
             return
         self.search_text = event.value
         self.refresh_current_view()
+        self.refresh_inline_search_scope(event.value, self.view_mode)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "records":

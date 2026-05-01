@@ -78,7 +78,7 @@ class AppLayoutMixin(App):
                 yield Label("Records", id="records_title", classes="section-title")
                 yield Input(
                     "",
-                    placeholder="/ search current results",
+                    placeholder="/ search source records",
                     id="inline_search",
                 )
             table = DataTable(id="records", cursor_type="row")

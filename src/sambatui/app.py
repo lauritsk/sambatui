@@ -380,6 +380,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.zones: list[str] = []
         self.sidebar_items: dict[str, list[SidebarItem]] = {}
         self.pending_g = False
+        self._last_dns_search_zone = ""
 
     def initialize_view(self) -> None:
         self.refresh_connection_summary()
@@ -856,6 +857,11 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         async with self.busy():
             code, output = await self.run_samba(action, args)
             if update_table and code == 0:
+                self._last_dns_search_zone = (
+                    self.val("zone")
+                    if action == "query" and args == ["@", "ALL"]
+                    else ""
+                )
                 self.populate_records(parse_records(output))
             if code == 0:
                 self.notify("OK")
@@ -1189,6 +1195,65 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             self.refresh_smart_view()
         else:
             self.refresh_record_view()
+
+    @work(group="inline_search", exclusive=True)
+    async def refresh_inline_search_scope(
+        self, search_text: str, view_mode: str
+    ) -> None:
+        await asyncio.sleep(0.35)
+        if search_text != self.search_text or view_mode != self.view_mode:
+            return
+        if view_mode == "directory":
+            await self.refresh_directory_search_scope(search_text)
+        elif view_mode == "dns" and search_text:
+            await self.refresh_dns_search_scope(search_text)
+
+    async def refresh_directory_search_scope(self, search_text: str) -> bool:
+        if not self.current_directory_values:
+            return False
+        values = {
+            **self.current_directory_values,
+            "text": search_text,
+            "max_rows": str(self.current_directory_max_rows),
+        }
+        limit = self.ldap_search_max_rows(values)
+        kind = values.get("kind") or "users"
+        client = self.ldap_client(values["base_dn"])
+        error = client.validation_error()
+        if error:
+            self.report_error(error)
+            return False
+
+        rows = await self.directory_search_rows(client, kind, search_text, limit)
+        if rows is None:
+            return False
+        if search_text != self.search_text or self.view_mode != "directory":
+            return False
+
+        self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
+        self.current_directory_max_rows = limit
+        self.populate_directory(rows)
+        suffix = " — limit reached; press m to load more" if len(rows) >= limit else ""
+        self.set_status(
+            f"Search matched {len(rows)} LDAP entries across directory (limit {limit}){suffix}"
+        )
+        return True
+
+    async def refresh_dns_search_scope(self, search_text: str) -> bool:
+        zone = self.val("zone")
+        if not zone:
+            return False
+        if self._last_dns_search_zone == zone:
+            return False
+        async with self.busy():
+            code, output = await self.run_samba("query", ["@", "ALL"])
+        if code != 0:
+            return False
+        if search_text != self.search_text or self.view_mode != "dns":
+            return False
+        self._last_dns_search_zone = zone
+        self.populate_records(parse_records(output))
+        return True
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         return sorted(

@@ -191,8 +191,8 @@ LDAP search, or running smart views.
   reverse zone matches an A-record address.
 - `u`: update selected record.
 - `d`: delete selected records.
-- `/`: focus the inline live filter for DNS records, LDAP rows, or smart-view
-  findings; `Esc` clears it.
+- `/`: focus inline search. DNS/LDAP search the source data instead of only
+  loaded rows; smart views filter loaded findings. `Esc` clears it.
 - `n` / `t` / `e`: sort by name/type/value.
 - `h` / `l` or `Tab` / `Shift+Tab`: focus zones/records.
 - `j` / `k`, `gg` / `G`, `PageUp` / `PageDown`, `Ctrl+u` / `Ctrl+d`:
