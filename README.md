@@ -123,7 +123,7 @@ Optional variables:
 | --- | --- | --- |
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
-| `SAMBATUI_USER` | Samba username, often `DOMAIN\\user` | empty |
+| `SAMBATUI_USER` | Samba/LDAP username. `DOMAIN\\user` works for many Samba actions; UPN form (`user@example.com`) is preferred for LDAP password bind. | empty |
 | `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects valid `klist -s` ticket | `kerberos` with ticket, else `password` |
 | `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
 | `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
@@ -256,7 +256,10 @@ proposes a base DN from the current DNS zone.
 
 With `SAMBATUI_AUTH=password`, LDAP uses the configured username/password and
 requires `ldaps` or `starttls`. Cleartext simple bind is intentionally
-unsupported.
+unsupported. Prefer a UPN-style username (`user@example.com`) for LDAP password
+binds. `DOMAIN\\user` makes ldap3 use NTLM and can fail on some Samba/legacy DCs;
+if LDAP bind or compatibility mode fails with `DOMAIN\\user`, retry with the UPN
+for the same account.
 
 With `SAMBATUI_AUTH=kerberos`, LDAP uses SASL GSSAPI and the current Kerberos
 ticket cache. Install the optional extra first:
@@ -272,8 +275,10 @@ LDAP on port 389, set `SAMBATUI_LDAP_ENCRYPTION=off` or `starttls`.
 
 For old Samba/EL6-era LDAP servers that only negotiate legacy TLS or fail schema
 probing, set `SAMBATUI_LDAP_COMPATIBILITY=on` or use the LDAP compatibility field
-in the UI. This mode is off by default because it relaxes TLS protocol/cipher
-policy for LDAP/StartTLS and skips LDAP schema probing.
+in the UI. When enabling compatibility with password auth, prefer a UPN username
+(`user@example.com`) over `DOMAIN\\user`. This mode is off by default because it
+relaxes TLS protocol/cipher policy for LDAP/StartTLS and skips LDAP schema
+probing.
 
 ## Development
 

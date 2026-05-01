@@ -426,7 +426,7 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
 
 def test_remediation_and_smart_view_edges() -> None:
     assert actionable_error("  ldap bind failed: nope  ") == (
-        "ldap bind failed: nope Action: check credentials, domain format, encryption, or Kerberos ticket."
+        "ldap bind failed: nope Action: check credentials, UPN username format, encryption, or Kerberos ticket."
     )
     assert actionable_error("Already Action: done") == "Already Action: done"
     assert bounded_int("bad", 7) == 7

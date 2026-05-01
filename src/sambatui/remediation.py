@@ -57,7 +57,7 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
     (_contains("ldap base dn"), "set Base DN like DC=example,DC=com"),
     (
         _contains("ldap bind failed"),
-        "check credentials, domain format, encryption, or Kerberos ticket",
+        "check credentials, UPN username format, encryption, or Kerberos ticket",
     ),
     (
         _contains("ldap search failed"),

@@ -122,9 +122,9 @@ class ConnectionSettings:
                 self.zone,
             ),
             (
-                "User — DOMAIN\\user or user accepted by Samba.",
+                "User — DOMAIN\\user or UPN; UPN is preferred for LDAP password bind.",
                 "user",
-                "EXAMPLE\\admin",
+                "admin@example.com",
                 self.user,
             ),
             (
@@ -180,7 +180,7 @@ class ConnectionSettings:
                 self.ldap_encryption or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — on relaxes TLS and schema probing for old Samba/EL6-era servers.",
+                "LDAP compatibility — on relaxes TLS/schema; with password auth prefer UPN user.",
                 "ldap_compatibility",
                 "on | off",
                 self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,

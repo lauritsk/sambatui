@@ -50,7 +50,7 @@ def test_key_hints_change_by_side_tab() -> None:
 
 def test_actionable_error_adds_concise_remediation() -> None:
     assert actionable_error("LDAP bind failed: invalidCredentials").endswith(
-        "Action: check credentials, domain format, encryption, or Kerberos ticket."
+        "Action: check credentials, UPN username format, encryption, or Kerberos ticket."
     )
     assert "run kinit" in actionable_error("Kerberos ticket expired")
     assert actionable_error("") == ""
