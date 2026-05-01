@@ -25,6 +25,56 @@ from .config import (
 from .ldap_directory import LdapSearchConfig, domain_to_base_dn
 
 FormField: TypeAlias = tuple[str, str, str, str]
+FieldTemplate: TypeAlias = tuple[str, str, str]
+
+SAMBA_FIELD_TEMPLATES: tuple[FieldTemplate, ...] = (
+    (
+        "Server — AD domain controller hostname or IP used by samba-tool -H.",
+        "server",
+        "dc01.example.com or 192.0.2.10",
+    ),
+    (
+        "AD DNS domain — used for setup/discovery and LDAP defaults.",
+        "domain",
+        "example.com",
+    ),
+    (
+        "DNS zone — active zone to query/edit after loading zones.",
+        "zone",
+        "example.com or 2.0.192.in-addr.arpa",
+    ),
+    (
+        "User — DOMAIN\\user or UPN; UPN is preferred for LDAP password bind.",
+        "user",
+        "admin@example.com",
+    ),
+    (
+        "Password — hidden. Leave empty for Kerberos or password file/env loading.",
+        "password",
+        "password",
+    ),
+    ("Auth mode — password or kerberos.", "auth", "password | kerberos"),
+    (
+        "Kerberos option — value passed to --use-kerberos.",
+        "kerberos",
+        "desired | required | off",
+    ),
+    (
+        "Kerberos credential cache — optional --use-krb5-ccache path.",
+        "krb5_ccache",
+        "/tmp/krb5cc_1000",
+    ),
+    (
+        "smb.conf — optional --configfile path for Samba settings.",
+        "configfile",
+        "/etc/samba/smb.conf",
+    ),
+    (
+        "Extra samba-tool options — separate multiple options with semicolons.",
+        "options",
+        "--option=name=value; --debuglevel=1",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -120,66 +170,8 @@ class ConnectionSettings:
 
     def samba_form_fields(self) -> list[FormField]:
         return [
-            (
-                "Server — AD domain controller hostname or IP used by samba-tool -H.",
-                "server",
-                "dc01.example.com or 192.0.2.10",
-                self.server,
-            ),
-            (
-                "AD DNS domain — used for setup/discovery and LDAP defaults.",
-                "domain",
-                "example.com",
-                self.domain,
-            ),
-            (
-                "DNS zone — active zone to query/edit after loading zones.",
-                "zone",
-                "example.com or 2.0.192.in-addr.arpa",
-                self.zone,
-            ),
-            (
-                "User — DOMAIN\\user or UPN; UPN is preferred for LDAP password bind.",
-                "user",
-                "admin@example.com",
-                self.user,
-            ),
-            (
-                "Password — hidden. Leave empty for Kerberos or password file/env loading.",
-                "password",
-                "password",
-                self.password,
-            ),
-            (
-                "Auth mode — password or kerberos.",
-                "auth",
-                "password | kerberos",
-                self.auth,
-            ),
-            (
-                "Kerberos option — value passed to --use-kerberos.",
-                "kerberos",
-                "desired | required | off",
-                self.kerberos,
-            ),
-            (
-                "Kerberos credential cache — optional --use-krb5-ccache path.",
-                "krb5_ccache",
-                "/tmp/krb5cc_1000",
-                self.krb5_ccache,
-            ),
-            (
-                "smb.conf — optional --configfile path for Samba settings.",
-                "configfile",
-                "/etc/samba/smb.conf",
-                self.configfile,
-            ),
-            (
-                "Extra samba-tool options — separate multiple options with semicolons.",
-                "options",
-                "--option=name=value; --debuglevel=1",
-                self.options,
-            ),
+            (label, field_name, placeholder, getattr(self, field_name))
+            for label, field_name, placeholder in SAMBA_FIELD_TEMPLATES
         ]
 
     def ldap_form_fields(self) -> list[FormField]:

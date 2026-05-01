@@ -508,11 +508,15 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         await self.invoke_action(action_name, *args)
         return True
 
-    def setup_wizard_fields(self) -> list[FormField]:
+    def setup_wizard_auth_defaults(self) -> tuple[str, str]:
         auth = self.val("auth") or DEFAULT_AUTH
         kerberos = self.val("kerberos") or DEFAULT_KERBEROS
         if auth.casefold() == "kerberos" and kerberos.casefold() == "off":
             kerberos = "required"
+        return auth, kerberos
+
+    def setup_wizard_fields(self) -> list[FormField]:
+        auth, kerberos = self.setup_wizard_auth_defaults()
         return [
             (
                 "AD DNS domain — used to discover domain controllers and zones.",
@@ -615,6 +619,38 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.report_error(f"Setup {check} check failed{suffix} Action: {action}.")
         return False
 
+    async def setup_dns_zones(self) -> list[str] | None:
+        self.set_status("Setup: checking DNS zones")
+        code, output = await self.run_zonelist()
+        if code != 0:
+            self.setup_check_failed(
+                "DNS",
+                output,
+                "check credentials, DC reachability, samba-tool rights, and domain",
+            )
+            return None
+
+        zones = parse_zones(output)
+        if not zones:
+            self.setup_check_failed(
+                "DNS",
+                "no zones returned",
+                "check DNS service health and account rights on the selected DC",
+            )
+            return None
+        return zones
+
+    async def setup_ldap_connectivity_ok(self) -> bool:
+        self.set_status("Setup: checking LDAP bind")
+        ldap_error = await self.check_ldap_connectivity()
+        if not ldap_error:
+            return True
+        return self.setup_check_failed(
+            "LDAP",
+            ldap_error,
+            "check LDAP encryption, credentials, Base DN, firewall, or Kerberos ticket",
+        )
+
     async def run_setup_wizard(self, values: dict[str, str]) -> bool:
         domain = normalize_domain(values.get("domain", "")).lower()
         async with self.busy():
@@ -624,36 +660,16 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             except ValueError as exc:
                 self.report_error(str(exc))
                 return False
+
             controller = preferred_domain_controller(services)
             if controller is None:
                 self.report_error(f"No AD SRV records found for {domain}")
                 return False
 
             self.apply_setup_wizard_values(domain, controller.target, values)
-            self.set_status("Setup: checking DNS zones")
-            code, output = await self.run_zonelist()
-            if code != 0:
-                return self.setup_check_failed(
-                    "DNS",
-                    output,
-                    "check credentials, DC reachability, samba-tool rights, and domain",
-                )
-            zones = parse_zones(output)
-            if not zones:
-                return self.setup_check_failed(
-                    "DNS",
-                    "no zones returned",
-                    "check DNS service health and account rights on the selected DC",
-                )
-
-            self.set_status("Setup: checking LDAP bind")
-            ldap_error = await self.check_ldap_connectivity()
-            if ldap_error:
-                return self.setup_check_failed(
-                    "LDAP",
-                    ldap_error,
-                    "check LDAP encryption, credentials, Base DN, firewall, or Kerberos ticket",
-                )
+            zones = await self.setup_dns_zones()
+            if zones is None or not await self.setup_ldap_connectivity_ok():
+                return False
 
             self.zones = zones
             self.populate_zones(zones)
@@ -1302,6 +1318,33 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     async def action_load_zones(self) -> None:
         await self.load_zones()
 
+    async def discover_ad_controller(
+        self, domain: str
+    ) -> tuple[list[DiscoveredService], DiscoveredService] | None:
+        try:
+            services = await asyncio.to_thread(discover_ad_services, domain)
+        except ValueError as exc:
+            self.report_error(str(exc))
+            return None
+
+        controller = preferred_domain_controller(services)
+        if controller is None:
+            self.report_error(f"No AD SRV records found for {domain}")
+            return None
+        return services, controller
+
+    def apply_discovered_ad_controller(self, controller: DiscoveredService) -> None:
+        self.set_val("server", controller.target)
+        self.set_val("domain", controller.domain)
+        if not self.val("zone"):
+            self.set_val("zone", controller.domain)
+        if not self.val("ldap_base"):
+            self.set_val("ldap_base", domain_to_base_dn(controller.domain))
+            self.ldap_structure_rows = []
+        self.populate_ldap_structure(self.ldap_structure_rows)
+        self.refresh_connection_summary()
+        self.save_preferences()
+
     async def open_discover_ad(self, default_domain: str = "") -> bool:
         values = await self.form(
             "Discover AD domain controllers",
@@ -1318,27 +1361,14 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         )
         if not values:
             return False
+
         domain = values["domain"] or self.connection_domain_default()
         async with self.busy():
-            try:
-                services = await asyncio.to_thread(discover_ad_services, domain)
-            except ValueError as exc:
-                self.report_error(str(exc))
+            discovery = await self.discover_ad_controller(domain)
+            if discovery is None:
                 return False
-            controller = preferred_domain_controller(services)
-            if controller is None:
-                self.report_error(f"No AD SRV records found for {domain}")
-                return False
-            self.set_val("server", controller.target)
-            self.set_val("domain", controller.domain)
-            if not self.val("zone"):
-                self.set_val("zone", controller.domain)
-            if not self.val("ldap_base"):
-                self.set_val("ldap_base", domain_to_base_dn(controller.domain))
-                self.ldap_structure_rows = []
-            self.populate_ldap_structure(self.ldap_structure_rows)
-            self.refresh_connection_summary()
-            self.save_preferences()
+            services, controller = discovery
+            self.apply_discovered_ad_controller(controller)
             message = (
                 f"Discovered {len(services)} AD SRV record(s); "
                 f"selected {controller.target}:{controller.port}"
@@ -1773,6 +1803,54 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             )
         return results
 
+    def dns_dashboard_unloaded_results(self) -> list[SmartViewCheckResult]:
+        return [
+            SmartViewCheckResult(
+                view_id=view_id,
+                label=SMART_VIEW_BY_ID[view_id].label,
+                source="DNS",
+                error="DNS zones are not loaded.",
+            )
+            for view_id in FULL_HEALTH_DNS_VIEW_IDS
+        ]
+
+    async def dns_dashboard_check_results(self) -> list[SmartViewCheckResult]:
+        dns_result = await self.dns_records_with_failures_for_smart_view()
+        if dns_result is None:
+            return self.dns_dashboard_unloaded_results()
+        records_by_zone, failures = dns_result
+        return self.dns_dashboard_results(records_by_zone, failures)
+
+    def ldap_dashboard_validation_results(
+        self, validation_error: str
+    ) -> list[SmartViewCheckResult]:
+        return [
+            SmartViewCheckResult(
+                view_id=view_id,
+                label=SMART_VIEW_BY_ID[view_id].label,
+                source="LDAP",
+                error=validation_error,
+            )
+            for view_id in FULL_HEALTH_LDAP_VIEW_IDS
+        ]
+
+    async def ldap_dashboard_check_results(
+        self, values: dict[str, str], options: SmartViewOptions
+    ) -> list[SmartViewCheckResult]:
+        self.apply_ldap_connection_values(values)
+        client = self.ldap_client(values["base_dn"])
+        validation_error = client.validation_error()
+        if validation_error:
+            return self.ldap_dashboard_validation_results(validation_error)
+
+        user_rows, user_error = await self.dashboard_ldap_rows(client, "users")
+        computer_rows, computer_error = await self.dashboard_ldap_rows(
+            client, "computers"
+        )
+        return self.ldap_dashboard_results(
+            user_rows, user_error, computer_rows, computer_error, options
+        )
+
     async def load_full_health_dashboard(
         self,
         values: dict[str, str],
@@ -1780,46 +1858,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         *,
         refreshed: bool = False,
     ) -> None:
-        results: list[SmartViewCheckResult] = []
-        dns_result = await self.dns_records_with_failures_for_smart_view()
-        if dns_result is None:
-            for view_id in FULL_HEALTH_DNS_VIEW_IDS:
-                view = SMART_VIEW_BY_ID[view_id]
-                results.append(
-                    SmartViewCheckResult(
-                        view_id=view_id,
-                        label=view.label,
-                        source="DNS",
-                        error="DNS zones are not loaded.",
-                    )
-                )
-        else:
-            records_by_zone, failures = dns_result
-            results.extend(self.dns_dashboard_results(records_by_zone, failures))
-
-        self.apply_ldap_connection_values(values)
-        client = self.ldap_client(values["base_dn"])
-        validation_error = client.validation_error()
-        if validation_error:
-            results.extend(
-                SmartViewCheckResult(
-                    view_id=view_id,
-                    label=SMART_VIEW_BY_ID[view_id].label,
-                    source="LDAP",
-                    error=validation_error,
-                )
-                for view_id in FULL_HEALTH_LDAP_VIEW_IDS
-            )
-        else:
-            user_rows, user_error = await self.dashboard_ldap_rows(client, "users")
-            computer_rows, computer_error = await self.dashboard_ldap_rows(
-                client, "computers"
-            )
-            results.extend(
-                self.ldap_dashboard_results(
-                    user_rows, user_error, computer_rows, computer_error, options
-                )
-            )
+        results = await self.dns_dashboard_check_results()
+        results.extend(await self.ldap_dashboard_check_results(values, options))
 
         rows = full_health_dashboard_rows(results)
         self.populate_smart_view(
@@ -2033,8 +2073,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             f"Command preview: {command}"
         )
 
-    @work
-    async def action_add(self) -> None:
+    async def add_record_form_values(self) -> tuple[str, str, str, str] | None:
         type_values = await self.form(
             "Add DNS record — choose type",
             f"Zone: {self.val('zone')}. Guided flow shows fields for one record type.",
@@ -2050,7 +2089,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             self.record_type_selection_error,
         )
         if not type_values:
-            return
+            return None
+
         rtype = (type_values["rtype"] or "A").upper()
         values = await self.form(
             f"Add {rtype} record",
@@ -2060,14 +2100,23 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             lambda form_values: self.guided_add_record_error(rtype, form_values),
         )
         if not values:
-            return
+            return None
+
         name = values["name"]
         value = self.add_record_value_from_fields(rtype, values)
         ttl = values["ttl"]
         error = self.guided_add_record_error(rtype, values)
         if error:
             self.report_error(error)
+            return None
+        return name, rtype, value, ttl
+
+    @work
+    async def action_add(self) -> None:
+        record_values = await self.add_record_form_values()
+        if record_values is None:
             return
+        name, rtype, value, ttl = record_values
         if not await self.confirm(
             self.add_record_preview(name, rtype, value, ttl),
             default_confirm=True,
