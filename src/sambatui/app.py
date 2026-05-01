@@ -938,8 +938,30 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         items.extend(SidebarItem(label, label.strip(), "ldap_dn") for label in labels)
         return items
 
+    def active_ldap_sidebar_item(self) -> SidebarItem | None:
+        values = self.current_directory_values
+        kind = values.get("kind", "")
+        text = values.get("text", "")
+        if kind == "all" and text:
+            return SidebarItem(text, text, "ldap_dn")
+        if kind in {item.value for item in LDAP_SIDEBAR_ITEMS}:
+            return SidebarItem("", kind, "ldap_kind")
+        return None
+
+    def select_ldap_sidebar_cursor(self) -> None:
+        active_item = self.active_ldap_sidebar_item()
+        if active_item is None:
+            return
+        table = self.query_one("#ldap_structure", DataTable)
+        for row_index, item in enumerate(self.sidebar_items.get("ldap_structure", [])):
+            if item.action == active_item.action and item.value == active_item.value:
+                with suppress(Exception):
+                    table.move_cursor(row=row_index)
+                return
+
     def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
         self.populate_sidebar_table("ldap_structure", self.ldap_sidebar_items(rows))
+        self.select_ldap_sidebar_cursor()
 
     def select_zone_cursor(self, zone: str) -> None:
         if not zone or zone not in self.zones:
