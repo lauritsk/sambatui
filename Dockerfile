@@ -1,4 +1,4 @@
-FROM dhi.io/uv:0.11.8-debian13@sha256:0d696ef68d115128547e50bb9862cc565319841a21541f956860830dc2ba74ae AS uv
+FROM dhi.io/uv:0.11.8-debian13@sha256:5aa09d752754ac43a0893266fefda5921e089ae5f78b9fe577805e5bdd9b8a4b AS uv
 
 FROM dhi.io/python:3.14.4-debian13-dev@sha256:eec5f7badfdcb6685d36f1316d543bf54be5f202511883cae8215f13600fb317 AS builder
 ARG TARGETPLATFORM
@@ -17,7 +17,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TERM=xterm-256color \
     VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
-RUN apt-get update \
+RUN grep -q '^adm:' /etc/group || printf 'adm:x:4:\n' >> /etc/group \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         bind9-dnsutils \
         ca-certificates \
