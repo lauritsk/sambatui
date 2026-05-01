@@ -9,6 +9,7 @@ Whole-repository security review of sambatui.
 - **Findings**: 1 Medium
 - **Risk Level**: Medium
 - **Confidence**: High
+- **Issue check**: `gh issue list` checked; only Dependency Dashboard open.
 - **Validation**: `mise run lint` passed, including `uv audit` with no
   known vulnerabilities.
 
@@ -17,7 +18,7 @@ Whole-repository security review of sambatui.
 ### VULN-001 Credentials exposed in process arguments (Medium)
 
 **Location**: `src/sambatui/client.py:88`, executed at
-`src/sambatui/app.py:326`
+`src/sambatui/app.py:790`
 
 **Confidence**: High
 
@@ -48,4 +49,17 @@ that assert the password never appears in generated command argv.
 
 ## Needs Verification
 
-None.
+### VERIFY-001 LDAP compatibility disables TLS verification
+
+**Location**: `src/sambatui/ldap_directory.py:218`,
+`src/sambatui/ldap_directory.py:226`
+
+**Question**: Is opt-in `ldap_compatibility=on` allowed with password auth by
+policy? It sets `ssl.CERT_NONE`; consider blocking password auth in
+compatibility mode or showing a stronger warning.
+
+## Notes
+
+No shell command injection was identified: subprocess execution uses argv lists
+and no `shell=True`. LDAP search text uses `escape_filter_chars`. Password file
+permissions are checked before loading. CI actions are pinned.
