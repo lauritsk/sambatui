@@ -167,9 +167,9 @@ LDAP search, or running smart views.
 - `c` or **Discover DCs**: discover AD domain controllers via DNS SRV
   records and populate the server field.
 - `L`: search AD directory over read-only LDAP (`users`, `groups`, `computers`,
-  `ous`, or `all`). The LDAP sidebar preloads top-level directory views; select
-  Users, Groups, Computers, OUs, or All entries to load that view. After a search,
-  discovered structure rows can be selected to filter by that DN fragment.
+  `ous`, or `all`). The LDAP sidebar shows the Base DN root plus discovered real
+  containers; select root to load all entries, or a container to search within
+  that subtree.
 - `S` opens the smart-view picker; number shortcuts run common smart views.
 - Full health dashboard (`8` from Smart views) runs key DNS and LDAP hygiene
   checks together, shows grouped summary counts before detailed findings, and
