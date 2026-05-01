@@ -359,6 +359,87 @@ def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
     asyncio.run(run_app())
 
 
+def test_inline_search_filters_dns_directory_and_smart_views() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.populate_records(
+                [
+                    DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw"),
+                    DnsRow("db", "1", "0", "A", "192.0.2.20", "3600", "raw"),
+                ]
+            )
+
+            await pilot.press("/")
+            search = app.query_one("#inline_search", Input)
+            records = app.query_one("#records", DataTable)
+            assert app.focused is search
+
+            search.value = "www"
+            await pilot.pause()
+            assert app.search_text == "www"
+            assert records.row_count == 1
+            assert str(records.get_row_at(0)[1]) == "www"
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert search.value == ""
+            assert app.search_text == ""
+            assert app.focused is records
+            assert records.row_count == 2
+
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,CN=Users,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Ops,CN=Users,DC=example,DC=com",
+                        kind="group",
+                        name="Ops",
+                        summary="ops@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            search.value = "alice"
+            await pilot.pause()
+            assert records.row_count == 1
+            assert str(records.get_row_at(0)[1]) == "Alice"
+
+            app.populate_smart_view(
+                "DNS duplicates/conflicts",
+                [
+                    SmartViewRow(
+                        severity="high",
+                        object="example.com:www",
+                        finding="Duplicate DNS record",
+                        evidence="2 identical records",
+                        suggested_action="Remove duplicate copies.",
+                        source="dns",
+                    ),
+                    SmartViewRow(
+                        severity="medium",
+                        object="example.com:db",
+                        finding="Missing PTR",
+                        evidence="No reverse record",
+                        suggested_action="Add PTR.",
+                        source="dns",
+                    ),
+                ],
+            )
+            search.value = "duplicate"
+            await pilot.pause()
+            assert records.row_count == 1
+            assert str(records.get_row_at(0)[3]) == "Duplicate DNS record"
+
+    asyncio.run(run_app())
+
+
 def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
@@ -371,7 +452,6 @@ def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
                 ("1", FormScreen),
                 ("q", FormScreen),
                 ("a", FormScreen),
-                ("slash", FormScreen),
             ]:
                 await pilot.press(key)
                 for _ in range(10):
