@@ -407,7 +407,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     def report_error(self, message: str) -> None:
         text = actionable_error(message)
-        self.notify(text[:200], severity="error")
+        self.notify(text[:200], severity="error", markup=False)
         self.set_status(text[:180])
 
     def set_val(self, widget_id: str, value: str) -> None:
