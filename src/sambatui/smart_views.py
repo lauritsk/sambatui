@@ -177,16 +177,8 @@ def dns_duplicate_records(
     for record in iter_dns_records(records_by_zone):
         if record.rtype == "-":
             continue
-        key = (
-            normalize_dns_name(record.zone),
-            normalize_dns_name(record.name),
-            record.rtype,
-            normalize_dns_value(record.value),
-        )
-        buckets[key].append(record)
-        by_name[
-            (normalize_dns_name(record.zone), normalize_dns_name(record.name))
-        ].append(record)
+        buckets[dns_record_identity(record)].append(record)
+        by_name[dns_record_name_key(record)].append(record)
 
     for (_zone, name, rtype, value), duplicates in sorted(buckets.items()):
         if len(duplicates) < 2:
@@ -233,9 +225,7 @@ def dns_a_without_ptr(
     for record in iter_dns_records(records_by_zone):
         if record.rtype != "A":
             continue
-        try:
-            ipaddress.IPv4Address(record.value)
-        except ValueError:
+        if not valid_ipv4(record.value):
             continue
         expected = reverse_record_for_ipv4(record.value, zones)
         if expected is None:
@@ -295,11 +285,7 @@ def dns_ptr_without_a(
     findings: list[SmartViewRow] = []
 
     for record in iter_dns_records(records_by_zone):
-        if record.rtype == "A":
-            try:
-                ipaddress.IPv4Address(record.value)
-            except ValueError:
-                continue
+        if record.rtype == "A" and valid_ipv4(record.value):
             forward_a[normalize_dns_name(record.fqdn)].add(record.value)
 
     for record in iter_dns_records(records_by_zone):
@@ -383,11 +369,7 @@ def ldap_delete_candidate_users(
         if is_disabled and (
             disabled_reference is None or disabled_reference < disabled_cutoff
         ):
-            evidence = "disabled"
-            if changed is not None:
-                evidence += f"; changed {age_text(changed, now)} ago"
-            elif created is not None:
-                evidence += f"; created {age_text(created, now)} ago"
+            evidence = disabled_user_evidence(changed, created, now)
             findings.append(
                 SmartViewRow(
                     severity="medium",
@@ -416,6 +398,16 @@ def ldap_delete_candidate_users(
                 )
             )
     return findings
+
+
+def disabled_user_evidence(
+    changed: datetime | None, created: datetime | None, now: datetime
+) -> str:
+    if changed is not None:
+        return f"disabled; changed {age_text(changed, now)} ago"
+    if created is not None:
+        return f"disabled; created {age_text(created, now)} ago"
+    return "disabled"
 
 
 def ldap_stale_computers(
@@ -490,9 +482,29 @@ def ptr_targets_by_reverse_key(
     for record in iter_dns_records(records_by_zone):
         if record.rtype != "PTR":
             continue
-        key = (normalize_dns_name(record.zone), normalize_dns_name(record.name))
-        targets[key].add(normalize_dns_name(record.value))
+        targets[dns_record_name_key(record)].add(normalize_dns_name(record.value))
     return targets
+
+
+def dns_record_identity(record: DnsRecordRef) -> tuple[str, str, str, str]:
+    return (
+        normalize_dns_name(record.zone),
+        normalize_dns_name(record.name),
+        record.rtype,
+        normalize_dns_value(record.value),
+    )
+
+
+def dns_record_name_key(record: DnsRecordRef) -> tuple[str, str]:
+    return normalize_dns_name(record.zone), normalize_dns_name(record.name)
+
+
+def valid_ipv4(value: str) -> bool:
+    try:
+        ipaddress.IPv4Address(value)
+    except ValueError:
+        return False
+    return True
 
 
 def dns_fqdn(name: str, zone: str) -> str:
