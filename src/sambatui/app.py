@@ -44,6 +44,8 @@ from .config import (
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
     DEFAULT_USER,
     DEFAULT_ZONE,
+    fix_password_file_permissions,
+    password_file_permissions_too_open,
     password_file_warning,
     read_password_file,
     save_user_config,
@@ -607,6 +609,9 @@ class SambatuiApp(App):
         self.render_records([])
 
     def set_initial_connection_status(self) -> None:
+        if (self.val("auth") or DEFAULT_AUTH).casefold() == "kerberos":
+            self.set_status("Kerberos auth selected. Run kinit if the ticket expires.")
+            return
         warning = password_file_warning(self.password_file())
         if warning:
             self.report_error(warning)
@@ -706,12 +711,25 @@ class SambatuiApp(App):
     def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
         return LdapDirectoryClient(self.ldap_config(base_dn))
 
-    def load_password(self) -> None:
+    async def load_password(self) -> None:
         path = self.password_file()
         warning = password_file_warning(path)
         if warning:
-            self.report_error(warning)
-            return
+            if not password_file_permissions_too_open(path):
+                self.report_error(warning)
+                return
+            if not await self.confirm(
+                f"Password file permissions too open: {path}\n\nFix with chmod 600 and load?"
+            ):
+                self.report_error(warning)
+                return
+            try:
+                fix_password_file_permissions(path)
+            except OSError as exc:
+                self.report_error(
+                    f"Cannot fix password file permissions for {path}: {exc}"
+                )
+                return
         password = read_password_file(path)
         if not password:
             self.report_error(f"No password found in {path}")
@@ -779,8 +797,8 @@ class SambatuiApp(App):
         await self.invoke_action(action_name, *args)
         return True
 
-    def action_load_password_file(self) -> None:
-        self.load_password()
+    async def action_load_password_file(self) -> None:
+        await self.load_password()
 
     def action_save_password_file(self) -> None:
         self.save_password()
@@ -801,9 +819,13 @@ class SambatuiApp(App):
         if (self.val("auth") or DEFAULT_AUTH).casefold() == "password" and not self.val(
             "password"
         ):
-            password = read_password_file(self.password_file())
-            if password:
-                self.set_val("password", password)
+            warning = password_file_warning(self.password_file())
+            if warning:
+                self.report_error(warning)
+            else:
+                password = read_password_file(self.password_file())
+                if password:
+                    self.set_val("password", password)
         self.refresh_connection_summary()
         self.save_preferences()
         self.set_status("Connection settings updated")

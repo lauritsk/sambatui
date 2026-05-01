@@ -124,7 +124,7 @@ Optional variables:
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
 | `SAMBATUI_USER` | Samba username, often `DOMAIN\\user` | empty |
-| `SAMBATUI_AUTH` | `password` or `kerberos` | `password` |
+| `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects valid `klist -s` ticket | `kerberos` with ticket, else `password` |
 | `SAMBATUI_KERBEROS` | Passed to `--use-kerberos`; `kerberos` auth upgrades `off` to `required` | `off` |
 | `SAMBATUI_KRB5_CCACHE` | Passed to `--use-krb5-ccache`; also used as LDAP GSSAPI credential cache when Kerberos LDAP auth is active | empty |
 | `SAMBATUI_CONFIGFILE` | Passed to `--configfile` for an alternate `smb.conf` | empty |
@@ -206,8 +206,10 @@ deletes, and secret writes.
 ## Authentication and passwords
 
 Prefer Kerberos where possible. With an existing ticket (`kinit` or system login),
-set `SAMBATUI_AUTH=kerberos`; sambatui then omits the password from
-`samba-tool` arguments and uses `--use-kerberos=required` unless overridden.
+sambatui auto-detects `klist -s` and defaults auth to Kerberos unless
+`SAMBATUI_AUTH` or saved config sets an auth mode. Kerberos auth omits the
+password from `samba-tool` arguments and uses `--use-kerberos=required` unless
+overridden.
 
 Password mode remains available for environments without Kerberos tickets. The
 app cannot safely drive the interactive `samba-tool` password prompt. Provide a
@@ -225,7 +227,9 @@ password by:
 
 You can also use **Save password** / **Load password** in the app. Password
 files must be readable only by the owner (`chmod 600`) or sambatui will refuse to
-load them. Do not commit password files or `.env` files.
+load them. If permissions are too open, **Load password** offers to fix them with
+`chmod 600` and then load the file. Do not commit password files or `.env`
+files.
 
 Password mode still passes credentials to `samba-tool` non-interactively. Prefer
 Kerberos ticket mode on shared systems where process arguments may be visible to

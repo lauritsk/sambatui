@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -187,12 +188,53 @@ def _default(envvar: str, key: str, fallback: str) -> str:
     return os.getenv(envvar, USER_CONFIG.get(key, fallback))
 
 
+def has_valid_kerberos_ticket(
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> bool:
+    try:
+        result = runner(
+            ["klist", "-s"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except FileNotFoundError, OSError, subprocess.SubprocessError:
+        return False
+    return result.returncode == 0
+
+
+def detected_default_auth(
+    *,
+    env: Mapping[str, str] = os.environ,
+    user_config: Mapping[str, str] = USER_CONFIG,
+    ticket_checker: Callable[[], bool] = has_valid_kerberos_ticket,
+) -> str:
+    explicit_auth = env.get("SAMBATUI_AUTH") or user_config.get("auth")
+    if explicit_auth:
+        return explicit_auth
+    return "kerberos" if ticket_checker() else "password"
+
+
+def password_file_permissions_too_open(path: Path) -> bool:
+    try:
+        return bool(path.stat().st_mode & 0o077)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+
+
+def fix_password_file_permissions(path: Path) -> None:
+    path.chmod(0o600)
+
+
 DEFAULT_SERVER = _default("SAMBATUI_SERVER", "server", "")
 DEFAULT_ZONE = os.getenv(
     "SAMBATUI_ZONE", USER_CONFIG.get("zone") or USER_CONFIG.get("last_zone", "")
 )
 DEFAULT_USER = os.getenv("SAMBATUI_USER", "")
-DEFAULT_AUTH = _default("SAMBATUI_AUTH", "auth", "password")
+DEFAULT_AUTH = detected_default_auth()
 DEFAULT_KERBEROS = os.getenv("SAMBATUI_KERBEROS", "off")
 DEFAULT_KRB5_CCACHE = os.getenv("SAMBATUI_KRB5_CCACHE", "")
 DEFAULT_CONFIGFILE = os.getenv("SAMBATUI_CONFIGFILE", "")
@@ -226,7 +268,10 @@ def password_file_warning(path: Path) -> str | None:
     except OSError as exc:
         return f"Cannot inspect password file {path}: {exc}"
     if mode & 0o077:
-        return f"Password file permissions too open: {path}. Run chmod 600 {path}."
+        return (
+            f"Password file permissions too open: {path}. "
+            f"Press p to fix and load, or run chmod 600 {path}."
+        )
     return None
 
 
