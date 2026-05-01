@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import suppress
+from typing import cast
 
 from rich.text import Text
 
@@ -16,7 +17,7 @@ from textual.widgets import Button, DataTable, Input, Static
 
 from sambatui.discovery import DiscoveredService
 from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
-from sambatui.ldap_directory import DirectoryRow
+from sambatui.ldap_directory import DirectoryRow, LdapDirectoryClient
 from sambatui.screens import (
     CommandPaletteScreen,
     ConfirmScreen,
@@ -246,6 +247,35 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
 
             assert app.search_limits == [200, 400, 400]
             assert app.current_directory_max_rows == 400
+
+    asyncio.run(run_app())
+
+
+def test_ldap_container_expansion_failure_does_not_report_error() -> None:
+    class FailingContainerClient:
+        def child_containers(
+            self, max_entries: int | None = None
+        ) -> list[DirectoryRow]:
+            raise ValueError("LDAP search failed: insufficientAccessRights")
+
+    class ContainerApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.errors: list[str] = []
+
+        def report_error(self, message: str) -> None:
+            self.errors.append(message)
+
+    async def run_app() -> None:
+        app = ContainerApp()
+        async with app.run_test():
+            app.errors.clear()
+            rows = await app.directory_container_rows(
+                cast(LdapDirectoryClient, FailingContainerClient())
+            )
+
+            assert rows == []
+            assert app.errors == []
 
     asyncio.run(run_app())
 
