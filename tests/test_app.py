@@ -42,6 +42,42 @@ def test_actionable_error_adds_concise_remediation() -> None:
     assert actionable_error("") == ""
 
 
+def test_report_error_disables_markup_for_raw_command_output() -> None:
+    class ErrorApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.notifications = []
+
+        def notify(
+            self,
+            message: str,
+            *,
+            title: str = "",
+            severity: str = "information",
+            timeout: float | None = None,
+            markup: bool = True,
+        ) -> None:
+            self.notifications.append(
+                {
+                    "message": message,
+                    "title": title,
+                    "severity": severity,
+                    "timeout": timeout,
+                    "markup": markup,
+                }
+            )
+
+    app = ErrorApp()
+
+    app.report_error(
+        "Failed to bind to uuid 50abc2a4-574d-40b3-9d66-ee4fd5fba076 "
+        "[ncalrpc:=50abc2a4-574d-40b3-9d66-ee4fd5fba076/0x00000005,lo]"
+    )
+
+    assert app.notifications[0]["severity"] == "error"
+    assert app.notifications[0]["markup"] is False
+
+
 def test_command_palette_search_matches_label_shortcut_and_description() -> None:
     choice = (
         "ldap_search_users",
