@@ -504,17 +504,33 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
             return UserPrincipalNameSuggester(self.upn_domain)
         return None
 
+    def upn_suggestion_for_input(self, user_input: Input) -> str:
+        return user_principal_name_suggestion(user_input.value, self.upn_domain())
+
     def refresh_upn_suggestion(self) -> None:
         if not self.should_suggest_upn_domain():
             return
         with suppress(Exception):
             user_input = self.query_one("#user", Input)
-            suggestion = user_principal_name_suggestion(
-                user_input.value, self.upn_domain()
-            )
+            suggestion = self.upn_suggestion_for_input(user_input)
             user_input._suggestion = (
                 suggestion if suggestion != user_input.value.strip() else ""
             )
+
+    def accept_upn_suggestion(self) -> None:
+        if not self.should_suggest_upn_domain():
+            return
+        with suppress(Exception):
+            user_input = self.query_one("#user", Input)
+            suggestion = self.upn_suggestion_for_input(user_input)
+            if suggestion == user_input.value.strip():
+                return
+            self._suppress_autofill = True
+            try:
+                user_input.value = suggestion
+                user_input._suggestion = ""
+            finally:
+                self._suppress_autofill = False
 
     def maybe_autofill_connection_fields(self) -> None:
         field_ids = {field_id for _, field_id, _, _ in self.fields}
@@ -582,6 +598,11 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
         self.maybe_autofill_connection_fields()
         self.refresh_upn_suggestion()
         self.refresh_validation()
+
+    def on_input_blurred(self, event: Input.Blurred) -> None:
+        if event.input.id == "user":
+            self.accept_upn_suggestion()
+            self.refresh_validation()
 
     def on_key(self, event: Any) -> None:
         if isinstance(self.focused, Button) and event.key in {"enter", "space"}:

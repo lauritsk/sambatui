@@ -1286,6 +1286,13 @@ def test_setup_form_suggests_upn_domain_suffix() -> None:
             assert getattr(user, "_suggestion") == "alice@example.com"
             assert form.form_values()["user"] == "alice@example.com"
 
+            await pilot.press("tab")
+            await pilot.pause()
+            assert user.value == "alice@example.com"
+            assert getattr(user, "_suggestion") == ""
+
+            user.focus()
+            user.value = "alice"
             domain.value = "ad.example."
             await pilot.pause()
             assert getattr(user, "_suggestion") == "alice@ad.example"
