@@ -134,7 +134,7 @@ class HelpScreen(ModalScreen[None]):
     HELP_TEXT = """Connection
   Ctrl+P    Open searchable command palette
   w         Run first-run setup wizard
-  Ctrl+O    Open/edit connection settings (also via sidebar Connection…)
+  Ctrl+O    Open/edit connection settings (also via command palette)
   p/P       Load/save password file
   c         Discover AD domain controllers
 

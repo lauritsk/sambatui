@@ -28,8 +28,6 @@ Screen { layout: vertical; }
 }
 
 #dns_panel, #ldap_panel, #smart_panel { height: 1fr; }
-.action-buttons { height: auto; margin-bottom: 1; }
-.action-buttons Button { margin-bottom: 1; }
 
 .section-title { text-style: bold; color: $accent; margin-bottom: 1; }
 #records_header { height: 3; }
@@ -41,8 +39,7 @@ Screen { layout: vertical; }
 
 Button { width: 1fr; }
 
-#zones { height: 1fr; margin-bottom: 1; }
-#ldap_hint { height: 1fr; }
+#zones, #ldap_structure { height: 1fr; margin-bottom: 1; }
 #records { height: 1fr; }
 #record_details {
     height: 10;
