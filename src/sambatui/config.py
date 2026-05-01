@@ -239,9 +239,7 @@ def detected_default_auth(
 def password_file_permissions_too_open(path: Path) -> bool:
     try:
         return bool(path.stat().st_mode & 0o077)
-    except FileNotFoundError:
-        return False
-    except OSError:
+    except FileNotFoundError, OSError:
         return False
 
 
