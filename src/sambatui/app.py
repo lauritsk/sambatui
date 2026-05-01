@@ -154,6 +154,26 @@ SMART_ACTION_BUTTONS = (
     ("smart_dns_health", "DNS duplicate check"),
     ("smart_ldap_cleanup", "LDAP cleanup check"),
 )
+CONNECTION_STATE_INPUTS = (
+    (DEFAULT_SERVER, "server", False),
+    (DEFAULT_ZONE, "zone", False),
+    (DEFAULT_USER, "user", False),
+    (DEFAULT_PASSWORD, "password", True),
+    (DEFAULT_AUTH, "auth", False),
+    (DEFAULT_KERBEROS, "kerberos", False),
+    (DEFAULT_KRB5_CCACHE, "krb5_ccache", False),
+    (DEFAULT_CONFIGFILE, "configfile", False),
+    (DEFAULT_OPTIONS, "options", False),
+    (DEFAULT_LDAP_BASE, "ldap_base", False),
+    (DEFAULT_LDAP_ENCRYPTION, "ldap_encryption", False),
+    (DEFAULT_LDAP_COMPATIBILITY, "ldap_compatibility", False),
+    (DEFAULT_AUTO_PTR, "auto_ptr", False),
+    (DEFAULT_SMART_DAYS, "smart_days", False),
+    (DEFAULT_SMART_DISABLED_DAYS, "smart_disabled_days", False),
+    (DEFAULT_SMART_NEVER_LOGGED_DAYS, "smart_never_logged_days", False),
+    (DEFAULT_SMART_MAX_ROWS, "smart_max_rows", False),
+    (str(DEFAULT_PASSWORD_FILE), "password_file", False),
+)
 RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "name": lambda row: row.name.casefold(),
     "type": lambda row: row.rtype.casefold(),
@@ -462,84 +482,105 @@ class SambatuiApp(App):
                 self.keys_hint_for_tab(self.active_side_tab_id())
             )
 
-    def compose(self) -> ComposeResult:
+    def compose_connection_state(self) -> ComposeResult:
         with Vertical(id="connection_state"):
-            yield Input(DEFAULT_SERVER, id="server")
-            yield Input(DEFAULT_ZONE, id="zone")
-            yield Input(DEFAULT_USER, id="user")
-            yield Input(DEFAULT_PASSWORD, password=True, id="password")
-            yield Input(DEFAULT_AUTH, id="auth")
-            yield Input(DEFAULT_KERBEROS, id="kerberos")
-            yield Input(DEFAULT_KRB5_CCACHE, id="krb5_ccache")
-            yield Input(DEFAULT_CONFIGFILE, id="configfile")
-            yield Input(DEFAULT_OPTIONS, id="options")
-            yield Input(DEFAULT_LDAP_BASE, id="ldap_base")
-            yield Input(DEFAULT_LDAP_ENCRYPTION, id="ldap_encryption")
-            yield Input(DEFAULT_LDAP_COMPATIBILITY, id="ldap_compatibility")
-            yield Input(DEFAULT_AUTO_PTR, id="auto_ptr")
-            yield Input(DEFAULT_SMART_DAYS, id="smart_days")
-            yield Input(DEFAULT_SMART_DISABLED_DAYS, id="smart_disabled_days")
-            yield Input(DEFAULT_SMART_NEVER_LOGGED_DAYS, id="smart_never_logged_days")
-            yield Input(DEFAULT_SMART_MAX_ROWS, id="smart_max_rows")
-            yield Input(str(DEFAULT_PASSWORD_FILE), id="password_file")
+            for value, input_id, is_password in CONNECTION_STATE_INPUTS:
+                yield Input(value, password=is_password, id=input_id)
 
-        with Horizontal(id="main"):
-            with Vertical(id="sidebar", classes="panel"):
-                yield Static("Connection: not checked", id="connection_summary")
-                with TabbedContent(id="side_tabs"):
-                    with TabPane("DNS", id="dns_tab"):
-                        with Vertical(id="dns_panel"):
-                            yield Static("DNS zones", classes="section-title")
-                            with Vertical(id="dns_actions", classes="action-buttons"):
-                                for button_id, label in DNS_ACTION_BUTTONS:
-                                    yield Button(label, id=button_id)
-                            zones = DataTable(id="zones", cursor_type="row")
-                            zones.add_columns("DNS zones")
-                            yield zones
-                    with TabPane("LDAP", id="ldap_tab"):
-                        with Vertical(id="ldap_panel"):
-                            yield Static("LDAP directory", classes="section-title")
-                            with Vertical(id="ldap_actions", classes="action-buttons"):
-                                for button_id, label in LDAP_ACTION_BUTTONS:
-                                    yield Button(label, id=button_id)
-                            yield Static(
-                                "Search AD directory. Results open in the main table.",
-                                id="ldap_hint",
-                                classes="hint",
-                            )
-                    with TabPane("Smart", id="smart_tab"):
-                        with Vertical(id="smart_panel"):
-                            yield Static("Smart views", classes="section-title")
-                            with Vertical(id="smart_actions", classes="action-buttons"):
-                                for button_id, label in SMART_ACTION_BUTTONS:
-                                    yield Button(label, id=button_id)
-                            yield Static(
-                                self.smart_view_hint_text(),
-                                id="smart_hint",
-                                classes="hint",
-                            )
-                yield Static("Ready", id="status")
+    def compose_action_buttons(
+        self, container_id: str, buttons: tuple[tuple[str, str], ...]
+    ) -> ComposeResult:
+        with Vertical(id=container_id, classes="action-buttons"):
+            for button_id, label in buttons:
+                yield Button(label, id=button_id)
 
-            with Vertical(id="results", classes="panel"):
-                with Horizontal(id="records_header"):
-                    yield Label("Records", id="records_title", classes="section-title")
-                    yield Input(
-                        "",
-                        placeholder="/ search current results",
-                        id="inline_search",
-                    )
-                table = DataTable(id="records", cursor_type="row")
-                table.add_columns(*DNS_COLUMNS)
-                yield table
-                yield Static(
-                    "Details\nNo row selected.",
-                    id="record_details",
-                    classes="hint",
-                    markup=False,
+    def compose_dns_tab(self) -> ComposeResult:
+        with TabPane("DNS", id="dns_tab"):
+            with Vertical(id="dns_panel"):
+                yield Static("DNS zones", classes="section-title")
+                yield from self.compose_action_buttons(
+                    "dns_actions", DNS_ACTION_BUTTONS
                 )
+                zones = DataTable(id="zones", cursor_type="row")
+                zones.add_columns("DNS zones")
+                yield zones
+
+    def compose_ldap_tab(self) -> ComposeResult:
+        with TabPane("LDAP", id="ldap_tab"):
+            with Vertical(id="ldap_panel"):
+                yield Static("LDAP directory", classes="section-title")
+                yield from self.compose_action_buttons(
+                    "ldap_actions", LDAP_ACTION_BUTTONS
+                )
+                yield Static(
+                    "Search AD directory. Results open in the main table.",
+                    id="ldap_hint",
+                    classes="hint",
+                )
+
+    def compose_smart_tab(self) -> ComposeResult:
+        with TabPane("Smart", id="smart_tab"):
+            with Vertical(id="smart_panel"):
+                yield Static("Smart views", classes="section-title")
+                yield from self.compose_action_buttons(
+                    "smart_actions", SMART_ACTION_BUTTONS
+                )
+                yield Static(
+                    self.smart_view_hint_text(),
+                    id="smart_hint",
+                    classes="hint",
+                )
+
+    def compose_sidebar(self) -> ComposeResult:
+        with Vertical(id="sidebar", classes="panel"):
+            yield Static("Connection: not checked", id="connection_summary")
+            with TabbedContent(id="side_tabs"):
+                yield from self.compose_dns_tab()
+                yield from self.compose_ldap_tab()
+                yield from self.compose_smart_tab()
+            yield Static("Ready", id="status")
+
+    def compose_results_panel(self) -> ComposeResult:
+        with Vertical(id="results", classes="panel"):
+            with Horizontal(id="records_header"):
+                yield Label("Records", id="records_title", classes="section-title")
+                yield Input(
+                    "",
+                    placeholder="/ search current results",
+                    id="inline_search",
+                )
+            table = DataTable(id="records", cursor_type="row")
+            table.add_columns(*DNS_COLUMNS)
+            yield table
+            yield Static(
+                "Details\nNo row selected.",
+                id="record_details",
+                classes="hint",
+                markup=False,
+            )
+
+    def compose(self) -> ComposeResult:
+        yield from self.compose_connection_state()
+        with Horizontal(id="main"):
+            yield from self.compose_sidebar()
+            yield from self.compose_results_panel()
         yield Static(self.keys_hint_for_tab("dns_tab"), id="keys")
 
     def on_mount(self) -> None:
+        self.initialize_state()
+        self.initialize_view()
+
+        if not shutil.which("samba-tool"):
+            self.report_error("samba-tool not found in PATH")
+            return
+
+        self.set_initial_connection_status()
+        if self.connection_needs_setup():
+            self.set_status("Connection incomplete. Press Ctrl+O to configure.")
+        else:
+            self.call_after_refresh(self.load_zones)
+
+    def initialize_state(self) -> None:
         self.selected_record_rows: set[int] = set()
         self.selection_anchor: int | None = None
         self.visual_selecting = False
@@ -557,18 +598,15 @@ class SambatuiApp(App):
         self._syncing_search_input = False
         self.zones: list[str] = []
         self.pending_g = False
+
+    def initialize_view(self) -> None:
         self.refresh_connection_summary()
         self.update_records_title()
         self.action_focus_records()
-
         self.refresh_key_hints()
-
         self.render_records([])
 
-        if not shutil.which("samba-tool"):
-            self.report_error("samba-tool not found in PATH")
-            return
-
+    def set_initial_connection_status(self) -> None:
         warning = password_file_warning(self.password_file())
         if warning:
             self.report_error(warning)
@@ -576,11 +614,6 @@ class SambatuiApp(App):
             self.set_status(f"Password loaded from env or {DEFAULT_PASSWORD_FILE}")
         else:
             self.set_status("Enter password, load password file, or use kerberos auth")
-
-        if self.connection_needs_setup():
-            self.set_status("Connection incomplete. Press Ctrl+O to configure.")
-        else:
-            self.call_after_refresh(self.load_zones)
 
     def val(self, widget_id: str) -> str:
         return self.query_one(f"#{widget_id}", Input).value.strip()
