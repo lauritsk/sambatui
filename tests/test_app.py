@@ -250,6 +250,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
         def __init__(self) -> None:
             super().__init__()
             self.searches: list[tuple[str, str, int | None]] = []
+            self.search_bases: list[str] = []
             self.sidebar_cursor_rows: list[int] = []
 
         def save_preferences(self) -> None:
@@ -270,6 +271,9 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             max_entries: int | None = None,
         ) -> list[DirectoryRow] | None:
             self.searches.append((kind, text, max_entries))
+            self.search_bases.append(client.config.base_dn)
+            if client.config.base_dn == "CN=Users,DC=example,DC=com":
+                return []
             return [
                 DirectoryRow(
                     dn="CN=Ops,CN=Users,DC=example,DC=com",
@@ -294,6 +298,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert str(structure.get_row_at(0)[0]) == "DC=example,DC=com"
             assert await app.activate_sidebar_selection(structure)
             assert app.searches == [("all", "", 200)]
+            assert app.search_bases == ["DC=example,DC=com"]
 
             records = app.query_one("#records", DataTable)
             assert app.view_mode == "directory"
@@ -305,7 +310,13 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             app.sidebar_cursor_rows.clear()
             structure.move_cursor(row=1)
             assert await app.activate_sidebar_selection(structure)
-            assert app.searches[-1] == ("all", "CN=Users", 200)
+            assert app.searches[-1] == ("all", "", 200)
+            assert app.search_bases[-1] == "CN=Users,DC=example,DC=com"
+            assert app.query_one("#records", DataTable).row_count == 1
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == (
+                "No LDAP entries shown"
+            )
+            assert structure.row_count == 2
             assert structure.cursor_row == 1
             assert app.sidebar_cursor_rows == [1]
 

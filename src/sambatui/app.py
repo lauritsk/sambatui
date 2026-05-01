@@ -246,7 +246,9 @@ def _trailing_dc_index(parts: Sequence[str]) -> int:
     return index if index < len(parts) else max(len(parts) - 1, 0)
 
 
-def ldap_structure_labels(rows: Sequence[DirectoryRow], base_dn: str) -> list[str]:
+def ldap_structure_nodes(
+    rows: Sequence[DirectoryRow], base_dn: str
+) -> list[tuple[str, str]]:
     base_parts = split_ldap_dn(base_dn)
     nodes: dict[str, tuple[str, ...]] = {}
 
@@ -279,12 +281,16 @@ def ldap_structure_labels(rows: Sequence[DirectoryRow], base_dn: str) -> list[st
         key=lambda parts: tuple(part.casefold() for part in reversed(parts)),
     )
     shortest = min(len(parts) for parts in ordered)
-    labels: list[str] = []
+    result: list[tuple[str, str]] = []
     for parts in ordered:
         depth = max(0, len(parts) - shortest)
         label = ",".join(parts) if depth == 0 else parts[0]
-        labels.append(f"{'  ' * depth}{label}")
-    return labels
+        result.append((f"{'  ' * depth}{label}", ",".join(parts)))
+    return result
+
+
+def ldap_structure_labels(rows: Sequence[DirectoryRow], base_dn: str) -> list[str]:
+    return [label for label, _dn in ldap_structure_nodes(rows, base_dn)]
 
 
 class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
@@ -360,6 +366,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.visual_selecting = False
         self.record_rows: list[DnsRow] = []
         self.directory_rows: list[DirectoryRow] = []
+        self.ldap_structure_rows: list[DirectoryRow] = []
         self.current_directory_values: dict[str, str] = {}
         self.current_directory_max_rows = LDAP_DEFAULT_MAX_ROWS
         self.smart_view_rows: list[SmartViewRow] = []
@@ -664,6 +671,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.set_val("server", server)
         self.set_val("domain", domain)
         self.set_val("zone", domain)
+        self.ldap_structure_rows = []
         self.set_val("ldap_base", domain_to_base_dn(domain))
         self.set_val("user", values.get("user", self.val("user")))
         self.set_val("password", password)
@@ -678,7 +686,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         )
         self.refresh_connection_summary()
         self.update_records_title()
-        self.populate_ldap_structure(self.directory_rows)
+        self.populate_ldap_structure(self.ldap_structure_rows)
 
     async def check_ldap_connectivity(self) -> str | None:
         try:
@@ -960,26 +968,32 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 )
             ]
 
-        items = [SidebarItem(base_dn, base_dn, "ldap_root")]
         base_key = base_dn.casefold()
-        labels = ldap_structure_labels(rows, base_dn)
-        items.extend(
-            SidebarItem(label, label.strip(), "ldap_dn")
-            for label in labels
-            if label.strip().casefold() != base_key
-        )
-        return items
+        return [
+            SidebarItem(
+                label,
+                dn,
+                "ldap_root" if dn.casefold() == base_key else "ldap_dn",
+            )
+            for label, dn in ldap_structure_nodes(rows, base_dn)
+        ]
 
     def active_ldap_sidebar_item(self) -> SidebarItem | None:
         values = self.current_directory_values
         kind = values.get("kind", "")
         text = values.get("text", "")
-        if kind == "all" and not text:
-            return SidebarItem(
-                self.ldap_base_default(), self.ldap_base_default(), "ldap_root"
-            )
+        base_dn = self.ldap_base_default()
+        search_base_dn = values.get("search_base_dn", "") or values.get("base_dn", "")
+        if (
+            kind == "all"
+            and not text
+            and search_base_dn.casefold() == base_dn.casefold()
+        ):
+            return SidebarItem(base_dn, base_dn, "ldap_root")
+        if kind == "all" and not text and search_base_dn:
+            return SidebarItem(search_base_dn, search_base_dn, "ldap_dn")
         if kind == "all" and text:
-            return SidebarItem(text, text, "ldap_dn")
+            return SidebarItem(text, search_base_dn or text, "ldap_dn")
         return None
 
     def select_ldap_sidebar_cursor(self) -> None:
@@ -1023,25 +1037,31 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         await self.refresh_current_zone()
         return True
 
-    def ldap_sidebar_values(self, kind: str, text: str = "") -> dict[str, str]:
+    def ldap_sidebar_values(
+        self, kind: str, text: str = "", search_base_dn: str = ""
+    ) -> dict[str, str]:
+        base_dn = self.ldap_base_default()
         return {
             "kind": kind,
             "text": text,
-            "base_dn": self.ldap_base_default(),
+            "base_dn": base_dn,
+            "search_base_dn": search_base_dn or base_dn,
             "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             "ldap_compatibility": self.val("ldap_compatibility")
             or DEFAULT_LDAP_COMPATIBILITY,
             "max_rows": str(LDAP_DEFAULT_MAX_ROWS),
         }
 
-    async def activate_ldap_sidebar(self, kind: str, text: str = "") -> bool:
+    async def activate_ldap_sidebar(
+        self, kind: str, text: str = "", search_base_dn: str = ""
+    ) -> bool:
         with suppress(Exception):
             self.query_one("#side_tabs", TabbedContent).active = "ldap_tab"
             self.refresh_key_hints()
-        label = kind if not text else text
+        label = search_base_dn or text or kind
         self.set_status(f"Loading LDAP {label}")
         return await self.run_directory_search(
-            self.ldap_sidebar_values(kind, text),
+            self.ldap_sidebar_values(kind, text, search_base_dn),
             default_kind=kind,
             action="Loaded",
         )
@@ -1054,7 +1074,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         if item.action == "ldap_root":
             return await self.activate_ldap_sidebar("all")
         if item.action == "ldap_dn":
-            return await self.activate_ldap_sidebar("all", item.value)
+            return await self.activate_ldap_sidebar("all", search_base_dn=item.value)
         return False
 
     async def activate_sidebar_selection(self, table: DataTable) -> bool:
@@ -1080,12 +1100,19 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
             f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.sort_field}"
         )
 
+    def remember_ldap_structure_rows(self, rows: Sequence[DirectoryRow]) -> None:
+        by_dn = {row.dn.casefold(): row for row in self.ldap_structure_rows}
+        for row in rows:
+            by_dn.setdefault(row.dn.casefold(), row)
+        self.ldap_structure_rows = list(by_dn.values())
+
     def populate_directory(self, rows: list[DirectoryRow]) -> None:
         self.view_mode = "directory"
         self.set_records_columns(DIRECTORY_COLUMNS)
         self.query_one("#records_title", Label).update("Directory (read-only LDAP)")
         self.directory_rows = rows
-        self.populate_ldap_structure(rows)
+        self.remember_ldap_structure_rows(rows)
+        self.populate_ldap_structure(self.ldap_structure_rows)
         self.refresh_directory_view()
         self.set_status(f"Loaded {len(rows)} LDAP entries")
 
@@ -1265,7 +1292,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         }
         limit = self.ldap_search_max_rows(values)
         kind = values.get("kind") or "users"
-        client = self.ldap_client(values["base_dn"])
+        client = self.ldap_client(values.get("search_base_dn") or values["base_dn"])
         error = client.validation_error()
         if error:
             self.report_error(error)
@@ -1425,7 +1452,8 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
                 self.set_val("zone", controller.domain)
             if not self.val("ldap_base"):
                 self.set_val("ldap_base", domain_to_base_dn(controller.domain))
-            self.populate_ldap_structure(self.directory_rows)
+                self.ldap_structure_rows = []
+            self.populate_ldap_structure(self.ldap_structure_rows)
             self.refresh_connection_summary()
             self.save_preferences()
             message = (
@@ -1491,11 +1519,13 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     def apply_ldap_connection_values(
         self, values: dict[str, str], *, refresh_sidebar: bool = True
     ) -> None:
+        if values["base_dn"].casefold() != self.val("ldap_base").casefold():
+            self.ldap_structure_rows = []
         self.set_val("ldap_base", values["base_dn"])
         self.set_val("ldap_encryption", values["ldap_encryption"])
         self.set_val("ldap_compatibility", values["ldap_compatibility"])
         if refresh_sidebar:
-            self.populate_ldap_structure(self.directory_rows)
+            self.populate_ldap_structure(self.ldap_structure_rows)
         self.save_preferences()
 
     async def directory_search_rows(
@@ -1527,7 +1557,7 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
     ) -> bool:
         self.apply_ldap_connection_values(values, refresh_sidebar=False)
         limit = max_rows if max_rows is not None else self.ldap_search_max_rows(values)
-        client = self.ldap_client(values["base_dn"])
+        client = self.ldap_client(values.get("search_base_dn") or values["base_dn"])
         error = client.validation_error()
         if error:
             self.report_error(error)
