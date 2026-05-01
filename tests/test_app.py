@@ -251,11 +251,13 @@ def test_ldap_sidebar_top_level_items_load_directory_views() -> None:
             assert app.searches == [("groups", "", 200)]
             assert app.view_mode == "directory"
             assert str(records.get_row_at(0)[1]) == "Ops"
+            assert structure.cursor_row == 1
 
             # Discovered structure rows remain actionable: clicking CN=Users filters all.
             structure.move_cursor(row=6)
             assert await app.activate_sidebar_selection(structure)
             assert app.searches[-1] == ("all", "CN=Users", 200)
+            assert structure.cursor_row == 6
 
     asyncio.run(run_app())
 
