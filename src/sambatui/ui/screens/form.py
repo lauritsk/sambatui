@@ -94,6 +94,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
         self.form_title = title
         self.hint = hint
         self.fields = fields
+        self._field_ids = {field_id for _, field_id, _, _ in fields}
         self.submit_label = submit_label
         self.validator = validator
         self._autofilled: dict[str, str] = {}
@@ -131,14 +132,13 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
             )
         return values
 
-    def field_ids(self) -> set[str]:
-        return {field_id for _, field_id, _, _ in self.fields}
+    def has_fields(self, *field_ids: str) -> bool:
+        return set(field_ids).issubset(self._field_ids)
 
     def should_suggest_upn_domain(self) -> bool:
-        return self.form_title == "First-run setup wizard" and {
-            "domain",
-            "user",
-        }.issubset(self.field_ids())
+        return self.form_title == "First-run setup wizard" and self.has_fields(
+            "domain", "user"
+        )
 
     def upn_domain(self) -> str:
         return self.query_one("#domain", Input).value.strip()
@@ -177,7 +177,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
                 self._suppress_autofill = False
 
     def maybe_autofill_connection_fields(self) -> None:
-        if not {"server", "zone", "ldap_base"}.issubset(self.field_ids()):
+        if not self.has_fields("server", "zone", "ldap_base"):
             return
 
         server = self.query_one("#server", Input).value.strip()
