@@ -48,6 +48,12 @@ from .helpers import (
 )
 
 
+LDAP_INACTIVE_USERS_VIEW_ID = "ldap_inactive_users"
+LDAP_DELETE_CANDIDATES_VIEW_ID = "ldap_delete_candidates"
+LDAP_STALE_COMPUTERS_VIEW_ID = "ldap_stale_computers"
+LDAP_USERS_WITHOUT_GROUPS_VIEW_ID = "ldap_users_without_groups"
+
+
 class AppSmartActionsMixin(AppControllerBase):
     def smart_view_choices(self) -> list[SmartViewChoice]:
         return [
@@ -147,23 +153,15 @@ class AppSmartActionsMixin(AppControllerBase):
                 values, SmartViewOptions.from_values(values), refreshed=True
             )
             return
-        if view.source == "DNS":
-            records_by_zone = await self.dns_records_for_smart_view()
-            if records_by_zone is None:
-                return
-            rows = self.dns_smart_rows(view.view_id, records_by_zone)
-        else:
-            if not values:
-                self.refresh_smart_view()
-                return
-            directory_rows = await self.ldap_directory_for_smart_view(view, values)
-            if directory_rows is None:
-                return
-            rows = self.ldap_smart_rows(
-                view.view_id,
-                directory_rows,
-                SmartViewOptions.from_values(values),
-            )
+        if view.source != "DNS" and not values:
+            self.refresh_smart_view()
+            return
+
+        rows = await self.build_smart_view_rows(
+            view, values, SmartViewOptions.from_values(values)
+        )
+        if rows is None:
+            return
         rows = self.sorted_smart_view(rows)
         self.populate_smart_view(view.label, rows[: self.current_smart_max_rows])
         self.notify("Refreshed smart-view findings")
@@ -217,6 +215,18 @@ class AppSmartActionsMixin(AppControllerBase):
         self.set_val("smart_max_rows", str(options.max_rows))
         self.save_preferences()
 
+    def remember_current_smart_view(
+        self,
+        view: SmartViewDefinition,
+        values: dict[str, str],
+        options: SmartViewOptions,
+    ) -> None:
+        self.current_smart_view_id = view.view_id
+        self.current_smart_sort_field = ""
+        self.current_smart_sort_reverse = False
+        self.current_smart_max_rows = options.max_rows
+        self.current_smart_values = values
+
     def populate_smart_view_results(
         self, label: str, rows: list[SmartViewRow], max_rows: int
     ) -> None:
@@ -236,9 +246,29 @@ class AppSmartActionsMixin(AppControllerBase):
             self.report_error(error)
             return None
 
-        kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
+        kind = self.ldap_smart_view_kind(view)
         max_rows = SmartViewOptions.from_values(values).max_rows
         return await self.directory_search_rows(client, kind, "", max_rows)
+
+    def ldap_smart_view_kind(self, view: SmartViewDefinition) -> str:
+        return "computers" if view.view_id == LDAP_STALE_COMPUTERS_VIEW_ID else "users"
+
+    async def build_smart_view_rows(
+        self,
+        view: SmartViewDefinition,
+        values: dict[str, str],
+        options: SmartViewOptions,
+    ) -> list[SmartViewRow] | None:
+        if view.source == "DNS":
+            records_by_zone = await self.dns_records_for_smart_view()
+            if records_by_zone is None:
+                return None
+            return self.dns_smart_rows(view.view_id, records_by_zone)
+
+        directory_rows = await self.ldap_directory_for_smart_view(view, values)
+        if directory_rows is None:
+            return None
+        return self.ldap_smart_rows(view.view_id, directory_rows, options)
 
     def ldap_smart_rows(
         self,
@@ -246,21 +276,19 @@ class AppSmartActionsMixin(AppControllerBase):
         directory_rows: list[DirectoryRow],
         options: SmartViewOptions,
     ) -> list[SmartViewRow]:
-        match view_id:
-            case "ldap_inactive_users":
-                return ldap_inactive_users(directory_rows, days=options.days)
-            case "ldap_delete_candidates":
-                return ldap_delete_candidate_users(
-                    directory_rows,
-                    disabled_days=options.disabled_days,
-                    never_logged_days=options.never_logged_days,
-                )
-            case "ldap_stale_computers":
-                return ldap_stale_computers(directory_rows, days=options.days)
-            case "ldap_users_without_groups":
-                return ldap_users_without_groups(directory_rows)
-            case _:
-                return []
+        if view_id == LDAP_INACTIVE_USERS_VIEW_ID:
+            return ldap_inactive_users(directory_rows, days=options.days)
+        if view_id == LDAP_DELETE_CANDIDATES_VIEW_ID:
+            return ldap_delete_candidate_users(
+                directory_rows,
+                disabled_days=options.disabled_days,
+                never_logged_days=options.never_logged_days,
+            )
+        if view_id == LDAP_STALE_COMPUTERS_VIEW_ID:
+            return ldap_stale_computers(directory_rows, days=options.days)
+        if view_id == LDAP_USERS_WITHOUT_GROUPS_VIEW_ID:
+            return ldap_users_without_groups(directory_rows)
+        return []
 
     async def dashboard_ldap_rows(
         self, client: LdapDirectoryClient, kind: str
@@ -405,28 +433,15 @@ class AppSmartActionsMixin(AppControllerBase):
 
         options = SmartViewOptions.from_values(values)
         self.apply_smart_view_options(view, options)
-        self.current_smart_view_id = view.view_id
-        self.current_smart_sort_field = ""
-        self.current_smart_sort_reverse = False
-        self.current_smart_max_rows = options.max_rows
-        self.current_smart_values = values
+        self.remember_current_smart_view(view, values, options)
 
         if view.view_id == FULL_HEALTH_VIEW_ID:
             await self.load_full_health_dashboard(values, options)
             return
 
-        if view.source == "DNS":
-            records_by_zone = await self.dns_records_for_smart_view()
-            if records_by_zone is None:
-                return
-            rows = self.dns_smart_rows(view.view_id, records_by_zone)
-            self.populate_smart_view_results(view.label, rows, options.max_rows)
+        rows = await self.build_smart_view_rows(view, values, options)
+        if rows is None:
             return
-
-        directory_rows = await self.ldap_directory_for_smart_view(view, values)
-        if directory_rows is None:
-            return
-        rows = self.ldap_smart_rows(view.view_id, directory_rows, options)
         self.populate_smart_view_results(view.label, rows, options.max_rows)
 
     async def apply_smart_fix(self, row: SmartViewRow) -> None:
