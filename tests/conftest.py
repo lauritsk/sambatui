@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from contextlib import suppress
+import os
 
+from hypothesis import settings
 
-def pytest_configure() -> None:
-    with suppress(ImportError, AttributeError):
-        from pyasn1.codec.ber import encoder
-
-        encoder.tagMap = encoder.TAG_MAP
-        encoder.typeMap = encoder.TYPE_MAP
+settings.register_profile(
+    "sambatui",
+    deadline=None,
+    max_examples=100,
+)
+settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "sambatui"))

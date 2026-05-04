@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from sambatui.core import config as config_module
 from sambatui.core.config import (
     _default_domain,
+    _safe_user_config_values,
     password_file_permissions_too_open,
     password_file_warning,
     user_config_value_error,
@@ -65,3 +66,19 @@ def test_user_config_value_error_accepts_any_preference_value(
     error = user_config_value_error(key, value)
 
     assert error is None or isinstance(error, str)
+
+
+@given(
+    st.dictionaries(
+        CONFIG_KEYS,
+        st.one_of(st.text(max_size=100), st.integers(), st.booleans(), st.none()),
+        max_size=8,
+    )
+)
+def test_safe_user_config_values_are_self_validating(
+    values: dict[str, object],
+) -> None:
+    safe_values = _safe_user_config_values(values)
+
+    assert config_module.user_config_validation_error(safe_values) is None
+    assert set(safe_values) <= config_module.USER_CONFIG_KEYS

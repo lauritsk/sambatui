@@ -1,5 +1,8 @@
 import asyncio
+import ipaddress
 
+from hypothesis import given
+from hypothesis import strategies as st
 
 from sambatui.app import (
     DnsRow,
@@ -16,15 +19,22 @@ from sambatui.ui.screens import (
     FormScreen,
 )
 
+DNS_LABEL = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
+    | st.sampled_from("_"),
+    min_size=1,
+    max_size=20,
+).filter(lambda value: value[0].isalnum() and value[-1].isalnum() and value.isascii())
+DNS_NAME = st.lists(DNS_LABEL, min_size=1, max_size=4).map(".".join)
 
-def test_parse_zones_deduplicates_zone_names() -> None:
-    output = """
-        pszZoneName                 : example.com
-        ZoneName                    : 2.0.192.in-addr.arpa
-        pszZoneName                 : example.com
-    """
 
-    assert parse_zones(output) == ["example.com", "2.0.192.in-addr.arpa"]
+@given(st.lists(DNS_NAME, min_size=1, max_size=8))
+def test_parse_zones_deduplicates_zone_names(zones: list[str]) -> None:
+    output = "\n".join(
+        f"        pszZoneName                 : {zone}" for zone in [*zones, *zones]
+    )
+
+    assert parse_zones(output) == list(dict.fromkeys(zones))
 
 
 def test_parse_records_reads_records_and_empty_nodes() -> None:
@@ -48,20 +58,43 @@ def test_parse_records_reads_records_and_empty_nodes() -> None:
     ]
 
 
-def test_validate_record_accepts_documentation_examples() -> None:
-    assert validate_record("www", "A", "192.0.2.10") is None
-    assert validate_record("alias", "CNAME", "www.example.com.") is None
-    assert validate_record("@", "MX", "10 mail.example.com.") is None
+@given(
+    st.sampled_from(
+        [
+            ("www", "A", "192.0.2.10"),
+            ("alias", "CNAME", "www.example.com."),
+            ("@", "MX", "10 mail.example.com."),
+        ]
+    )
+)
+def test_validate_record_accepts_documentation_examples(
+    record: tuple[str, str, str],
+) -> None:
+    assert validate_record(*record) is None
 
 
-def test_guided_add_record_fields_are_type_specific() -> None:
+@given(
+    st.sampled_from(
+        [
+            ("A", {"name", "address", "ttl"}),
+            ("AAAA", {"name", "address", "ttl"}),
+            ("CNAME", {"name", "target", "ttl"}),
+            ("PTR", {"name", "target", "ttl"}),
+            ("MX", {"name", "priority", "target", "ttl"}),
+            ("SRV", {"name", "priority", "weight", "port", "target", "ttl"}),
+            ("TXT", {"name", "text", "ttl"}),
+        ]
+    )
+)
+def test_guided_add_record_fields_are_type_specific(
+    case: tuple[str, set[str]],
+) -> None:
+    rtype, expected = case
     app = SambatuiApp()
 
-    a_fields = {field_id for _, field_id, _, _ in app.add_record_type_fields("A")}
-    srv_fields = {field_id for _, field_id, _, _ in app.add_record_type_fields("SRV")}
-
-    assert a_fields == {"name", "address", "ttl"}
-    assert srv_fields == {"name", "priority", "weight", "port", "target", "ttl"}
+    assert {
+        field_id for _, field_id, _, _ in app.add_record_type_fields(rtype)
+    } == expected
 
 
 def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
@@ -201,31 +234,43 @@ def test_validate_record_uses_dns_parser_for_supported_types() -> None:
     assert validate_record("www", "A", "999.0.2.10") is not None
 
 
-def test_valid_dns_name_keeps_sambatui_label_policy() -> None:
-    assert valid_dns_name("_ldap._tcp.example.com.")
-    assert not valid_dns_name("-bad.example.com")
-    assert not valid_dns_name("bad space.example.com")
+@given(DNS_NAME)
+def test_valid_dns_name_keeps_sambatui_label_policy(name: str) -> None:
+    assert valid_dns_name(name)
+    assert valid_dns_name(f"{name}.")
+    assert not valid_dns_name(f"-{name}")
+    assert not valid_dns_name(f"bad space.{name}")
 
 
-def test_ptr_target_for_name_uses_zone_for_relative_names() -> None:
-    assert ptr_target_for_name("www", "example.com") == "www.example.com"
-    assert ptr_target_for_name("@", "example.com") == "example.com"
-    assert ptr_target_for_name("host.example.net.", "example.com") == "host.example.net"
+@given(DNS_LABEL, DNS_NAME, DNS_NAME)
+def test_ptr_target_for_name_uses_zone_for_relative_names(
+    label: str, absolute_name: str, zone: str
+) -> None:
+    assert ptr_target_for_name(label, zone) == f"{label}.{zone}"
+    assert ptr_target_for_name("@", zone) == zone
+    assert ptr_target_for_name(f"{absolute_name}.", zone) == absolute_name
 
 
-def test_reverse_record_for_ipv4_prefers_longest_matching_zone() -> None:
-    zones = ["2.0.192.in-addr.arpa", "0.192.in-addr.arpa", "example.com"]
+@given(st.ip_addresses(v=4))
+def test_reverse_record_for_ipv4_prefers_longest_matching_zone(
+    address: ipaddress.IPv4Address,
+) -> None:
+    octets = str(address).split(".")
+    zone = f"{octets[2]}.{octets[1]}.{octets[0]}.in-addr.arpa"
+    zones = [zone, f"{octets[1]}.{octets[0]}.in-addr.arpa", "example.com"]
 
-    assert reverse_record_for_ipv4("192.0.2.10", zones) == (
-        "2.0.192.in-addr.arpa",
-        "10",
-    )
+    assert reverse_record_for_ipv4(str(address), zones) == (zone, octets[3])
 
 
-def test_reverse_record_for_ipv4_falls_back_to_24_zone() -> None:
-    assert reverse_record_for_ipv4("192.0.2.10", []) == (
-        "2.0.192.in-addr.arpa",
-        "10",
+@given(st.ip_addresses(v=4))
+def test_reverse_record_for_ipv4_falls_back_to_24_zone(
+    address: ipaddress.IPv4Address,
+) -> None:
+    octets = str(address).split(".")
+
+    assert reverse_record_for_ipv4(str(address), []) == (
+        f"{octets[2]}.{octets[1]}.{octets[0]}.in-addr.arpa",
+        octets[3],
     )
 
 

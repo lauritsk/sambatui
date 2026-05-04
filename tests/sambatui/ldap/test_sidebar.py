@@ -1,3 +1,6 @@
+from hypothesis import given
+from hypothesis import strategies as st
+
 from sambatui.ldap.client import DirectoryRow
 from sambatui.ldap.sidebar import (
     SidebarItem,
@@ -13,12 +16,31 @@ def directory_row(dn: str, kind: str = "user") -> DirectoryRow:
     return DirectoryRow(dn=dn, kind=kind, name="", summary="", attributes={})
 
 
-def test_split_ldap_dn_keeps_escaped_commas() -> None:
-    assert split_ldap_dn(r"CN=Doe\, Jane, OU=Users ,DC=example,DC=com") == (
-        r"CN=Doe\, Jane",
-        "OU=Users",
-        "DC=example",
-        "DC=com",
+RDN_VALUE = st.text(
+    alphabet=st.characters(
+        blacklist_characters=",\\\n\r", min_codepoint=33, max_codepoint=126
+    ),
+    min_size=1,
+    max_size=20,
+)
+DOMAIN_LABEL = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd")),
+    min_size=1,
+    max_size=12,
+).filter(lambda value: value.isascii())
+BASE_DN = st.lists(DOMAIN_LABEL, min_size=2, max_size=4).map(
+    lambda labels: ",".join(f"DC={label}" for label in labels)
+)
+
+
+@given(RDN_VALUE, RDN_VALUE, RDN_VALUE, BASE_DN)
+def test_split_ldap_dn_keeps_escaped_commas(
+    first: str, second: str, ou: str, base_dn: str
+) -> None:
+    assert split_ldap_dn(rf"CN={first}\, {second}, OU={ou} ,{base_dn}") == (
+        rf"CN={first}\, {second}",
+        f"OU={ou}",
+        *tuple(base_dn.split(",")),
     )
 
 
@@ -35,8 +57,11 @@ def test_ldap_structure_nodes_falls_back_to_trailing_domain_components() -> None
     ]
 
 
-def test_ldap_structure_labels_are_empty_without_rows_or_base() -> None:
-    assert ldap_structure_labels([], "") == []
+@given(st.just([]), st.just(""))
+def test_ldap_structure_labels_are_empty_without_rows_or_base(
+    rows: list[DirectoryRow], base_dn: str
+) -> None:
+    assert ldap_structure_labels(rows, base_dn) == []
 
 
 def test_ldap_sidebar_items_mark_root_and_child_actions() -> None:
@@ -53,17 +78,20 @@ def test_ldap_sidebar_items_mark_root_and_child_actions() -> None:
     ]
 
 
-def test_active_ldap_sidebar_item_tracks_root_child_and_text_search() -> None:
-    base_dn = "DC=example,DC=com"
+@given(BASE_DN, RDN_VALUE, RDN_VALUE)
+def test_active_ldap_sidebar_item_tracks_root_child_and_text_search(
+    base_dn: str, child: str, text: str
+) -> None:
+    child_dn = f"OU={child},{base_dn}"
 
     assert active_ldap_sidebar_item(
         {"kind": "all", "text": "", "search_base_dn": base_dn}, base_dn
     ) == SidebarItem(base_dn, base_dn, "ldap_root")
     assert active_ldap_sidebar_item(
-        {"kind": "all", "text": "", "search_base_dn": "OU=Users," + base_dn},
+        {"kind": "all", "text": "", "search_base_dn": child_dn},
         base_dn,
-    ) == SidebarItem("OU=Users," + base_dn, "OU=Users," + base_dn, "ldap_dn")
+    ) == SidebarItem(child_dn, child_dn, "ldap_dn")
     assert active_ldap_sidebar_item(
-        {"kind": "all", "text": "alice", "base_dn": base_dn}, base_dn
-    ) == SidebarItem("alice", base_dn, "ldap_dn")
+        {"kind": "all", "text": text, "base_dn": base_dn}, base_dn
+    ) == SidebarItem(text, base_dn, "ldap_dn")
     assert active_ldap_sidebar_item({"kind": "users", "text": ""}, base_dn) is None
