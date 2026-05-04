@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-
+from dataclasses import replace
 
 from .models import SmartViewCheckResult, SmartViewRow
 
@@ -104,22 +104,7 @@ def sorted_details(
 def dashboard_detail_row(
     result: SmartViewCheckResult, row: SmartViewRow
 ) -> SmartViewRow:
-    return SmartViewRow(
-        severity=row.severity,
-        object=row.object,
-        finding=f"{result.label}: {row.finding}",
-        evidence=row.evidence,
-        suggested_action=row.suggested_action,
-        source=row.source,
-        fix_action=row.fix_action,
-        fix_label=row.fix_label,
-        fix_zone=row.fix_zone,
-        fix_name=row.fix_name,
-        fix_rtype=row.fix_rtype,
-        fix_value=row.fix_value,
-        fix_dn=row.fix_dn,
-        fix_attribute=row.fix_attribute,
-    )
+    return replace(row, finding=f"{result.label}: {row.finding}")
 
 
 def severity_rank(severity: str) -> int:
