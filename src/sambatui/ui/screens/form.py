@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import suppress
 from ipaddress import ip_address
-from typing import Any, TypeAlias
+from typing import TypeAlias
 from urllib.parse import urlparse
 
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import Suggester
 from textual.widgets import Button, Input, Static
@@ -245,7 +246,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
             self.accept_upn_suggestion()
             self.refresh_form_feedback()
 
-    def on_key(self, event: Any) -> None:
+    def on_key(self, event: Key) -> None:
         if isinstance(self.focused, Button) and event.key in {"enter", "space"}:
             return
         if event.key == "escape":

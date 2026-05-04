@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from .core.config import (
     DEFAULT_AUTH,
@@ -265,7 +264,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "Apply the available guided DNS fix for the selected smart-view finding.",
     ),
 )
-PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[Any, ...]]] = {
+PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[str, ...]]] = {
     "help": ("action_help", ()),
     "setup_wizard": ("action_setup_wizard", ()),
     "connection": ("action_connection", ()),

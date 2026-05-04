@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
@@ -63,8 +64,8 @@ class SmartViewPickerScreen(FocusedModalScreen[str | None]):
     def dismiss_selected(self) -> None:
         self.dismiss(self.selected_view_id())
 
-    def on_key(self, event: Any) -> None:
-        character = getattr(event, "character", None)
+    def on_key(self, event: Key) -> None:
+        character = event.character
         if event.key == "escape":
             event.prevent_default()
             event.stop()

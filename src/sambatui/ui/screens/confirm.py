@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
@@ -64,8 +63,8 @@ class ConfirmScreen(FocusedModalScreen[bool]):
         button_id = "confirm" if self.default_confirm else "deny"
         self.query_one(f"#{button_id}", Button).focus()
 
-    def on_key(self, event: Any) -> None:
-        decision = self.key_decision(event.key, getattr(event, "character", None))
+    def on_key(self, event: Key) -> None:
+        decision = self.key_decision(event.key, event.character)
         if decision is None:
             return
         event.prevent_default()

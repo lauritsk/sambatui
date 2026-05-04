@@ -23,6 +23,7 @@ from ..core.config import (
     password_file_warning,
     read_password_file,
     save_user_config,
+    write_private_text,
 )
 from ..samba.discovery import (
     normalize_domain,
@@ -279,12 +280,7 @@ class AppCoreMixin(AppControllerBase):
         ):
             self.notify("Save cancelled")
             return
-        parent_exists = path.parent.exists()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not parent_exists:
-            path.parent.chmod(0o700)
-        path.write_text(password + "\n", encoding="utf-8")
-        path.chmod(0o600)
+        write_private_text(path, password + "\n")
         self.set_status(f"Saved password to {path}")
         self.notify("Password saved")
 

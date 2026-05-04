@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 from sambatui.ldap.filters import KIND_LABELS
 from sambatui.ldap.types import DirectoryRow
 
 
-def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:
-    attrs = normalize_entry_attributes(entry.entry_attributes_as_dict)
-    dn = str(entry.entry_dn)
+def entry_to_directory_row(entry: object, kind: str = "all") -> DirectoryRow:
+    attributes = getattr(entry, "entry_attributes_as_dict", {})
+    attrs = normalize_entry_attributes(
+        attributes if isinstance(attributes, Mapping) else {}
+    )
+    dn = str(getattr(entry, "entry_dn", ""))
     name = first_attr(attrs, "displayName", "cn", "name", "sAMAccountName") or dn
     row_kind = infer_kind(attrs, kind)
     summary = directory_summary(attrs)
@@ -19,14 +21,14 @@ def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:
 
 
 def normalize_entry_attributes(
-    attributes: Mapping[str, Any],
+    attributes: Mapping[str, object],
 ) -> dict[str, tuple[str, ...]]:
     return {
         str(key): normalize_attribute_values(value) for key, value in attributes.items()
     }
 
 
-def normalize_attribute_values(value: Any) -> tuple[str, ...]:
+def normalize_attribute_values(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, (list, tuple, set)):

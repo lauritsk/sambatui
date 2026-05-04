@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
@@ -77,7 +76,7 @@ App
     def on_mount(self) -> None:
         self.query_one("#close", Button).focus()
 
-    def on_key(self, event: Any) -> None:
+    def on_key(self, event: Key) -> None:
         if event.key in {"escape", "enter"}:
             event.prevent_default()
             event.stop()

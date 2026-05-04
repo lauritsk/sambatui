@@ -68,6 +68,9 @@ def test_ldap_tls_wrap_socket_and_helpers(monkeypatch: pytest.MonkeyPatch) -> No
         == "LDAP password bind requires ldaps or starttls."
     )
     assert _paged_search_cookie(None) is None
+    assert _paged_search_cookie({"controls": {}}) is None
+    assert _paged_search_cookie({"controls": {"1.2.840.113556.1.4.319": "bad"}}) is None
+    assert _paged_search_cookie({"controls": {"1.2.840.113556.1.4.319": {}}}) is None
     assert _ldap_result_message(None, "fallback") == "fallback"
 
 

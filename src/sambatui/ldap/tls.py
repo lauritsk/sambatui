@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import Any, cast
-import importlib
+from typing import Protocol
+import socket
 import ssl
+
+from ldap3 import Tls
 
 from sambatui.ldap.types import LdapSearchConfig
 
 LDAP_COMPATIBILITY_TLS_CIPHERS = "DEFAULT:@SECLEVEL=0"
 
-_ldap3_module = importlib.import_module("ldap3")
-Tls = cast(Any, _ldap3_module).Tls
+
+class SocketConnection(Protocol):
+    socket: socket.socket
 
 
 class LdapCompatibilityTls(Tls):
@@ -21,7 +24,9 @@ class LdapCompatibilityTls(Tls):
             ciphers=LDAP_COMPATIBILITY_TLS_CIPHERS,
         )
 
-    def wrap_socket(self, connection: Any, do_handshake: bool = False) -> None:
+    def wrap_socket(
+        self, connection: SocketConnection, do_handshake: bool = False
+    ) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE

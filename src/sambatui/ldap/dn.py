@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, cast
+from collections.abc import Callable, Mapping
+from typing import Protocol, cast
 import importlib
 
 from sambatui.ldap.types import LDAP_ADD_KINDS
 
+
+class ParseDn(Protocol):
+    def __call__(
+        self, dn: str, *, escape: bool = False
+    ) -> list[tuple[str, str, str]]: ...
+
+
 _ldap3_dn = importlib.import_module("ldap3.utils.dn")
-escape_rdn = cast(Any, _ldap3_dn).escape_rdn
-parse_dn = cast(Any, _ldap3_dn).parse_dn
+escape_rdn = cast(Callable[[str], str], getattr(_ldap3_dn, "escape_rdn"))
+parse_dn = cast(ParseDn, getattr(_ldap3_dn, "parse_dn"))
 
 LDAP_ADD_OBJECT_CLASSES: Mapping[str, tuple[str, ...]] = {
     "user": ("top", "person", "organizationalPerson", "user"),
@@ -75,7 +82,7 @@ def ldap_dn_equal(left: str, right: str) -> bool:
 
 def build_add_entry(
     kind: str, parent_dn: str, name: str, attributes: Mapping[str, str]
-) -> tuple[str, tuple[str, ...], dict[str, Any]]:
+) -> tuple[str, tuple[str, ...], dict[str, object]]:
     normalized_kind = kind.casefold()
     object_class = LDAP_ADD_OBJECT_CLASSES.get(normalized_kind)
     if object_class is None:
@@ -90,7 +97,7 @@ def build_add_entry(
 
     rdn_attr = "OU" if normalized_kind == "ou" else "CN"
     dn = f"{rdn_attr}={escape_rdn(clean_name)},{clean_parent}"
-    ldap_attributes: dict[str, Any] = _clean_add_attributes(attributes)
+    ldap_attributes: dict[str, object] = _clean_add_attributes(attributes)
     if normalized_kind == "ou":
         ldap_attributes["ou"] = clean_name
     else:
@@ -108,5 +115,5 @@ def build_add_entry(
     return dn, object_class, ldap_attributes
 
 
-def _clean_add_attributes(attributes: Mapping[str, str]) -> dict[str, str]:
+def _clean_add_attributes(attributes: Mapping[str, str]) -> dict[str, object]:
     return {key: value for key, value in attributes.items() if value != ""}

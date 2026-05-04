@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import dns.exception
 import dns.resolver
@@ -11,7 +11,7 @@ from sambatui.dns.validation import valid_dns_name
 
 
 class SrvResolver(Protocol):
-    def resolve(self, qname: str, rdtype: str) -> Iterable[Any]: ...
+    def resolve(self, qname: str, rdtype: str) -> Iterable[object]: ...
 
 
 @dataclass(frozen=True)
@@ -61,21 +61,27 @@ def discover_ad_services(
 
 
 def _services_from_answer(
-    service: str, domain: str, answer: Iterable[Any]
+    service: str, domain: str, answer: Iterable[object]
 ) -> list[DiscoveredService]:
     services: list[DiscoveredService] = []
     for record in answer:
-        target = str(record.target).rstrip(".")
+        target = str(getattr(record, "target", "")).rstrip(".")
         if not target or target == ".":
+            continue
+        try:
+            port = int(getattr(record, "port"))
+            priority = int(getattr(record, "priority"))
+            weight = int(getattr(record, "weight"))
+        except TypeError, ValueError:
             continue
         services.append(
             DiscoveredService(
                 service=service,
                 domain=domain,
                 target=target,
-                port=int(record.port),
-                priority=int(record.priority),
-                weight=int(record.weight),
+                port=port,
+                priority=priority,
+                weight=weight,
             )
         )
     return services

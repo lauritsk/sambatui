@@ -17,9 +17,18 @@ class FakeSrvRecord:
     weight: int = 0
 
 
-def test_discovery_empty_target_and_non_ldap_preference() -> None:
+class BadSrvRecord:
+    target = "bad.example.com"
+    port = object()
+    priority = 0
+    weight = 0
+
+
+def test_discovery_empty_target_bad_port_and_non_ldap_preference() -> None:
     services = _services_from_answer(
-        "ldap", "example.com", [FakeSrvRecord("."), FakeSrvRecord("dc.example.com.")]
+        "ldap",
+        "example.com",
+        [FakeSrvRecord("."), BadSrvRecord(), FakeSrvRecord("dc.example.com.")],
     )
     assert [service.target for service in services] == ["dc.example.com"]
     preferred = preferred_domain_controller(
