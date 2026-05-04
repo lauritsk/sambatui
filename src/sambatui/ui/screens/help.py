@@ -34,9 +34,8 @@ class HelpScreen(FocusedModalScreen[None]):
   c         Discover AD domain controllers
 
 Main tabs
-  DNS       Load zones, select a zone, manage records
-  LDAP      Search AD directory over LDAP; a/u/d add, edit, delete entries
-  Smart     Read-only DNS/LDAP hygiene findings
+  DNS       Load zones, select a zone, manage records, run DNS findings
+  LDAP      Search AD directory over LDAP; a/u/d add, edit, delete entries, run LDAP findings
   L         Search LDAP from anywhere
   m         Load 200 more rows for the last LDAP search
   S         Pick a smart view from a list
@@ -44,8 +43,8 @@ Main tabs
   z         Load DNS zones
 
 Navigation
-  Tab       Switch zones/records table
-  h/l       Focus zones/records
+  Tab       Switch sidebar findings/records table
+  h/l       Focus sidebar/records
   j/k       Move cursor
   gg/G      Top/bottom
   Ctrl+d/u  Half-page down/up
@@ -59,7 +58,7 @@ Records / directory
   n/t/e     Sort by name/type/value
   Space     Toggle record selection
   v/V       Visual/range select
-  Esc       Clear visual/select/search state
+  Esc       Clear visual/select/search/finding filter state
 
 App
   ?         Show this help

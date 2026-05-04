@@ -132,7 +132,7 @@ class SambatuiApp(
         ("z", "load_zones", "Zones"),
         ("c", "discover_ad", "Discover DC"),
         ("L", "ldap_search", "LDAP"),
-        ("S", "smart_view", "Smart views"),
+        ("S", "smart_view", "Findings picker"),
         ("r", "refresh", "Refresh"),
         ("q", "query", "Query"),
         ("a", "add", "Add"),

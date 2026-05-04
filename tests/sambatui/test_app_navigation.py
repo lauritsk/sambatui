@@ -18,11 +18,7 @@ from sambatui.ui.screens import (
 )
 
 
-@given(
-    st.sampled_from(
-        [("dns_tab", "DNS:"), ("ldap_tab", "LDAP:"), ("smart_tab", "Smart:")]
-    )
-)
+@given(st.sampled_from([("dns_tab", "DNS:"), ("ldap_tab", "LDAP:")]))
 def test_key_hints_change_by_side_tab(case: tuple[str, str]) -> None:
     tab, prefix = case
     app = SambatuiApp()
@@ -122,7 +118,8 @@ def test_sidebar_uses_current_list_widgets() -> None:
         async with app.run_test():
             assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
-            assert app.query_one("#smart_views", DataTable).row_count == 8
+            assert app.query_one("#dns_findings", DataTable).row_count == 3
+            assert app.query_one("#ldap_findings", DataTable).row_count == 4
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
             app.populate_ldap_structure([])
             assert app.query_one("#ldap_structure", DataTable).row_count == 1

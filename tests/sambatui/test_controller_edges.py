@@ -889,11 +889,11 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
                 SidebarItem("Run 1", "dns_duplicates", "smart_view")
             )
             assert app.smart_runs == ["dns_duplicates"]
-            app.query_one("#smart_views", DataTable).move_cursor(row=1)
+            app.query_one("#dns_findings", DataTable).move_cursor(row=1)
             assert await app.activate_sidebar_selection(
-                app.query_one("#smart_views", DataTable)
+                app.query_one("#dns_findings", DataTable)
             )
-            assert app.smart_runs[-1] == "dns_duplicates"
+            assert app.smart_runs[-1] == "dns_a_without_ptr"
             table = app.query_one("#zones", DataTable)
             assert await app.activate_sidebar_selection(table)
 
@@ -918,9 +918,30 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
 
             app.populate_records([row("b"), row("a")])
             app.sort_records("type")
+            app.query_one("#zone", Input).value = "example.com"
+            duplicate = [row("dup"), row("dup")]
+            findings = app.passive_dns_findings(duplicate)
+            assert app.dns_row_severity(duplicate[0], findings) == "medium"
+            assert str(app.severity_marker("medium")) == "▌"
+            assert str(app.severity_marker("low", quiet=True)) == "•"
+            assert app.severity_marker("") == ""
+            app.render_records(duplicate)
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[0]) == "▌"
+            app.current_smart_view_id = "dns_duplicates"
+            assert "DNS / Findings" in app.active_smart_filter_suffix()
             app.populate_smart_view("x", [smart_row()])
+            assert str(app.smart_row_marker(smart_row())) == "•"
+            assert "DNS / Findings / x" in str(
+                app.query_one("#records_title", Static).render()
+            )
             app.sort_records("name")
             assert "Sorted smart view" in str(app.query_one("#status", Static).render())
+            app.clear_current_smart_view()
+            assert app.view_mode == "dns"
+            app.current_smart_view_id = "missing"
+            assert app.active_smart_filter_suffix() == ""
+            app.current_smart_view_id = "full_health_dashboard"
+            assert app.active_smart_filter_suffix() == ""
             app.sort_smart_view("missing")
             app.search_text = ""
             app.view_mode = "unknown"
@@ -937,7 +958,15 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.populate_directory(
                 [directory_row(name="Bob"), directory_row(name="Alice")]
             )
+            directory_findings = app.passive_directory_findings(app.directory_rows)
+            assert app.directory_row_severity(app.directory_rows[0], directory_findings)
+            app.render_directory(app.directory_rows)
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[0]) == "▌"
             app.sort_records("name")
+            app.current_smart_view_id = "ldap_inactive_users"
+            app.populate_smart_view("ldap", [smart_row(source="ldap")])
+            app.clear_current_smart_view()
+            assert app.view_mode == "directory"
             app.sort_directory("missing")
 
             records = app.query_one("#records", DataTable)
