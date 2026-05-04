@@ -127,6 +127,20 @@ class AppSmartActionsMixin(AppControllerBase):
             )
         return values
 
+    async def smart_view_values(
+        self, view: SmartViewDefinition
+    ) -> dict[str, str] | None:
+        defaults = self.smart_view_default_values(view)
+        values = await self.form(
+            view.label,
+            view.description,
+            self.smart_view_fields(view),
+            "Run smart view",
+        )
+        if values is None:
+            return None
+        return defaults | values
+
     async def dns_records_with_failures_for_smart_view(
         self,
     ) -> tuple[dict[str, list[DnsRow]], list[str]] | None:
@@ -449,7 +463,9 @@ class AppSmartActionsMixin(AppControllerBase):
 
     async def run_smart_view(self, view_id: str) -> None:
         view = SMART_VIEW_BY_ID[view_id]
-        values = self.smart_view_default_values(view)
+        values = await self.smart_view_values(view)
+        if values is None:
+            return
         options = SmartViewOptions.from_values(values)
         self.apply_smart_view_options(view, options)
         self.remember_current_smart_view(view, values, options)
