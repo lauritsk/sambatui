@@ -102,6 +102,8 @@ class AppCoreMixin(AppControllerBase):
         self.current_smart_view_id = ""
         self.current_smart_max_rows = 500
         self.current_smart_values: dict[str, str] = {}
+        self.current_smart_sort_field = ""
+        self.current_smart_sort_reverse = False
         self.records_columns = DNS_COLUMNS
         self.view_mode = "dns"
         self.sort_field = "name"
