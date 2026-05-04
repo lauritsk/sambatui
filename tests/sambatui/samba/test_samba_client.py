@@ -89,4 +89,3 @@ def test_parse_samba_options_uses_semicolon_separated_values() -> None:
         "log level=1",
         "foo=bar",
     )
-
