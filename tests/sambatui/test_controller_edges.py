@@ -18,7 +18,7 @@ from sambatui.controllers.helpers import (
     setup_auth_values,
     sort_direction,
 )
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
 from sambatui.ldap.sidebar import SidebarItem
 from sambatui.samba.discovery import DiscoveredService
 from sambatui.smart_view_catalog import (
@@ -1299,6 +1299,20 @@ def test_ldap_action_edges() -> None:
 
 
 def test_smart_action_edges() -> None:
+    class SmartLdapClient:
+        def __init__(self, app: SmartApp) -> None:
+            self.app = app
+
+        def disable_account(self, dn: str, user_account_control: int) -> None:
+            if "fail" in dn:
+                raise ValueError("disable failed")
+            self.app.ldap_disables.append((dn, user_account_control))
+
+        def delete_entry(self, dn: str) -> None:
+            if "fail" in dn:
+                raise ValueError("delete failed")
+            self.app.ldap_deletes.append(dn)
+
     class SmartApp(NotificationApp):
         def __init__(self) -> None:
             super().__init__()
@@ -1311,6 +1325,8 @@ def test_smart_action_edges() -> None:
             self.directory_result: list[DirectoryRow] | None = [directory_row()]
             self.fix_codes: list[int] = []
             self.confirms: list[bool] = []
+            self.ldap_disables: list[tuple[str, int]] = []
+            self.ldap_deletes: list[str] = []
 
         async def form(self, *args: Any, **kwargs: Any) -> dict[str, str] | None:
             return self.forms.pop(0)
@@ -1344,6 +1360,9 @@ def test_smart_action_edges() -> None:
 
         async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
             return self.confirms.pop(0)
+
+        def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
+            return cast(LdapDirectoryClient, SmartLdapClient(self))
 
     async def run_app() -> None:
         app = SmartApp()
@@ -1415,7 +1434,7 @@ def test_smart_action_edges() -> None:
             await app.run_smart_view(FULL_HEALTH_VIEW_ID)
             assert app.loaded_full
 
-            await app.apply_smart_fix(smart_row(source="ldap"))
+            await app.apply_smart_fix(smart_row(source="ldap", fix_action=""))
             await app.apply_smart_fix(smart_row(fix_action=""))
             await app.apply_smart_fix(smart_row(fix_name="bad space"))
             app.confirms = [False]
@@ -1427,6 +1446,59 @@ def test_smart_action_edges() -> None:
             app.confirms = [True]
             app.fix_codes = [0]
             await app.action_fix_smart.__wrapped__(app)
+            await app.apply_smart_fix(
+                smart_row(fix_action="ldap_disable_account", fix_value="bad")
+            )
+            await app.apply_smart_fix(
+                smart_row(fix_action="ldap_disable_account", fix_value="514", fix_dn="")
+            )
+            app.confirms = [False]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_disable_account",
+                    fix_value="514",
+                    fix_dn="CN=old,DC=example,DC=com",
+                )
+            )
+            app.confirms = [True]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_disable_account",
+                    fix_value="514",
+                    fix_dn="CN=fail,DC=example,DC=com",
+                )
+            )
+            app.confirms = [True]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_disable_account",
+                    fix_value="514",
+                    fix_dn="CN=old,DC=example,DC=com",
+                )
+            )
+            assert app.ldap_disables == [("CN=old,DC=example,DC=com", 514)]
+            await app.apply_smart_fix(
+                smart_row(fix_action="ldap_delete_entry", fix_dn="")
+            )
+            app.confirms = [False]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_delete_entry", fix_dn="CN=old,DC=example,DC=com"
+                )
+            )
+            app.confirms = [True]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_delete_entry", fix_dn="CN=fail,DC=example,DC=com"
+                )
+            )
+            app.confirms = [True]
+            await app.apply_smart_fix(
+                smart_row(
+                    fix_action="ldap_delete_entry", fix_dn="CN=old,DC=example,DC=com"
+                )
+            )
+            assert app.ldap_deletes == ["CN=old,DC=example,DC=com"]
             app.populate_records([row()])
             await app.action_fix_smart.__wrapped__(app)
 

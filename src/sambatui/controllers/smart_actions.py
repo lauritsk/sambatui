@@ -445,14 +445,19 @@ class AppSmartActionsMixin(AppControllerBase):
         self.populate_smart_view_results(view.label, rows, options.max_rows)
 
     async def apply_smart_fix(self, row: SmartViewRow) -> None:
-        if row.source == "ldap":
-            self.notify("LDAP findings are read-only/export-only.", severity="error")
-            return
-        if row.fix_action != "dns_add_ptr":
-            self.notify(
-                "No guided fix is available for this finding.", severity="error"
-            )
-            return
+        match row.fix_action:
+            case "dns_add_ptr":
+                await self.apply_dns_smart_fix(row)
+            case "ldap_disable_account":
+                await self.apply_ldap_disable_smart_fix(row)
+            case "ldap_delete_entry":
+                await self.apply_ldap_delete_smart_fix(row)
+            case _:
+                self.notify(
+                    "No guided fix is available for this finding.", severity="error"
+                )
+
+    async def apply_dns_smart_fix(self, row: SmartViewRow) -> None:
         error = validate_record(row.fix_name, row.fix_rtype, row.fix_value)
         if error:
             self.report_error(error)
@@ -473,6 +478,55 @@ class AppSmartActionsMixin(AppControllerBase):
                 "add", row.fix_zone, [row.fix_name, row.fix_rtype, row.fix_value]
             )
         if code != 0:
+            return
+        self.notify(f"Applied fix: {row.fix_label}")
+        await self.refresh_current_smart_view()
+
+    async def apply_ldap_disable_smart_fix(self, row: SmartViewRow) -> None:
+        try:
+            user_account_control = int(row.fix_value)
+        except ValueError:
+            self.report_error("LDAP disable fix has invalid userAccountControl value.")
+            return
+        if not row.fix_dn:
+            self.report_error("LDAP disable fix needs a DN.")
+            return
+        if not await self.confirm(
+            "Fix smart finding?\n\n"
+            "DISABLE LDAP account\n"
+            f"DN: {row.fix_dn}\n"
+            f"userAccountControl -> {user_account_control}\n\n"
+            f"Finding: {row.finding}\n"
+            f"Evidence: {row.evidence}",
+            default_confirm=True,
+        ):
+            self.notify("Fix cancelled")
+            return
+        _result, error = await self.ldap_thread_result(
+            lambda: self.ldap_client().disable_account(row.fix_dn, user_account_control)
+        )
+        if error:
+            return
+        self.notify(f"Applied fix: {row.fix_label}")
+        await self.refresh_current_smart_view()
+
+    async def apply_ldap_delete_smart_fix(self, row: SmartViewRow) -> None:
+        if not row.fix_dn:
+            self.report_error("LDAP delete fix needs a DN.")
+            return
+        if not await self.confirm(
+            "DELETE LDAP entry for smart finding?\n\n"
+            f"DN: {row.fix_dn}\n\n"
+            "This cannot be undone from this app. Non-empty containers may fail.\n\n"
+            f"Finding: {row.finding}\n"
+            f"Evidence: {row.evidence}",
+        ):
+            self.notify("Fix cancelled")
+            return
+        _result, error = await self.ldap_thread_result(
+            lambda: self.ldap_client().delete_entry(row.fix_dn)
+        )
+        if error:
             return
         self.notify(f"Applied fix: {row.fix_label}")
         await self.refresh_current_smart_view()

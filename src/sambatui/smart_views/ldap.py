@@ -31,6 +31,7 @@ def ldap_inactive_users(
                 evidence=f"lastLogonTimestamp {age_text(last_logon, now)} ago (replicated AD value).",
                 suggested_action="Review owner; disable first, then delete after retention policy.",
                 source="ldap",
+                **ldap_disable_fix(row),
             )
         )
     return findings
@@ -98,6 +99,9 @@ def disabled_user_cleanup_finding(
         evidence=disabled_user_evidence(changed, created, now),
         suggested_action="Verify retention/legal hold; delete or archive per policy.",
         source="ldap",
+        fix_action="ldap_delete_entry",
+        fix_label=f"delete {directory_object_name(row)}",
+        fix_dn=row.dn,
     )
 
 
@@ -111,6 +115,7 @@ def never_logged_user_finding(
         evidence=f"created {age_text(created, now)} ago; no lastLogonTimestamp.",
         suggested_action="Confirm onboarding status; disable/delete if abandoned.",
         source="ldap",
+        **ldap_disable_fix(row),
     )
 
 
@@ -159,6 +164,7 @@ def stale_computer_finding(
         evidence=evidence,
         suggested_action="Confirm device retired; disable/delete and clean DNS if stale.",
         source="ldap",
+        **ldap_disable_fix(row),
     )
 
 
@@ -189,6 +195,27 @@ def ldap_users_without_groups(rows: Sequence[DirectoryRow]) -> list[SmartViewRow
             )
         )
     return findings
+
+
+def ldap_disable_fix(row: DirectoryRow) -> dict[str, str]:
+    user_account_control = ldap_user_account_control(row)
+    if user_account_control is None:
+        return {}
+    return {
+        "fix_action": "ldap_disable_account",
+        "fix_label": f"disable {directory_object_name(row)}",
+        "fix_dn": row.dn,
+        "fix_attribute": "userAccountControl",
+        "fix_value": str(user_account_control | ACCOUNTDISABLE),
+    }
+
+
+def ldap_user_account_control(row: DirectoryRow) -> int | None:
+    value = first_attr(row.attributes, "userAccountControl")
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def directory_object_name(row: DirectoryRow) -> str:

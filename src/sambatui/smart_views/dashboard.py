@@ -117,6 +117,8 @@ def dashboard_detail_row(
         fix_name=row.fix_name,
         fix_rtype=row.fix_rtype,
         fix_value=row.fix_value,
+        fix_dn=row.fix_dn,
+        fix_attribute=row.fix_attribute,
     )
 
 

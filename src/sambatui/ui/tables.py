@@ -47,7 +47,7 @@ def smart_fix_hint(row: SmartViewRow) -> str:
     if row.fix_action:
         return f"{row.suggested_action} Fix: press f to {row.fix_label}."
     if row.source == "ldap":
-        return f"{row.suggested_action} LDAP findings are read-only/export-only."
+        return f"{row.suggested_action} No guided LDAP fix is available."
     return row.suggested_action
 
 

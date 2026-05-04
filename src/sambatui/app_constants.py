@@ -31,7 +31,7 @@ from .smart_view_catalog import SMART_VIEWS
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / search",
     "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  a add  u edit  d delete  m load more  S smart  / search  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
+    "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
 CONNECTION_STATE_INPUTS = (
@@ -261,7 +261,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "fix_smart",
         "Fix selected smart finding",
         "f",
-        "Apply the available guided DNS fix for the selected smart-view finding.",
+        "Apply the available guided fix for the selected smart-view finding.",
     ),
 )
 PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[str, ...]]] = {

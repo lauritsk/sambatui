@@ -222,6 +222,10 @@ def test_ldap_inactive_users_ignores_disabled_and_recent_users() -> None:
     findings = ldap_inactive_users(rows, days=90, now=now)
 
     assert [finding.object for finding in findings] == ["old"]
+    assert findings[0].fix_action == "ldap_disable_account"
+    assert findings[0].fix_dn == "CN=Alice,DC=example,DC=com"
+    assert findings[0].fix_attribute == "userAccountControl"
+    assert findings[0].fix_value == str(512 | ACCOUNTDISABLE)
 
 
 def test_ldap_delete_candidate_users_flags_disabled_old_and_never_logged_in() -> None:
@@ -251,6 +255,10 @@ def test_ldap_delete_candidate_users_flags_disabled_old_and_never_logged_in() ->
         "Disabled user cleanup candidate",
         "User never logged in",
     ]
+    assert findings[0].fix_action == "ldap_delete_entry"
+    assert findings[0].fix_dn == "CN=Alice,DC=example,DC=com"
+    assert findings[1].fix_action == "ldap_disable_account"
+    assert findings[1].fix_value == str(512 | ACCOUNTDISABLE)
 
 
 def test_ldap_stale_computers_flags_old_logon() -> None:
@@ -272,6 +280,8 @@ def test_ldap_stale_computers_flags_old_logon() -> None:
 
     assert findings[0].object == "host.example.com"
     assert findings[0].finding == "Stale computer account"
+    assert findings[0].fix_action == "ldap_disable_account"
+    assert findings[0].fix_value == str(4096 | ACCOUNTDISABLE)
 
 
 def test_ldap_users_without_groups_flags_empty_memberof() -> None:
