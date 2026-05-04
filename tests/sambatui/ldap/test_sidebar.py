@@ -94,4 +94,5 @@ def test_active_ldap_sidebar_item_tracks_root_child_and_text_search(
     assert active_ldap_sidebar_item(
         {"kind": "all", "text": text, "base_dn": base_dn}, base_dn
     ) == SidebarItem(text, base_dn, "ldap_dn")
+    assert active_ldap_sidebar_item({"kind": "all", "text": ""}, base_dn) is None
     assert active_ldap_sidebar_item({"kind": "users", "text": ""}, base_dn) is None

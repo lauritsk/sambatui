@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from .dn import split_ldap_dn
 from .rows import DirectoryRow
 
 
@@ -11,32 +12,6 @@ class SidebarItem:
     label: str
     value: str
     action: str
-
-
-def split_ldap_dn(dn: str) -> tuple[str, ...]:
-    parts: list[str] = []
-    current: list[str] = []
-    escaped = False
-    for char in dn:
-        if escaped:
-            current.append(char)
-            escaped = False
-            continue
-        if char == "\\":
-            current.append(char)
-            escaped = True
-            continue
-        if char == ",":
-            part = "".join(current).strip()
-            if part:
-                parts.append(part)
-            current = []
-            continue
-        current.append(char)
-    part = "".join(current).strip()
-    if part:
-        parts.append(part)
-    return tuple(parts)
 
 
 def _dn_suffix_index(parts: Sequence[str], suffix: Sequence[str]) -> int:
@@ -124,12 +99,15 @@ def active_ldap_sidebar_item(
     values: Mapping[str, str], base_dn: str
 ) -> SidebarItem | None:
     kind = values.get("kind", "")
+    if kind != "all":
+        return None
+
     text = values.get("text", "")
     search_base_dn = values.get("search_base_dn", "") or values.get("base_dn", "")
-    if kind == "all" and not text and search_base_dn.casefold() == base_dn.casefold():
-        return SidebarItem(base_dn, base_dn, "ldap_root")
-    if kind == "all" and not text and search_base_dn:
-        return SidebarItem(search_base_dn, search_base_dn, "ldap_dn")
-    if kind == "all" and text:
+    if text:
         return SidebarItem(text, search_base_dn or text, "ldap_dn")
+    if search_base_dn.casefold() == base_dn.casefold():
+        return SidebarItem(base_dn, base_dn, "ldap_root")
+    if search_base_dn:
+        return SidebarItem(search_base_dn, search_base_dn, "ldap_dn")
     return None
