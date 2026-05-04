@@ -39,6 +39,8 @@ from ..app_constants import (
     DEFAULT_SMART_DAYS,
     DEFAULT_SMART_DISABLED_DAYS,
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
+    LDAP_LOAD_MORE_ROWS,
+    LDAP_MAX_ROWS,
 )
 from .base import AppControllerBase
 from .helpers import (
@@ -133,11 +135,11 @@ class AppSmartActionsMixin(AppControllerBase):
 
     async def refresh_current_smart_view(self) -> None:
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        values = getattr(self, "current_smart_values", {})
         if view is None:
             self.refresh_smart_view()
             return
         if view.view_id == FULL_HEALTH_VIEW_ID:
-            values = getattr(self, "current_smart_values", {})
             if not values:
                 self.refresh_smart_view()
                 return
@@ -145,15 +147,41 @@ class AppSmartActionsMixin(AppControllerBase):
                 values, SmartViewOptions.from_values(values), refreshed=True
             )
             return
-        if view.source != "DNS":
-            self.refresh_smart_view()
-            return
-        records_by_zone = await self.dns_records_for_smart_view()
-        if records_by_zone is None:
-            return
-        rows = self.dns_smart_rows(view.view_id, records_by_zone)
+        if view.source == "DNS":
+            records_by_zone = await self.dns_records_for_smart_view()
+            if records_by_zone is None:
+                return
+            rows = self.dns_smart_rows(view.view_id, records_by_zone)
+        else:
+            if not values:
+                self.refresh_smart_view()
+                return
+            directory_rows = await self.ldap_directory_for_smart_view(view, values)
+            if directory_rows is None:
+                return
+            rows = self.ldap_smart_rows(
+                view.view_id,
+                directory_rows,
+                SmartViewOptions.from_values(values),
+            )
         self.populate_smart_view(view.label, rows[: self.current_smart_max_rows])
         self.notify("Refreshed smart-view findings")
+
+    async def load_more_smart_view(self) -> bool:
+        if not self.current_smart_values or not self.current_smart_view_id:
+            self.set_status("No smart view to extend. Press S to run a smart view.")
+            return False
+        max_rows = min(self.current_smart_max_rows + LDAP_LOAD_MORE_ROWS, LDAP_MAX_ROWS)
+        if max_rows == self.current_smart_max_rows:
+            self.set_status(f"Smart-view row limit already at {LDAP_MAX_ROWS}.")
+            return False
+        self.current_smart_max_rows = max_rows
+        self.current_smart_values = {
+            **self.current_smart_values,
+            "max_rows": str(max_rows),
+        }
+        await self.refresh_current_smart_view()
+        return True
 
     def selected_smart_row(self) -> SmartViewRow | None:
         if self.view_mode != "smart":
@@ -207,7 +235,8 @@ class AppSmartActionsMixin(AppControllerBase):
             return None
 
         kind = "computers" if view.view_id == "ldap_stale_computers" else "users"
-        return await self.directory_search_rows(client, kind, "")
+        max_rows = SmartViewOptions.from_values(values).max_rows
+        return await self.directory_search_rows(client, kind, "", max_rows)
 
     def ldap_smart_rows(
         self,
