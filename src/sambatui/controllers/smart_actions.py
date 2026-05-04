@@ -65,36 +65,37 @@ class AppSmartActionsMixin(AppControllerBase):
         ]
 
     def smart_threshold_fields(self, view: SmartViewDefinition) -> list[FormField]:
-        fields: list[FormField] = []
-        if view.needs_days:
-            fields.append(
+        threshold_fields = (
+            (
+                view.needs_days,
                 (
                     "Stale/inactive days",
                     "days",
                     "90",
                     self.val("smart_days") or DEFAULT_SMART_DAYS,
-                )
-            )
-        if view.needs_disabled_days:
-            fields.append(
+                ),
+            ),
+            (
+                view.needs_disabled_days,
                 (
                     "Disabled cleanup days",
                     "disabled_days",
                     "180",
                     self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS,
-                )
-            )
-        if view.needs_never_logged_days:
-            fields.append(
+                ),
+            ),
+            (
+                view.needs_never_logged_days,
                 (
                     "Never-logged-in days",
                     "never_logged_days",
                     "30",
                     self.val("smart_never_logged_days")
                     or DEFAULT_SMART_NEVER_LOGGED_DAYS,
-                )
-            )
-        return fields
+                ),
+            ),
+        )
+        return [field for enabled, field in threshold_fields if enabled]
 
     def smart_view_fields(self, view: SmartViewDefinition) -> list[FormField]:
         fields = self.smart_threshold_fields(view)
@@ -105,16 +106,22 @@ class AppSmartActionsMixin(AppControllerBase):
 
     def smart_view_default_values(self, view: SmartViewDefinition) -> dict[str, str]:
         values = {"max_rows": self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS}
-        if view.needs_days:
-            values["days"] = self.val("smart_days") or DEFAULT_SMART_DAYS
-        if view.needs_disabled_days:
-            values["disabled_days"] = (
-                self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS
-            )
-        if view.needs_never_logged_days:
-            values["never_logged_days"] = (
-                self.val("smart_never_logged_days") or DEFAULT_SMART_NEVER_LOGGED_DAYS
-            )
+        threshold_defaults = (
+            (view.needs_days, "days", self.val("smart_days") or DEFAULT_SMART_DAYS),
+            (
+                view.needs_disabled_days,
+                "disabled_days",
+                self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS,
+            ),
+            (
+                view.needs_never_logged_days,
+                "never_logged_days",
+                self.val("smart_never_logged_days") or DEFAULT_SMART_NEVER_LOGGED_DAYS,
+            ),
+        )
+        for enabled, field_id, value in threshold_defaults:
+            if enabled:
+                values[field_id] = value
         if view.needs_ldap:
             values.update(
                 {
@@ -376,7 +383,7 @@ class AppSmartActionsMixin(AppControllerBase):
         results: list[SmartViewCheckResult] = []
         for view_id in FULL_HEALTH_LDAP_VIEW_IDS:
             view = SMART_VIEW_BY_ID[view_id]
-            if view_id == "ldap_stale_computers":
+            if view_id == LDAP_STALE_COMPUTERS_VIEW_ID:
                 rows = computer_rows
                 error = computer_error
             else:
