@@ -2,6 +2,24 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.5.0](https://github.com/lauritsk/sambatui/compare/1a70d619e0aec799f7696e26f15b8595d44ea3e5..v0.5.0) - 2026-05-04
+#### Features
+- (**ui**) integrate findings into DNS and LDAP navigation - ([66c1e54](https://github.com/lauritsk/sambatui/commit/66c1e5405eb348fb66f5b649bdb24d9c8f719fda)) - Karl Hans Laurits
+#### Bug Fixes
+- (**ui**) restore smart view shortcut form - ([5778d71](https://github.com/lauritsk/sambatui/commit/5778d718d9debe3c6141d30e8b25d8ddee978613)) - Karl Hans Laurits
+- (**ui**) streamline smart view sidebar - ([ef0b327](https://github.com/lauritsk/sambatui/commit/ef0b3277a5abeddeeb9a1cb61200ca25674fa927)) - Karl Hans Laurits
+- limit LDAP dashboard searches - ([5681a23](https://github.com/lauritsk/sambatui/commit/5681a235ed1b514b5294f99ced42640862972f70)) - Karl Hans Laurits
+- use initial domain for UPN suggestions - ([5ebe37d](https://github.com/lauritsk/sambatui/commit/5ebe37dbbc1f4ef4a76b4a9409f36badc456f399)) - Karl Hans Laurits
+#### Documentation
+- (**ui**) update findings terminology - ([0e99957](https://github.com/lauritsk/sambatui/commit/0e9995706225fcc35cc67a967bd934ce5c3016b0)) - Karl Hans Laurits
+#### Refactoring
+- simplify smart view threshold handling - ([bf9cca1](https://github.com/lauritsk/sambatui/commit/bf9cca1a39296dc680fce0511a32132a84ad5d88)) - Karl Hans Laurits
+- simplify navigation table handling - ([0d72cf7](https://github.com/lauritsk/sambatui/commit/0d72cf7d0ff9f6191102da03bfe1d96c0f27478f)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- update local sambatui install - ([1a70d61](https://github.com/lauritsk/sambatui/commit/1a70d619e0aec799f7696e26f15b8595d44ea3e5)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.4.0](https://github.com/lauritsk/sambatui/compare/d15dedba89b2548b2fb70ed1c1bf7b0889003d85..v0.4.0) - 2026-05-04
 #### Features
 - (**smart-views**) add sidebar run controls - ([80fe557](https://github.com/lauritsk/sambatui/commit/80fe557bb4ed2ca9d47a42132e2489197b92239c)) - Karl Hans Laurits
