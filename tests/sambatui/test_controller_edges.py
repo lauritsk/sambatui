@@ -1377,7 +1377,7 @@ def test_smart_dns_ldap_dashboard_and_directory_edges(
             result = await app.dns_records_with_failures_for_smart_view()
             assert result is not None
             records_by_zone, failures = result
-            assert "example.com" in records_by_zone
+            assert records_by_zone.keys() == {"example.com"}
             assert failures == ["bad.example: query failed"]
             records = await app.dns_records_for_smart_view()
             assert records is not None
