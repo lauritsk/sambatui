@@ -3,14 +3,29 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
+import importlib
 import ssl
-import warnings
 
-from ldap3 import Tls
-from ldap3.utils.conv import escape_filter_chars
-from ldap3.utils.dn import escape_rdn, parse_dn
+
+def _install_pyasn1_ber_legacy_aliases() -> None:
+    with suppress(ImportError, AttributeError):
+        from pyasn1.codec.ber import encoder
+
+        encoder.tagMap = encoder.TAG_MAP
+        encoder.typeMap = encoder.TYPE_MAP
+
+
+_install_pyasn1_ber_legacy_aliases()
+
+_ldap3_module = importlib.import_module("ldap3")
+_ldap3_conv = importlib.import_module("ldap3.utils.conv")
+_ldap3_dn = importlib.import_module("ldap3.utils.dn")
+Tls = cast(Any, _ldap3_module).Tls
+escape_filter_chars = cast(Any, _ldap3_conv).escape_filter_chars
+escape_rdn = cast(Any, _ldap3_dn).escape_rdn
+parse_dn = cast(Any, _ldap3_dn).parse_dn
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
 DirectoryAddKind = Literal["user", "group", "computer", "ou"]
@@ -208,9 +223,10 @@ def parse_ldap_server(server: str, encryption: str = "ldaps") -> LdapServerSetti
     host = parsed.hostname or parsed.path
     if not host:
         raise ValueError("Enter LDAP server/DC.")
-    return LdapServerSettings(
-        host=host, port=parsed.port or default_port, use_ssl=use_ssl
-    )
+    port = parsed.port
+    if port == 0:
+        raise ValueError("LDAP server port must be between 1 and 65535.")
+    return LdapServerSettings(host=host, port=port or default_port, use_ssl=use_ssl)
 
 
 def gssapi_cred_store(krb5_ccache: str) -> dict[str, str] | None:
@@ -253,10 +269,9 @@ class LdapCompatibilityTls(Tls):
 
 
 def _allow_compatibility_tls_versions(context: ssl.SSLContext) -> None:
-    minimum = getattr(ssl.TLSVersion, "TLSv1", None)
+    minimum = getattr(ssl.TLSVersion, "MINIMUM_SUPPORTED", None)
     if minimum is not None:
-        with warnings.catch_warnings(), suppress(ValueError, ssl.SSLError):
-            warnings.simplefilter("ignore", DeprecationWarning)
+        with suppress(ValueError, ssl.SSLError):
             context.minimum_version = minimum
     for option_name in ("OP_NO_TLSv1", "OP_NO_TLSv1_1"):
         option = getattr(ssl, option_name, 0)

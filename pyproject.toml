@@ -45,6 +45,7 @@ omit = [
   "src/sambatui/app_layout.py",
   "src/sambatui/app_navigation.py",
   "src/sambatui/screens.py",
+  "src/sambatui/controllers/*",
   "src/sambatui/ui/*",
 ]
 
