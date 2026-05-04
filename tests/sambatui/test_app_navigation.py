@@ -11,6 +11,7 @@ from sambatui.app import (
 from textual.widgets import Button, DataTable, Input
 
 from sambatui.ldap.client import DirectoryRow
+from sambatui.smart_views import SmartViewRow
 from sambatui.ui.screens import (
     CommandPaletteScreen,
     command_palette_choice_matches,
@@ -193,6 +194,99 @@ def test_ldap_search_fields_accept_default_kind() -> None:
         app = SambatuiApp()
         async with app.run_test():
             assert app.ldap_search_fields("groups")[0][3] == "groups"
+
+    asyncio.run(run_app())
+
+
+def test_smart_view_load_more_preserves_active_smart_view() -> None:
+    class SmartLoadMoreApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.search_limits: list[int | None] = []
+            self.return_no_rows = False
+
+        def save_preferences(self) -> None:
+            return
+
+        async def directory_search_rows(
+            self,
+            client,
+            kind: str,
+            text: str,
+            max_entries: int | None = None,
+        ) -> list[DirectoryRow] | None:
+            self.search_limits.append(max_entries)
+            if self.return_no_rows:
+                return None
+            count = max_entries or 0
+            return [
+                DirectoryRow(
+                    dn=f"CN=User {index},DC=example,DC=com",
+                    kind="user",
+                    name=f"User {index}",
+                    summary="",
+                    attributes={},
+                )
+                for index in range(count)
+            ]
+
+        def ldap_smart_rows(
+            self, view_id, directory_rows, options
+        ) -> list[SmartViewRow]:
+            return [
+                SmartViewRow(
+                    severity="info",
+                    source="ldap",
+                    object=row.name,
+                    finding=f"Finding {index}",
+                    evidence=row.dn,
+                    suggested_action="Review user.",
+                )
+                for index, row in enumerate(directory_rows)
+            ]
+
+    async def run_app() -> None:
+        app = SmartLoadMoreApp()
+        async with app.run_test():
+            app.query_one("#server", Input).value = "dc01.example.com"
+            app.query_one("#user", Input).value = "admin@example.com"
+            app.query_one("#password", Input).value = "secret"
+            app.current_smart_view_id = "ldap_inactive_users"
+            app.current_smart_max_rows = 200
+            app.current_smart_values = {
+                "days": "90",
+                "base_dn": "DC=example,DC=com",
+                "ldap_encryption": "ldaps",
+                "ldap_compatibility": "off",
+                "max_rows": "200",
+            }
+            app.populate_smart_view("LDAP inactive enabled users", [])
+
+            assert await app.load_more_directory()
+
+            assert app.view_mode == "smart"
+            assert app.current_smart_view_id == "ldap_inactive_users"
+            assert app.current_smart_max_rows == 400
+            assert app.current_smart_values["max_rows"] == "400"
+            assert app.query_one("#records", DataTable).row_count == 400
+            assert app.search_limits == [400]
+            assert not app.current_directory_values
+
+            app.return_no_rows = True
+            await app.refresh_current_smart_view()
+            assert app.search_limits == [400, 400]
+
+            app.current_smart_values = {}
+            app.current_smart_view_id = "ldap_inactive_users"
+            await app.refresh_current_smart_view()
+
+            app.current_smart_view_id = ""
+            assert not await app.load_more_directory()
+
+            app.current_smart_values = {"max_rows": "5000"}
+            app.current_smart_view_id = "ldap_inactive_users"
+            app.current_smart_max_rows = 5000
+            assert not await app.load_more_directory()
 
     asyncio.run(run_app())
 

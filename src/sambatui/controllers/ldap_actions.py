@@ -191,6 +191,8 @@ class AppLdapActionsMixin(AppControllerBase):
         )
 
     async def load_more_directory(self) -> bool:
+        if self.view_mode == "smart":
+            return await self.load_more_smart_view()
         if not self.current_directory_values:
             self.set_status("No LDAP search to extend. Press L to search directory.")
             return False
