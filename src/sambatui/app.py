@@ -48,11 +48,13 @@ from .dns import (
     validate_record,
 )
 from .ldap_directory import (
+    LDAP_ADD_KINDS,
     LDAP_EDITABLE_ATTRIBUTES,
     DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
     domain_to_base_dn,
+    ldap_dn_in_scope,
 )
 from .ldap_sidebar import (
     SidebarItem,
@@ -2166,6 +2168,9 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     @work
     async def action_add(self) -> None:
+        if self.view_mode == "directory":
+            await self.add_ldap_entry()
+            return
         record_values = await self.add_record_form_values()
         if record_values is None:
             return
@@ -2273,6 +2278,124 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
         self.notify("LDAP entry updated")
         await self.refresh_current_directory_search()
 
+    def ldap_add_parent_dn(self) -> str:
+        return (
+            self.current_directory_values.get("search_base_dn")
+            or self.current_directory_values.get("base_dn")
+            or self.ldap_base_default()
+        )
+
+    def ldap_add_fields(self) -> list[FormField]:
+        return [
+            ("Object type", "kind", "user | group | computer | ou", "user"),
+            (
+                "Parent DN",
+                "parent_dn",
+                "container/OU DN for new object",
+                self.ldap_add_parent_dn(),
+            ),
+            ("Name", "name", "CN/OU name", ""),
+            (
+                "sAMAccountName",
+                "sAMAccountName",
+                "users/groups/computers; blank uses name",
+                "",
+            ),
+            ("UPN", "userPrincipalName", "optional user@domain", ""),
+            ("Mail", "mail", "optional", ""),
+            ("Description", "description", "optional", ""),
+        ]
+
+    def ldap_add_error(self, values: dict[str, str]) -> str | None:
+        kind = values.get("kind", "").casefold()
+        if kind not in LDAP_ADD_KINDS:
+            return f"Choose LDAP type: {', '.join(LDAP_ADD_KINDS)}."
+        parent_dn = values.get("parent_dn", "").strip()
+        if not parent_dn:
+            return "Enter LDAP parent DN."
+        configured_base_dn = (
+            self.current_directory_values.get("base_dn") or self.ldap_base_default()
+        ).strip()
+        if configured_base_dn and not ldap_dn_in_scope(parent_dn, configured_base_dn):
+            return f"Parent DN must be at or below LDAP base: {configured_base_dn}."
+        search_base_dn = self.current_directory_values.get("search_base_dn", "").strip()
+        if search_base_dn and not ldap_dn_in_scope(parent_dn, search_base_dn):
+            return f"Parent DN must be at or below LDAP search base: {search_base_dn}."
+        if not values.get("name", "").strip():
+            return "Enter LDAP object name."
+        return None
+
+    def ldap_add_attributes(self, values: dict[str, str]) -> dict[str, str]:
+        return {
+            attr: values.get(attr, "").strip()
+            for attr in ("sAMAccountName", "userPrincipalName", "mail", "description")
+        }
+
+    def ldap_add_preview(self, values: dict[str, str]) -> str:
+        attrs = self.ldap_add_attributes(values)
+        lines = [f"{attr}: {value}" for attr, value in attrs.items() if value]
+        return "\n".join(
+            [
+                "Add LDAP entry?",
+                "",
+                f"Type: {values['kind'].casefold()}",
+                f"Parent DN: {values['parent_dn']}",
+                f"Name: {values['name']}",
+                *lines,
+            ]
+        )
+
+    async def add_ldap_entry(self) -> None:
+        values = await self.form(
+            "Add LDAP entry",
+            "Create a user, group, computer, or OU under the chosen parent DN.",
+            self.ldap_add_fields(),
+            "Preview",
+            self.ldap_add_error,
+        )
+        if not values:
+            return
+        if not await self.confirm(self.ldap_add_preview(values), default_confirm=True):
+            self.notify("LDAP add cancelled")
+            return
+        async with self.busy():
+            try:
+                dn = await asyncio.to_thread(
+                    self.ldap_client().add_entry,
+                    values["kind"],
+                    values["parent_dn"],
+                    values["name"],
+                    self.ldap_add_attributes(values),
+                )
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return
+        self.notify(f"LDAP entry added: {dn}")
+        await self.refresh_current_directory_search()
+
+    def ldap_delete_preview(self, row: DirectoryRow) -> str:
+        return (
+            "DELETE selected LDAP entry?\n\n"
+            f"Name: {row.name}\nKind: {row.kind}\nDN: {row.dn}\n\n"
+            "This cannot be undone from this app. Non-empty containers may fail."
+        )
+
+    async def delete_ldap_entry(self) -> None:
+        row = self.selected_directory_row()
+        if row is None:
+            return
+        if not await self.confirm(self.ldap_delete_preview(row)):
+            self.notify("LDAP delete cancelled")
+            return
+        async with self.busy():
+            try:
+                await asyncio.to_thread(self.ldap_client().delete_entry, row.dn)
+            except ValueError as exc:
+                self.report_error(str(exc))
+                return
+        self.notify("LDAP entry deleted")
+        await self.refresh_current_directory_search()
+
     def update_record_fields(self, selected: dict[str, str]) -> list[FormField]:
         return [
             ("Record name", "name", "name, @ for zone root", selected["name"]),
@@ -2362,6 +2485,9 @@ class SambatuiApp(AppLayoutMixin, AppNavigationMixin, App):
 
     @work
     async def action_delete(self) -> None:
+        if self.view_mode == "directory":
+            await self.delete_ldap_entry()
+            return
         records = self.selected_records()
         if not records:
             self.notify(

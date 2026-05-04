@@ -10,8 +10,10 @@ import warnings
 
 from ldap3 import Tls
 from ldap3.utils.conv import escape_filter_chars
+from ldap3.utils.dn import escape_rdn, parse_dn
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
+DirectoryAddKind = Literal["user", "group", "computer", "ou"]
 LdapAuthMode = Literal["password", "kerberos"]
 LDAP_AUTH_MODES = frozenset({"password", "kerberos"})
 LDAP_ENCRYPTION_MODES = frozenset({"off", "ldaps", "starttls"})
@@ -75,6 +77,13 @@ _KIND_LABELS = {
     "computers": "computer",
     "ous": "ou",
     "all": "object",
+}
+LDAP_ADD_KINDS: tuple[DirectoryAddKind, ...] = ("user", "group", "computer", "ou")
+LDAP_ADD_OBJECT_CLASSES: Mapping[str, tuple[str, ...]] = {
+    "user": ("top", "person", "organizationalPerson", "user"),
+    "group": ("top", "group"),
+    "computer": ("top", "person", "organizationalPerson", "user", "computer"),
+    "ou": ("top", "organizationalUnit"),
 }
 
 
@@ -308,6 +317,100 @@ def build_directory_filter(kind: str, text: str = "") -> str:
     return f"(&{base_filter}{text_filter})"
 
 
+def _split_dn_parts(dn: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in dn.strip():
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+        if char == ",":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            continue
+        current.append(char)
+    part = "".join(current).strip()
+    if part:
+        parts.append(part)
+    return tuple(parts)
+
+
+def normalized_ldap_dn_parts(dn: str) -> tuple[tuple[str, str], ...]:
+    """Return comparable DN parts, accepting harmless whitespace around commas."""
+    compact_dn = ",".join(_split_dn_parts(dn))
+    return tuple(
+        (attr.casefold(), value.casefold())
+        for attr, value, _separator in parse_dn(compact_dn, escape=True)
+    )
+
+
+def ldap_dn_in_scope(dn: str, base_dn: str) -> bool:
+    try:
+        dn_parts = normalized_ldap_dn_parts(dn)
+        base_parts = normalized_ldap_dn_parts(base_dn)
+    except Exception:
+        return False
+    return (
+        bool(base_parts)
+        and len(dn_parts) >= len(base_parts)
+        and dn_parts[-len(base_parts) :] == base_parts
+    )
+
+
+def ldap_dn_equal(left: str, right: str) -> bool:
+    try:
+        return normalized_ldap_dn_parts(left) == normalized_ldap_dn_parts(right)
+    except Exception:
+        return False
+
+
+def build_add_entry(
+    kind: str, parent_dn: str, name: str, attributes: Mapping[str, str]
+) -> tuple[str, tuple[str, ...], dict[str, Any]]:
+    normalized_kind = kind.casefold()
+    object_class = LDAP_ADD_OBJECT_CLASSES.get(normalized_kind)
+    if object_class is None:
+        valid = ", ".join(LDAP_ADD_KINDS)
+        raise ValueError(f"LDAP add type must be one of: {valid}.")
+    clean_name = name.strip()
+    clean_parent = parent_dn.strip()
+    if not clean_name:
+        raise ValueError("LDAP add needs a name.")
+    if not clean_parent:
+        raise ValueError("LDAP add needs a parent DN.")
+
+    rdn_attr = "OU" if normalized_kind == "ou" else "CN"
+    dn = f"{rdn_attr}={escape_rdn(clean_name)},{clean_parent}"
+    ldap_attributes: dict[str, Any] = _clean_add_attributes(attributes)
+    if normalized_kind == "ou":
+        ldap_attributes["ou"] = clean_name
+    else:
+        ldap_attributes["cn"] = clean_name
+    if normalized_kind == "user":
+        ldap_attributes.setdefault("sAMAccountName", clean_name)
+    elif normalized_kind == "group":
+        ldap_attributes.setdefault("sAMAccountName", clean_name)
+        ldap_attributes.setdefault("groupType", -2147483646)
+    elif normalized_kind == "computer":
+        account = ldap_attributes.get("sAMAccountName") or clean_name
+        account = str(account).rstrip("$") + "$"
+        ldap_attributes["sAMAccountName"] = account
+        ldap_attributes.setdefault("userAccountControl", 4128)
+    return dn, object_class, ldap_attributes
+
+
+def _clean_add_attributes(attributes: Mapping[str, str]) -> dict[str, str]:
+    return {key: value for key, value in attributes.items() if value != ""}
+
+
 class LdapDirectoryClient:
     def __init__(self, config: LdapSearchConfig) -> None:
         self.config = config
@@ -345,6 +448,35 @@ class LdapDirectoryClient:
             one_level=True,
         )
 
+    def add_entry(
+        self,
+        kind: str,
+        parent_dn: str,
+        name: str,
+        attributes: Mapping[str, str],
+    ) -> str:
+        error = self.validation_error()
+        if error:
+            raise ValueError(error)
+        dn, object_class, ldap_attributes = build_add_entry(
+            kind, parent_dn, name, attributes
+        )
+        self._write(
+            lambda connection: connection.add(dn, object_class, ldap_attributes),
+            "LDAP add failed",
+        )
+        return dn
+
+    def delete_entry(self, dn: str) -> None:
+        if not dn.strip():
+            raise ValueError("LDAP delete needs a DN.")
+        if ldap_dn_equal(dn, self.config.base_dn):
+            raise ValueError("Refusing to delete LDAP base DN.")
+        error = self.validation_error()
+        if error:
+            raise ValueError(error)
+        self._write(lambda connection: connection.delete(dn), "LDAP delete failed")
+
     def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
         error = self.validation_error()
         if error:
@@ -356,27 +488,29 @@ class LdapDirectoryClient:
             return
 
         from ldap3 import MODIFY_DELETE, MODIFY_REPLACE
+
+        ldap_changes = {
+            attr: [(MODIFY_DELETE, [])] if value == "" else [(MODIFY_REPLACE, [value])]
+            for attr, value in changes.items()
+        }
+        self._write(
+            lambda connection: connection.modify(dn, ldap_changes), "LDAP modify failed"
+        )
+
+    def _write(self, operation: Any, failure_message: str) -> None:
         from ldap3.core.exceptions import LDAPException
 
         connection, settings = _new_ldap_connection(self.config, read_only=False)
         try:
             _start_tls_if_needed(connection, self.config, settings)
             _bind_connection(connection)
-            ldap_changes = {
-                attr: [(MODIFY_DELETE, [])]
-                if value == ""
-                else [(MODIFY_REPLACE, [value])]
-                for attr, value in changes.items()
-            }
             try:
-                modified = connection.modify(dn, ldap_changes)
+                ok = operation(connection)
             except LDAPException as exc:
+                raise ValueError(_ldap_exception_message(exc, failure_message)) from exc
+            if not ok:
                 raise ValueError(
-                    _ldap_exception_message(exc, "LDAP modify failed")
-                ) from exc
-            if not modified:
-                raise ValueError(
-                    _ldap_result_message(connection.result, "LDAP modify failed")
+                    _ldap_result_message(connection.result, failure_message)
                 )
         finally:
             with suppress(LDAPException):

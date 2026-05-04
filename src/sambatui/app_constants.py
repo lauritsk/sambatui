@@ -31,7 +31,7 @@ from .smart_view_catalog import SMART_VIEWS
 
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / search",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  u edit attrs  m load more  S smart  / search  r refresh",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  a add  u edit  d delete  m load more  S smart  / search  r refresh",
     "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix DNS finding  / filter  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
@@ -189,7 +189,12 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "Reload the current DNS zone or rerun the active smart view.",
     ),
     ("query_record", "Query DNS records", "q", "Query one DNS name and type."),
-    ("add_record", "Add DNS record", "a", "Create a DNS record in the active zone."),
+    (
+        "add_record",
+        "Add DNS record or LDAP entry",
+        "a",
+        "Create a DNS record or LDAP entry in the active view.",
+    ),
     (
         "update_record",
         "Update selected DNS record or LDAP attributes",
@@ -198,9 +203,9 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
     ),
     (
         "delete_records",
-        "Delete selected DNS records",
+        "Delete selected DNS records or LDAP entry",
         "d",
-        "Delete selected DNS records after confirmation.",
+        "Delete selected DNS records or the selected LDAP entry after confirmation.",
     ),
     (
         "filter_results",
