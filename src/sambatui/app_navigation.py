@@ -52,6 +52,8 @@ class AppNavigationMixin(App):
 
         def clear_record_selection(self) -> None: ...
 
+        def clear_current_smart_view(self) -> None: ...
+
         def refresh_current_view(self) -> None: ...
 
         def refresh_key_hints(self) -> None: ...
@@ -105,8 +107,6 @@ class AppNavigationMixin(App):
             active = self.query_one("#side_tabs", TabbedContent).active or "dns_tab"
         if active == "ldap_tab":
             return "ldap_structure"
-        if active == "smart_tab":
-            return "smart_views"
         return "zones"
 
     def action_focus_zones(self) -> None:
@@ -127,8 +127,15 @@ class AppNavigationMixin(App):
 
     def action_next_table(self) -> None:
         table = self.focused_table()
-        if table and table.id in {"zones", "ldap_structure"}:
-            self.action_focus_records()
+        if table and table.id in {"zones", "dns_findings"}:
+            self.query_one(
+                "#dns_findings" if table.id == "zones" else "#records", DataTable
+            ).focus()
+        elif table and table.id in {"ldap_structure", "ldap_findings"}:
+            self.query_one(
+                "#ldap_findings" if table.id == "ldap_structure" else "#records",
+                DataTable,
+            ).focus()
         else:
             self.action_focus_zones()
 
@@ -328,6 +335,9 @@ class AppNavigationMixin(App):
             self.clear_record_selection()
             self.set_status("Selection cleared")
             return
+        if self.view_mode == "smart":
+            self.clear_current_smart_view()
+            return
         if self.search_text:
             self.set_search_text("")
             self.set_status("Search cleared")
@@ -350,7 +360,12 @@ class AppNavigationMixin(App):
                 case _:
                     self.set_status("No active records view.")
             return
-        if table and table.id in {"zones", "ldap_structure", "smart_views"}:
+        if table and table.id in {
+            "zones",
+            "ldap_structure",
+            "dns_findings",
+            "ldap_findings",
+        }:
             await self.activate_sidebar_selection(table)
 
     async def on_key(self, event: Key) -> None:
@@ -452,7 +467,12 @@ class AppNavigationMixin(App):
             self.update_details_pane()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id not in {"zones", "ldap_structure", "smart_views"}:
+        if event.data_table.id not in {
+            "zones",
+            "ldap_structure",
+            "dns_findings",
+            "ldap_findings",
+        }:
             return
         await self.activate_sidebar_selection(event.data_table)
 

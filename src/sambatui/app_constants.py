@@ -29,11 +29,10 @@ from .ui.screens import CommandPaletteChoice, FormField
 from .smart_view_catalog import SMART_VIEWS
 
 KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S smart  q query  a add  u update  d delete  / search",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  a add  u edit  d delete  m load more  S smart  / search  r refresh",
-    "smart_tab": "Smart: ? help  Ctrl+P palette  w setup  Ctrl+O connection  S pick view  1-8 quick run  f fix finding  / filter  r refresh",
+    "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  1-3 findings  q query  a add  u update  d delete  / search",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  4-7 findings  a add  u edit  d delete  m load more  S picker  / search  r refresh",
 }
-SIDE_TAB_IDS = ("dns_tab", "ldap_tab", "smart_tab")
+SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
 CONNECTION_STATE_INPUTS = (
     (DEFAULT_SERVER, "server", False),
     (DEFAULT_DOMAIN, "domain", False),

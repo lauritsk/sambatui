@@ -6,6 +6,7 @@ from contextlib import suppress
 
 from textual import work
 from textual.coordinate import Coordinate
+from rich.text import Text
 from textual.widgets import (
     DataTable,
     Input,
@@ -28,10 +29,16 @@ from ..ldap.sidebar import (
     ldap_sidebar_items,
 )
 from ..core.models import DnsRow
+from ..core.remediation import bounded_int
 from ..smart_views import (
     SmartViewRow,
+    directory_object_name,
+    ldap_delete_candidate_users,
+    ldap_inactive_users,
+    ldap_stale_computers,
+    ldap_users_without_groups,
 )
-from ..smart_view_catalog import SMART_VIEW_BY_ID, SMART_VIEWS
+from ..smart_view_catalog import FULL_HEALTH_VIEW_ID, SMART_VIEW_BY_ID, SMART_VIEWS
 from ..ui.details import (
     details_empty_text,
     directory_details_text,
@@ -63,6 +70,7 @@ from ..app_constants import (
 )
 from .base import AppControllerBase
 from .helpers import (
+    DNS_SMART_ROW_BUILDERS,
     SMART_DEFAULT_SORTS,
     SMART_SORT_KEYS,
     TableRow,
@@ -150,16 +158,21 @@ class AppViewsMixin(AppControllerBase):
         self.select_zone_cursor(self.val("zone"))
 
     def populate_smart_views_sidebar(self) -> None:
+        self.populate_finding_sidebar("dns_findings", "DNS")
+        self.populate_finding_sidebar("ldap_findings", "LDAP")
+        self.select_smart_view_cursor()
+
+    def populate_finding_sidebar(self, table_id: str, source: str) -> None:
+        views = [view for view in SMART_VIEWS if view.source == source]
         items = [
             SidebarItem(f"Run {view.shortcut}", view.view_id, "smart_view")
-            for view in SMART_VIEWS
+            for view in views
         ]
-        table = self.query_one("#smart_views", DataTable)
-        self.sidebar_items["smart_views"] = items
+        table = self.query_one(f"#{table_id}", DataTable)
+        self.sidebar_items[table_id] = items
         table.clear()
-        for view in SMART_VIEWS:
-            table.add_row(f"Run {view.shortcut}", view.label)
-        self.select_smart_view_cursor()
+        for view in views:
+            table.add_row(f"Run {view.shortcut}", view.label.removeprefix(f"{source} "))
 
     def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
         return ldap_sidebar_items(rows, self.ldap_base_default())
@@ -183,9 +196,11 @@ class AppViewsMixin(AppControllerBase):
             self.select_sidebar_cursor("zones", SidebarItem("", zone, "dns_zone"))
 
     def select_smart_view_cursor(self) -> None:
-        if self.current_smart_view_id:
+        if not self.current_smart_view_id:
+            return
+        for table_id in ("dns_findings", "ldap_findings"):
             self.select_sidebar_cursor(
-                "smart_views", SidebarItem("", self.current_smart_view_id, "smart_view")
+                table_id, SidebarItem("", self.current_smart_view_id, "smart_view")
             )
 
     async def restore_active_zone_records(self) -> bool:
@@ -198,7 +213,18 @@ class AppViewsMixin(AppControllerBase):
 
     def records_title(self) -> str:
         zone = self.val("zone")
-        return f"Records — {zone}" if zone else "Records"
+        suffix = self.active_smart_filter_suffix()
+        base = f"Records — {zone}" if zone else "Records"
+        return f"{base} {suffix}" if suffix else base
+
+    def active_smart_filter_suffix(self) -> str:
+        if not self.current_smart_view_id:
+            return ""
+        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        if view is None or view.view_id == FULL_HEALTH_VIEW_ID:
+            return ""
+        label = view.label.removeprefix(f"{view.source} ")
+        return f"— {view.source} / Findings / {label} (Esc clears)"
 
     def update_records_title(self) -> None:
         self.query_one("#records_title", Label).update(self.records_title())
@@ -273,6 +299,8 @@ class AppViewsMixin(AppControllerBase):
         self.records_columns = columns
 
     def populate_records(self, rows: list[DnsRow]) -> None:
+        self.current_smart_view_id = ""
+        self.current_smart_values = {}
         self.view_mode = "dns"
         self.set_records_columns(DNS_COLUMNS)
         self.update_records_title()
@@ -288,10 +316,16 @@ class AppViewsMixin(AppControllerBase):
             by_dn.setdefault(row.dn.casefold(), row)
         self.ldap_structure_rows = list(by_dn.values())
 
+    def directory_title(self) -> str:
+        suffix = self.active_smart_filter_suffix()
+        return f"Directory (LDAP) {suffix}" if suffix else "Directory (LDAP)"
+
     def populate_directory(self, rows: list[DirectoryRow]) -> None:
+        self.current_smart_view_id = ""
+        self.current_smart_values = {}
         self.view_mode = "directory"
         self.set_records_columns(DIRECTORY_COLUMNS)
-        self.query_one("#records_title", Label).update("Directory (LDAP)")
+        self.query_one("#records_title", Label).update(self.directory_title())
         self.directory_rows = self.sorted_directory(rows)
         self.remember_ldap_structure_rows(rows)
         self.populate_ldap_structure(self.ldap_structure_rows)
@@ -300,11 +334,20 @@ class AppViewsMixin(AppControllerBase):
 
     def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
         self.view_mode = "smart"
+        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        context = (
+            view.source
+            if view is not None and view.source in {"DNS", "LDAP"}
+            else "Findings"
+        )
+        tab_id = "ldap_tab" if context == "LDAP" else "dns_tab"
         with suppress(Exception):
-            self.query_one("#side_tabs", TabbedContent).active = "smart_tab"
+            self.query_one("#side_tabs", TabbedContent).active = tab_id
             self.refresh_key_hints()
         self.set_records_columns(SMART_COLUMNS)
-        self.query_one("#records_title", Label).update(f"Smart View: {title}")
+        self.query_one("#records_title", Label).update(
+            f"{context} / Findings / {title} (Esc clears)"
+        )
         self.smart_view_rows = self.sorted_smart_view(rows)
         self.select_smart_view_cursor()
         self.refresh_smart_view()
@@ -315,18 +358,104 @@ class AppViewsMixin(AppControllerBase):
         self.selection_anchor = None
         self.visual_selecting = False
 
+    def smart_options_for_passive_findings(self) -> tuple[int, int, int]:
+        days = bounded_int(self.val("smart_days"), 90)
+        disabled_days = bounded_int(self.val("smart_disabled_days"), 180)
+        never_logged_days = bounded_int(self.val("smart_never_logged_days"), 30)
+        return days, disabled_days, never_logged_days
+
+    def passive_dns_findings(self, rows: Sequence[DnsRow]) -> list[SmartViewRow]:
+        zone = self.val("zone")
+        if not zone:
+            return []
+        records_by_zone = {zone: rows}
+        findings: list[SmartViewRow] = []
+        for builder in DNS_SMART_ROW_BUILDERS.values():
+            findings.extend(builder(records_by_zone))
+        return findings
+
+    def passive_directory_findings(
+        self, rows: Sequence[DirectoryRow]
+    ) -> list[SmartViewRow]:
+        days, disabled_days, never_logged_days = (
+            self.smart_options_for_passive_findings()
+        )
+        return [
+            *ldap_inactive_users(rows, days=days),
+            *ldap_delete_candidate_users(
+                rows,
+                disabled_days=disabled_days,
+                never_logged_days=never_logged_days,
+            ),
+            *ldap_stale_computers(rows, days=days),
+            *ldap_users_without_groups(rows),
+        ]
+
+    def highest_severity(self, severities: Iterable[str]) -> str:
+        order = {"critical": 0, "error": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        return min(
+            severities,
+            key=lambda severity: order.get(severity.casefold(), 99),
+            default="",
+        )
+
+    def dns_row_severity(self, row: DnsRow, findings: Sequence[SmartViewRow]) -> str:
+        zone_prefix = f"{self.val('zone')}:"
+        exact = f"{zone_prefix}{row.name}".casefold()
+        fqdn = f"{row.name}.{self.val('zone')}".casefold()
+        return self.highest_severity(
+            finding.severity
+            for finding in findings
+            if finding.object.casefold() == exact or fqdn in finding.object.casefold()
+        )
+
+    def directory_row_severity(
+        self, row: DirectoryRow, findings: Sequence[SmartViewRow]
+    ) -> str:
+        object_names = {
+            row.name.casefold(),
+            row.dn.casefold(),
+            directory_object_name(row).casefold(),
+        }
+        return self.highest_severity(
+            finding.severity
+            for finding in findings
+            if finding.object.casefold() in object_names
+            or finding.fix_dn.casefold() == row.dn.casefold()
+        )
+
+    def severity_marker(self, severity: str, *, quiet: bool = False) -> Text | str:
+        if not severity:
+            return ""
+        styles = {
+            "critical": "red",
+            "error": "red",
+            "high": "orange3",
+            "medium": "yellow3",
+            "low": "steel_blue",
+            "info": "grey54",
+        }
+        marker = "•" if quiet else "▌"
+        return Text(marker, style=styles.get(severity.casefold(), "grey54"))
+
+    def smart_row_marker(self, row: SmartViewRow) -> Text | str:
+        return self.severity_marker(row.severity, quiet=True)
+
     def render_result_rows(
         self,
         rows: list[TableRow],
         view_mode: str,
         row_values: Callable[[TableRow], RowValues],
+        marker: Callable[[TableRow], Text | str] | None = None,
     ) -> None:
         self.reset_render_state()
         table = self.query_one("#records", DataTable)
         table.clear()
         if rows:
             for row in rows:
-                table.add_row("", *row_values(row))
+                table.add_row(
+                    marker(row) if marker is not None else "", *row_values(row)
+                )
         else:
             title, hint = self.empty_state_text(view_mode)
             table.add_row("", title, "-", hint, "", "", "")
@@ -334,13 +463,29 @@ class AppViewsMixin(AppControllerBase):
         self.update_details_pane()
 
     def render_records(self, rows: list[DnsRow]) -> None:
-        self.render_result_rows(rows, "dns", dns_result_values)
+        findings = self.passive_dns_findings(rows)
+        self.render_result_rows(
+            rows,
+            "dns",
+            dns_result_values,
+            lambda row: self.severity_marker(self.dns_row_severity(row, findings)),
+        )
 
     def render_directory(self, rows: list[DirectoryRow]) -> None:
-        self.render_result_rows(rows, "directory", directory_result_values)
+        findings = self.passive_directory_findings(rows)
+        self.render_result_rows(
+            rows,
+            "directory",
+            directory_result_values,
+            lambda row: self.severity_marker(
+                self.directory_row_severity(row, findings)
+            ),
+        )
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
-        self.render_result_rows(rows, "smart", smart_result_values)
+        self.render_result_rows(
+            rows, "smart", smart_result_values, self.smart_row_marker
+        )
 
     def details_empty_text(self) -> str:
         return details_empty_text(self.empty_state_text(self.view_mode))
@@ -448,6 +593,25 @@ class AppViewsMixin(AppControllerBase):
         self.set_visible_status(
             len(rows), len(self.smart_view_rows), "smart-view findings", "smart"
         )
+
+    def clear_current_smart_view(self) -> None:
+        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        self.current_smart_view_id = ""
+        self.current_smart_values = {}
+        self.smart_view_rows = []
+        self.current_smart_sort_field = ""
+        self.current_smart_sort_reverse = False
+        if view is not None and view.source == "LDAP":
+            self.view_mode = "directory"
+            self.set_records_columns(DIRECTORY_COLUMNS)
+            self.query_one("#records_title", Label).update(self.directory_title())
+            self.refresh_directory_view()
+        else:
+            self.view_mode = "dns"
+            self.set_records_columns(DNS_COLUMNS)
+            self.update_records_title()
+            self.refresh_record_view()
+        self.set_status("Finding filter cleared")
 
     def refresh_current_view(self) -> None:
         match self.view_mode:

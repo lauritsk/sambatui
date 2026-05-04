@@ -11,8 +11,8 @@ from .ui.tables import DNS_COLUMNS
 
 
 class AppLayoutMixin(App):
-    def smart_view_hint_text(self) -> str:
-        return "Select a smart view below, or press S for picker. Number shortcuts still work."
+    def findings_hint_text(self) -> str:
+        return "Saved hygiene filters. Enter runs; Esc clears active finding."
 
     def keys_hint_for_tab(self, tab_id: str | None) -> str:
         return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
@@ -40,6 +40,13 @@ class AppLayoutMixin(App):
                 zones = DataTable(id="zones", cursor_type="row")
                 zones.add_columns("DNS zones")
                 yield zones
+                yield Static("Findings", classes="section-title")
+                yield Static(
+                    self.findings_hint_text(), id="dns_findings_hint", classes="hint"
+                )
+                dns_findings = DataTable(id="dns_findings", cursor_type="row")
+                dns_findings.add_columns("Run", "DNS finding")
+                yield dns_findings
 
     def compose_ldap_tab(self) -> ComposeResult:
         with TabPane("LDAP", id="ldap_tab"):
@@ -48,19 +55,13 @@ class AppLayoutMixin(App):
                 structure = DataTable(id="ldap_structure", cursor_type="row")
                 structure.add_columns("LDAP structure")
                 yield structure
-
-    def compose_smart_tab(self) -> ComposeResult:
-        with TabPane("Smart", id="smart_tab"):
-            with Vertical(id="smart_panel"):
-                yield Static("Smart views", classes="section-title")
+                yield Static("Findings", classes="section-title")
                 yield Static(
-                    self.smart_view_hint_text(),
-                    id="smart_hint",
-                    classes="hint",
+                    self.findings_hint_text(), id="ldap_findings_hint", classes="hint"
                 )
-                smart_views = DataTable(id="smart_views", cursor_type="row")
-                smart_views.add_columns("Run", "Smart view")
-                yield smart_views
+                ldap_findings = DataTable(id="ldap_findings", cursor_type="row")
+                ldap_findings.add_columns("Run", "LDAP finding")
+                yield ldap_findings
 
     def compose_sidebar(self) -> ComposeResult:
         with Vertical(id="sidebar", classes="panel"):
@@ -68,7 +69,6 @@ class AppLayoutMixin(App):
             with TabbedContent(id="side_tabs"):
                 yield from self.compose_dns_tab()
                 yield from self.compose_ldap_tab()
-                yield from self.compose_smart_tab()
             yield Static("Ready", id="status")
 
     def compose_results_panel(self) -> ComposeResult:
