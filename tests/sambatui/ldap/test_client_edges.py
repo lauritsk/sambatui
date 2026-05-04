@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from ldap3.core.exceptions import LDAPException
 
 from sambatui.ldap import client as ldap_module
@@ -74,21 +76,32 @@ def test_ldap_tls_wrap_socket_and_helpers(monkeypatch: pytest.MonkeyPatch) -> No
     assert _ldap_result_message(None, "fallback") == "fallback"
 
 
-@pytest.mark.parametrize(
-    ("kind", "attrs", "expected"),
-    [
-        ("bad", {}, "LDAP add type must be one of"),
-        ("user", {}, "LDAP add needs a name"),
-        ("user", {}, "LDAP add needs a parent DN"),
-    ],
+@given(
+    st.text(min_size=1).filter(
+        lambda kind: kind.casefold() not in {"user", "group", "computer", "ou"}
+    )
 )
-def test_build_add_entry_rejects_bad_inputs(
-    kind: str, attrs: dict[str, str], expected: str
-) -> None:
-    parent = "DC=example,DC=com" if expected != "LDAP add needs a parent DN" else ""
-    name = "Alice" if expected == "LDAP add needs a parent DN" else ""
-    with pytest.raises(ValueError, match=expected):
-        build_add_entry(kind, parent, name, attrs)
+def test_build_add_entry_rejects_generated_bad_kinds(kind: str) -> None:
+    with pytest.raises(ValueError, match="LDAP add type must be one of"):
+        build_add_entry(kind, "DC=example,DC=com", "Alice", {})
+
+
+@given(
+    st.sampled_from(["user", "group", "computer", "ou"]),
+    st.text(alphabet=" \t\n", max_size=20),
+)
+def test_build_add_entry_rejects_generated_blank_names(kind: str, blank: str) -> None:
+    with pytest.raises(ValueError, match="LDAP add needs a name"):
+        build_add_entry(kind, "DC=example,DC=com", blank, {})
+
+
+@given(
+    st.sampled_from(["user", "group", "computer", "ou"]),
+    st.text(alphabet=" \t\n", max_size=20),
+)
+def test_build_add_entry_rejects_generated_blank_parents(kind: str, blank: str) -> None:
+    with pytest.raises(ValueError, match="LDAP add needs a parent DN"):
+        build_add_entry(kind, blank, "Alice", {})
 
 
 def test_build_add_entry_group_and_computer_defaults() -> None:

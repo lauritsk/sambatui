@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from ldap3 import NTLM, SIMPLE
 from ldap3.core.exceptions import LDAPPackageUnavailableError
 
@@ -205,6 +207,43 @@ def test_dns_parsing_and_validation_edges() -> None:
     assert validate_record("srv", "SRV", "0 100 ldap.example.com.") is not None
     assert validate_record("@", "MX", "mail.example.com. 10") is None
     assert validate_record("@", "MX", "mail.example.com.") is not None
+
+
+@given(
+    st.lists(
+        st.text(
+            alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
+            | st.sampled_from("-_"),
+            min_size=1,
+            max_size=20,
+        ).filter(lambda label: label.strip() == label and label.isascii()),
+        min_size=1,
+        max_size=5,
+    )
+)
+def test_domain_to_base_dn_preserves_generated_labels(labels: list[str]) -> None:
+    domain = ".".join(labels)
+
+    assert domain_to_base_dn(f" {domain}. ") == ",".join(
+        f"DC={label}" for label in labels
+    )
+
+
+@given(
+    st.one_of(
+        st.text(alphabet=" \t\n", max_size=10),
+        st.tuples(
+            st.text(
+                alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=10
+            ),
+            st.text(
+                alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=10
+            ),
+        ).map(lambda parts: f"{parts[0]}..{parts[1]}"),
+    )
+)
+def test_domain_to_base_dn_rejects_blank_or_empty_labels(value: str) -> None:
+    assert domain_to_base_dn(value) == ""
 
 
 def test_ldap_config_validation_and_helpers() -> None:
