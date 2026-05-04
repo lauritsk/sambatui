@@ -456,3 +456,70 @@ def test_ldap_kind_header_sorts_directory_rows() -> None:
             )
 
     asyncio.run(run_app())
+
+
+def test_smart_view_header_and_key_sort_rows() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.current_smart_view_id = "ldap_inactive_users"
+            app.populate_smart_view(
+                "LDAP inactive enabled users",
+                [
+                    SmartViewRow(
+                        severity="medium",
+                        object="zara",
+                        finding="Inactive user",
+                        evidence="lastLogonTimestamp 300 days ago",
+                        suggested_action="Disable user.",
+                        source="ldap",
+                    ),
+                    SmartViewRow(
+                        severity="high",
+                        object="amy",
+                        finding="Inactive user",
+                        evidence="lastLogonTimestamp 200 days ago",
+                        suggested_action="Disable user.",
+                        source="ldap",
+                    ),
+                    SmartViewRow(
+                        severity="low",
+                        object="mike",
+                        finding="Inactive user",
+                        evidence="lastLogonTimestamp 100 days ago",
+                        suggested_action="Disable user.",
+                        source="ldap",
+                    ),
+                ],
+            )
+            records = app.query_one("#records", DataTable)
+            assert [str(records.get_row_at(index)[2]) for index in range(3)] == [
+                "zara",
+                "amy",
+                "mike",
+            ]
+
+            column = records.ordered_columns[2]
+            app.on_data_table_header_selected(
+                DataTable.HeaderSelected(records, column.key, 2, Text("Object"))
+            )
+            assert [str(records.get_row_at(index)[2]) for index in range(3)] == [
+                "amy",
+                "mike",
+                "zara",
+            ]
+            assert str(app.query_one("#status", Static).render()).startswith(
+                "Sorted smart view by object"
+            )
+
+            app.action_sort_value()
+            assert [str(records.get_row_at(index)[4]) for index in range(3)] == [
+                "lastLogonTimestamp 100 days ago",
+                "lastLogonTimestamp 200 days ago",
+                "lastLogonTimestamp 300 days ago",
+            ]
+            assert str(app.query_one("#status", Static).render()).startswith(
+                "Sorted smart view by evidence"
+            )
+
+    asyncio.run(run_app())
