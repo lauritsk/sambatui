@@ -142,6 +142,21 @@ class LdapDirectoryClient:
         invalid = sorted(set(changes) - ALL_LDAP_EDITABLE_ATTRIBUTES)
         if invalid:
             raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
+        self._modify_attributes(dn, changes, "LDAP modify failed")
+
+    def disable_account(self, dn: str, user_account_control: int) -> None:
+        if not dn.strip():
+            raise ValueError("LDAP disable needs a DN.")
+        self._raise_validation_error()
+        self._modify_attributes(
+            dn,
+            {"userAccountControl": str(user_account_control | 0x0002)},
+            "LDAP disable failed",
+        )
+
+    def _modify_attributes(
+        self, dn: str, changes: Mapping[str, str], failure_message: str
+    ) -> None:
         if not changes:
             return
 
@@ -152,7 +167,7 @@ class LdapDirectoryClient:
             for attr, value in changes.items()
         }
         self._write(
-            lambda connection: connection.modify(dn, ldap_changes), "LDAP modify failed"
+            lambda connection: connection.modify(dn, ldap_changes), failure_message
         )
 
     def _write(

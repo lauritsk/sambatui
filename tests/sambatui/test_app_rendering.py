@@ -1,4 +1,5 @@
 import asyncio
+from typing import cast
 
 from rich.text import Text
 
@@ -8,7 +9,7 @@ from sambatui.app import (
 )
 from textual.widgets import DataTable, Input, Static
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
 from sambatui.smart_view_catalog import SmartViewOptions
 from sambatui.smart_views import SmartViewRow
 
@@ -227,6 +228,105 @@ def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
                 "2.0.192.in-addr.arpa",
                 ["@", "ALL"],
             ) in app.commands
+            assert app.smart_view_rows == []
+
+    asyncio.run(run_app())
+
+
+def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
+    class FakeLdapClient:
+        def __init__(self, fixes: list[tuple[str, str, str]]) -> None:
+            self.fixes = fixes
+
+        def disable_account(self, dn: str, user_account_control: int) -> None:
+            self.fixes.append(("disable", dn, str(user_account_control)))
+
+    class LdapFixApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.ldap_fixes: list[tuple[str, str, str]] = []
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            assert "DISABLE LDAP account" in message
+            assert "CN=old,DC=example,DC=com" in message
+            assert "userAccountControl -> 514" in message
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
+            return cast(LdapDirectoryClient, FakeLdapClient(self.ldap_fixes))
+
+        async def refresh_current_smart_view(self) -> None:
+            self.smart_view_rows = []
+
+    async def run_app() -> None:
+        app = LdapFixApp()
+        async with app.run_test():
+            row = SmartViewRow(
+                severity="medium",
+                object="old",
+                finding="Enabled user inactive",
+                evidence="lastLogonTimestamp old",
+                suggested_action="Review owner; disable first.",
+                source="ldap",
+                fix_action="ldap_disable_account",
+                fix_label="disable old",
+                fix_value="514",
+                fix_dn="CN=old,DC=example,DC=com",
+                fix_attribute="userAccountControl",
+            )
+            app.populate_smart_view("LDAP inactive enabled users", [row])
+
+            await app.apply_smart_fix(row)
+
+            assert app.ldap_fixes == [("disable", "CN=old,DC=example,DC=com", "514")]
+            assert app.smart_view_rows == []
+
+    asyncio.run(run_app())
+
+
+def test_smart_fix_deletes_ldap_entry_and_refreshes_findings() -> None:
+    class FakeLdapClient:
+        def __init__(self, fixes: list[tuple[str, str]]) -> None:
+            self.fixes = fixes
+
+        def delete_entry(self, dn: str) -> None:
+            self.fixes.append(("delete", dn))
+
+    class LdapDeleteFixApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.ldap_fixes: list[tuple[str, str]] = []
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            assert "DELETE LDAP entry" in message
+            assert "CN=disabled,DC=example,DC=com" in message
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
+            return cast(LdapDirectoryClient, FakeLdapClient(self.ldap_fixes))
+
+        async def refresh_current_smart_view(self) -> None:
+            self.smart_view_rows = []
+
+    async def run_app() -> None:
+        app = LdapDeleteFixApp()
+        async with app.run_test():
+            row = SmartViewRow(
+                severity="medium",
+                object="disabled",
+                finding="Disabled user cleanup candidate",
+                evidence="disabled; changed 200 days ago",
+                suggested_action="Verify retention/legal hold.",
+                source="ldap",
+                fix_action="ldap_delete_entry",
+                fix_label="delete disabled",
+                fix_dn="CN=disabled,DC=example,DC=com",
+            )
+            app.populate_smart_view("LDAP delete candidates", [row])
+
+            await app.apply_smart_fix(row)
+
+            assert app.ldap_fixes == [("delete", "CN=disabled,DC=example,DC=com")]
             assert app.smart_view_rows == []
 
     asyncio.run(run_app())

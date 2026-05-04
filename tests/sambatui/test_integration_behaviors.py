@@ -266,6 +266,39 @@ def test_ldap_filter_kwargs_and_entry_mapping() -> None:
     assert directory_summary({"memberOf": ("a", "b")}) == "memberOf=2"
 
 
+def test_ldap_disable_account_sets_account_disable_bit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, str], str]] = []
+
+    def fake_modify(
+        self: LdapDirectoryClient,
+        dn: str,
+        changes: dict[str, str],
+        failure_message: str,
+    ) -> None:
+        calls.append((dn, changes, failure_message))
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            "dc", user="alice@example.com", password="pw", base_dn="DC=example,DC=com"
+        )
+    )
+    monkeypatch.setattr(LdapDirectoryClient, "_modify_attributes", fake_modify)
+
+    with pytest.raises(ValueError, match="LDAP disable needs a DN"):
+        client.disable_account("", 512)
+    client.disable_account("CN=old,DC=example,DC=com", 512)
+
+    assert calls == [
+        (
+            "CN=old,DC=example,DC=com",
+            {"userAccountControl": str(512 | 0x0002)},
+            "LDAP disable failed",
+        )
+    ]
+
+
 def test_ldap_search_success_starttls_and_package_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

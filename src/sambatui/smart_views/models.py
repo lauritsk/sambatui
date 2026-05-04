@@ -18,6 +18,8 @@ class SmartViewRow:
     fix_name: str = ""
     fix_rtype: str = ""
     fix_value: str = ""
+    fix_dn: str = ""
+    fix_attribute: str = ""
 
 
 @dataclass(frozen=True)

@@ -106,7 +106,7 @@ def smart_details_text(row: SmartViewRow) -> str:
     if row.fix_action:
         remediation = f"Press f to {row.fix_label}"
     elif row.source == "ldap":
-        remediation = "LDAP findings are read-only/export-only"
+        remediation = "No guided LDAP fix is available"
     return detail_text(
         "Smart-view details",
         (
