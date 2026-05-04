@@ -2,6 +2,30 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.4.0](https://github.com/lauritsk/sambatui/compare/d15dedba89b2548b2fb70ed1c1bf7b0889003d85..v0.4.0) - 2026-05-04
+#### Features
+- (**smart-views**) add sidebar run controls - ([80fe557](https://github.com/lauritsk/sambatui/commit/80fe557bb4ed2ca9d47a42132e2489197b92239c)) - Karl Hans Laurits
+- (**smart-views**) add logical default sorting - ([248ab80](https://github.com/lauritsk/sambatui/commit/248ab808db79f5b0c892d7a343be725823d0c664)) - Karl Hans Laurits
+- add guided LDAP smart fixes - ([5142175](https://github.com/lauritsk/sambatui/commit/51421752def278fe0c1c3d33a65cece353ec91fb)) - Karl Hans Laurits
+#### Bug Fixes
+- (**smart-views**) launch sidebar forms from worker - ([493054f](https://github.com/lauritsk/sambatui/commit/493054f1930c341f182cc7e3d448cd44d39952c4)) - Karl Hans Laurits
+- (**smart-views**) preserve context when loading more - ([ce08d61](https://github.com/lauritsk/sambatui/commit/ce08d612018cf5a6d9a1eec9c21a56a18b5efa51)) - Karl Hans Laurits
+#### Documentation
+- require type-safe code and hypothesis tests - ([9a99c03](https://github.com/lauritsk/sambatui/commit/9a99c032a51c9cc933575eb7cfe674fb24dbfe9e)) - Karl Hans Laurits
+#### Tests
+- add hypothesis coverage for pure edge cases - ([ceac6f8](https://github.com/lauritsk/sambatui/commit/ceac6f813c079917f8ebe3b7783add9c361c0ef7)) - Karl Hans Laurits
+- cover smart view sorting controls - ([395e0cf](https://github.com/lauritsk/sambatui/commit/395e0cffd8279dde305d2cbfee1dceb20143468f)) - Karl Hans Laurits
+#### Refactoring
+- simplify smart view helpers - ([3555db9](https://github.com/lauritsk/sambatui/commit/3555db9231c6efd05d0c0008480e8372a12eeb88)) - Karl Hans Laurits
+- simplify record selection navigation - ([8df9dba](https://github.com/lauritsk/sambatui/commit/8df9dbaa176e5e422365a37688bcc52194dad6fe)) - Karl Hans Laurits
+- simplify helper logic - ([5bf2cbc](https://github.com/lauritsk/sambatui/commit/5bf2cbcaff8ac866e9f23e2c7e80a90d7bfda1c0)) - Karl Hans Laurits
+- make records view routing explicit - ([224145d](https://github.com/lauritsk/sambatui/commit/224145d02e8dda718b18e09bedb71323bca048a6)) - Karl Hans Laurits
+- simplify smart view row loading - ([78ef763](https://github.com/lauritsk/sambatui/commit/78ef763681c983d4f76143f5de01fef97aff91bf)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- update local sambatui install - ([d15dedb](https://github.com/lauritsk/sambatui/commit/d15dedba89b2548b2fb70ed1c1bf7b0889003d85)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.3.1](https://github.com/lauritsk/sambatui/compare/4e8345b9a4d3ab516685ffb6dfaa159e1e7930b5..v0.3.1) - 2026-05-04
 #### Bug Fixes
 - harden typing and private file writes - ([05270c6](https://github.com/lauritsk/sambatui/commit/05270c66a319c2c5246b9c554447db4d1fa5abf8)) - Karl Hans Laurits
