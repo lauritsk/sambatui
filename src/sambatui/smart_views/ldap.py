@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-
 from ..ldap.client import DirectoryRow, first_attr
 from .models import SmartViewRow
 
@@ -211,11 +210,7 @@ def ldap_disable_fix(row: DirectoryRow) -> dict[str, str]:
 
 
 def ldap_user_account_control(row: DirectoryRow) -> int | None:
-    value = first_attr(row.attributes, "userAccountControl")
-    try:
-        return int(value)
-    except ValueError:
-        return None
+    return parse_int(first_attr(row.attributes, "userAccountControl"))
 
 
 def directory_object_name(row: DirectoryRow) -> str:
@@ -226,11 +221,17 @@ def directory_object_name(row: DirectoryRow) -> str:
 
 
 def ldap_is_disabled(row: DirectoryRow) -> bool:
-    value = first_attr(row.attributes, "userAccountControl")
-    try:
-        return bool(int(value) & ACCOUNTDISABLE)
-    except ValueError:
+    user_account_control = ldap_user_account_control(row)
+    if user_account_control is None:
         return False
+    return bool(user_account_control & ACCOUNTDISABLE)
+
+
+def parse_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def first_ad_datetime(row: DirectoryRow, *names: str) -> datetime | None:
