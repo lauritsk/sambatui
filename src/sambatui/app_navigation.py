@@ -89,6 +89,8 @@ class AppNavigationMixin(App):
             active = self.query_one("#side_tabs", TabbedContent).active or "dns_tab"
         if active == "ldap_tab":
             return "ldap_structure"
+        if active == "smart_tab":
+            return "smart_views"
         return "zones"
 
     def action_focus_zones(self) -> None:
@@ -125,10 +127,7 @@ class AppNavigationMixin(App):
         current_index = SIDE_TAB_IDS.index(current)
         tabs.active = SIDE_TAB_IDS[(current_index + delta) % len(SIDE_TAB_IDS)]
         self.refresh_key_hints()
-        if tabs.active in {"dns_tab", "ldap_tab"}:
-            self.action_focus_zones()
-        else:
-            self.action_focus_records()
+        self.action_focus_zones()
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -317,7 +316,7 @@ class AppNavigationMixin(App):
             else:
                 self.action_toggle_select()
             return
-        if table and table.id in {"zones", "ldap_structure"}:
+        if table and table.id in {"zones", "ldap_structure", "smart_views"}:
             await self.activate_sidebar_selection(table)
 
     async def on_key(self, event: Key) -> None:
@@ -419,7 +418,7 @@ class AppNavigationMixin(App):
             self.update_details_pane()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id not in {"zones", "ldap_structure"}:
+        if event.data_table.id not in {"zones", "ldap_structure", "smart_views"}:
             return
         await self.activate_sidebar_selection(event.data_table)
 

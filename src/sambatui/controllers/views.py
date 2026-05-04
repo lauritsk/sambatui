@@ -31,6 +31,7 @@ from ..core.models import DnsRow
 from ..smart_views import (
     SmartViewRow,
 )
+from ..smart_view_catalog import SMART_VIEW_BY_ID, SMART_VIEWS
 from ..ui.details import (
     details_empty_text,
     directory_details_text,
@@ -148,6 +149,18 @@ class AppViewsMixin(AppControllerBase):
         self.populate_sidebar_table("zones", items)
         self.select_zone_cursor(self.val("zone"))
 
+    def populate_smart_views_sidebar(self) -> None:
+        items = [
+            SidebarItem(f"Run {view.shortcut}", view.view_id, "smart_view")
+            for view in SMART_VIEWS
+        ]
+        table = self.query_one("#smart_views", DataTable)
+        self.sidebar_items["smart_views"] = items
+        table.clear()
+        for view in SMART_VIEWS:
+            table.add_row(f"Run {view.shortcut}", view.label)
+        self.select_smart_view_cursor()
+
     def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
         return ldap_sidebar_items(rows, self.ldap_base_default())
 
@@ -168,6 +181,12 @@ class AppViewsMixin(AppControllerBase):
     def select_zone_cursor(self, zone: str) -> None:
         if zone:
             self.select_sidebar_cursor("zones", SidebarItem("", zone, "dns_zone"))
+
+    def select_smart_view_cursor(self) -> None:
+        if self.current_smart_view_id:
+            self.select_sidebar_cursor(
+                "smart_views", SidebarItem("", self.current_smart_view_id, "smart_view")
+            )
 
     async def restore_active_zone_records(self) -> bool:
         zone = self.val("zone")
@@ -235,6 +254,9 @@ class AppViewsMixin(AppControllerBase):
             return await self.activate_ldap_sidebar("all")
         if item.action == "ldap_dn":
             return await self.activate_ldap_sidebar("all", search_base_dn=item.value)
+        if item.action == "smart_view" and item.value in SMART_VIEW_BY_ID:
+            await self.run_smart_view(item.value)
+            return True
         return False
 
     async def activate_sidebar_selection(self, table: DataTable) -> bool:
@@ -284,6 +306,7 @@ class AppViewsMixin(AppControllerBase):
         self.set_records_columns(SMART_COLUMNS)
         self.query_one("#records_title", Label).update(f"Smart View: {title}")
         self.smart_view_rows = self.sorted_smart_view(rows)
+        self.select_smart_view_cursor()
         self.refresh_smart_view()
         self.set_status(f"Loaded {len(rows)} smart-view findings")
 
