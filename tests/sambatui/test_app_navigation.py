@@ -1,5 +1,7 @@
 import asyncio
 
+from hypothesis import given
+from hypothesis import strategies as st
 
 from sambatui.app import (
     SambatuiApp,
@@ -15,20 +17,34 @@ from sambatui.ui.screens import (
 )
 
 
-def test_key_hints_change_by_side_tab() -> None:
+@given(
+    st.sampled_from(
+        [("dns_tab", "DNS:"), ("ldap_tab", "LDAP:"), ("smart_tab", "Smart:")]
+    )
+)
+def test_key_hints_change_by_side_tab(case: tuple[str, str]) -> None:
+    tab, prefix = case
     app = SambatuiApp()
 
-    assert app.keys_hint_for_tab("dns_tab").startswith("DNS:")
-    assert app.keys_hint_for_tab("ldap_tab").startswith("LDAP:")
-    assert app.keys_hint_for_tab("smart_tab").startswith("Smart:")
+    assert app.keys_hint_for_tab(tab).startswith(prefix)
 
 
-def test_actionable_error_adds_concise_remediation() -> None:
-    assert actionable_error("LDAP bind failed: invalidCredentials").endswith(
-        "Action: check credentials, UPN username format, encryption, or Kerberos ticket."
+@given(
+    st.sampled_from(
+        [
+            (
+                "LDAP bind failed: invalidCredentials",
+                "Action: check credentials, UPN username format, encryption, or Kerberos ticket.",
+            ),
+            ("Kerberos ticket expired", "run kinit"),
+            ("", ""),
+        ]
     )
-    assert "run kinit" in actionable_error("Kerberos ticket expired")
-    assert actionable_error("") == ""
+)
+def test_actionable_error_adds_concise_remediation(case: tuple[str, str]) -> None:
+    message, expected = case
+
+    assert expected in actionable_error(message)
 
 
 def test_report_error_disables_markup_for_raw_command_output() -> None:
@@ -67,7 +83,15 @@ def test_report_error_disables_markup_for_raw_command_output() -> None:
     assert app.notifications[0]["markup"] is False
 
 
-def test_command_palette_search_matches_label_shortcut_and_description() -> None:
+@given(
+    st.sampled_from(
+        [("ldap users", True), ("prefilled", True), ("dns zone", False), ("", True)]
+    )
+)
+def test_command_palette_search_matches_label_shortcut_and_description(
+    case: tuple[str, bool],
+) -> None:
+    query, expected = case
     choice = (
         "ldap_search_users",
         "Search LDAP users",
@@ -75,12 +99,12 @@ def test_command_palette_search_matches_label_shortcut_and_description() -> None
         "Open LDAP search prefilled for users.",
     )
 
-    assert command_palette_choice_matches(choice, "ldap users")
-    assert command_palette_choice_matches(choice, "prefilled")
-    assert not command_palette_choice_matches(choice, "dns zone")
+    assert command_palette_choice_matches(choice, query) is expected
 
 
-def test_command_palette_filters_choices() -> None:
+@given(st.sampled_from([("dns", ["add_record"]), ("search", ["ldap_search"])]))
+def test_command_palette_filters_choices(case: tuple[str, list[str]]) -> None:
+    query, expected_ids = case
     screen = CommandPaletteScreen(
         [
             ("add_record", "Add DNS record", "a", "Create a DNS record."),
@@ -88,10 +112,7 @@ def test_command_palette_filters_choices() -> None:
         ]
     )
 
-    assert [choice[0] for choice in screen.matching_choices("dns")] == ["add_record"]
-    assert [choice[0] for choice in screen.matching_choices("search")] == [
-        "ldap_search"
-    ]
+    assert [choice[0] for choice in screen.matching_choices(query)] == expected_ids
 
 
 def test_sidebar_uses_current_list_widgets() -> None:

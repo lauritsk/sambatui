@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 
+import dns.reversename
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -37,6 +38,37 @@ def test_ptr_target_for_valid_names_is_well_formed(name: str, zone: str) -> None
     assert target == target.rstrip(".")
     assert ".." not in target
     assert valid_dns_name(target)
+
+
+@given(DNS_NAME)
+def test_generated_dns_names_are_valid_relative_or_absolute(name: str) -> None:
+    assert valid_dns_name(name)
+    assert valid_dns_name(f"{name}.")
+
+
+@given(
+    DNS_NAME,
+    st.sampled_from(["A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS", "BAD"]),
+    st.text(max_size=80),
+)
+def test_validate_record_never_leaks_generated_input_exceptions(
+    name: str, rtype: str, value: str
+) -> None:
+    error = validate_record(name, rtype, value, require_value=False)
+
+    assert error is None or isinstance(error, str)
+
+
+@given(st.ip_addresses(v=4))
+def test_reverse_record_for_ipv4_matches_dns_reversename(
+    address: ipaddress.IPv4Address,
+) -> None:
+    zone, name = reverse_record_for_ipv4(str(address)) or ("", "")
+    reverse_name = dns.reversename.from_address(str(address)).to_text().rstrip(".")
+    reconstructed = zone if name == "@" else f"{name}.{zone}"
+
+    assert reconstructed == reverse_name
+    assert zone.endswith(".in-addr.arpa")
 
 
 @given(st.ip_addresses(v=4), st.lists(st.just("0.0.127.in-addr.arpa"), max_size=1))

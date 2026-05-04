@@ -1,24 +1,38 @@
+from hypothesis import given
+from hypothesis import strategies as st
+
 from sambatui.ui.screens import ConfirmScreen
 
 
-def test_confirmation_keys_match_yes_no_and_default() -> None:
-    dangerous = ConfirmScreen("Delete?", default_confirm=False)
-    safe = ConfirmScreen("Add?", default_confirm=True)
+@given(
+    st.booleans(),
+    st.sampled_from(
+        [
+            ("x", "y", True),
+            ("x", "Y", True),
+            ("x", "n", False),
+            ("escape", None, False),
+            ("x", "j", None),
+        ]
+    ),
+)
+def test_confirmation_keys_match_yes_no_and_default(
+    default_confirm: bool, key_case: tuple[str, str | None, bool | None]
+) -> None:
+    key, character, expected = key_case
+    screen = ConfirmScreen("Continue?", default_confirm=default_confirm)
 
-    assert dangerous.key_decision("x", "y") is True
-    assert dangerous.key_decision("x", "Y") is True
-    assert dangerous.key_decision("x", "n") is False
-    assert dangerous.key_decision("escape") is False
-    assert dangerous.key_decision("enter") is False
-    assert safe.key_decision("enter") is True
-    assert safe.key_decision("x", "j") is None
+    assert screen.key_decision(key, character) is expected
+    assert screen.key_decision("enter") is default_confirm
 
 
-def test_confirmation_labels_show_enter_default() -> None:
-    dangerous = ConfirmScreen("Delete?", default_confirm=False)
-    safe = ConfirmScreen("Add?", default_confirm=True)
+@given(st.booleans(), st.booleans())
+def test_confirmation_labels_show_enter_default(
+    default_confirm: bool, confirms: bool
+) -> None:
+    screen = ConfirmScreen("Continue?", default_confirm=default_confirm)
+    expected = "Yes" if confirms else "No"
+    if confirms == default_confirm:
+        expected = f"{expected} (Enter)"
 
-    assert dangerous.button_label(False) == "No (Enter)"
-    assert dangerous.button_label(True) == "Yes"
-    assert safe.button_label(False) == "No"
-    assert safe.button_label(True) == "Yes (Enter)"
+    assert screen.button_label(confirms) == expected

@@ -308,6 +308,12 @@ def test_normalize_dns_value_is_trimmed_lowercase_and_dotless(value: str) -> Non
     assert "  " not in normalized
 
 
+@given(DNS_NAME)
+def test_normalize_dns_name_matches_absolute_generated_name(name: str) -> None:
+    assert normalize_dns_name(f"{name}.") == normalize_dns_name(name)
+    assert dns_fqdn("@", f"{name}.") == name
+
+
 @given(DNS_NAME, DNS_NAME, st.booleans())
 def test_dns_fqdn_normalizes_relative_and_absolute_names(
     name: str, zone: str, absolute: bool

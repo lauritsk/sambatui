@@ -2,6 +2,8 @@ from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from sambatui.core import config as config_module
 from sambatui.core.config import (
@@ -80,26 +82,19 @@ def test_kerberos_ticket_detection_uses_klist_s() -> None:
     assert not has_valid_kerberos_ticket(timeout_runner)
 
 
-def test_detected_default_auth_prefers_explicit_config_then_ticket() -> None:
-    assert (
-        detected_default_auth(
-            env={"SAMBATUI_AUTH": "password"},
-            user_config={},
-            ticket_checker=lambda: True,
-        )
-        == "password"
-    )
-    assert (
-        detected_default_auth(
-            env={},
-            user_config={"auth": "password"},
-            ticket_checker=lambda: True,
-        )
-        == "password"
-    )
+@given(
+    st.one_of(st.none(), st.sampled_from(["password", "kerberos"])),
+    st.one_of(st.none(), st.sampled_from(["password", "kerberos"])),
+    st.booleans(),
+)
+def test_detected_default_auth_prefers_explicit_config_then_ticket(
+    env_auth: str | None, config_auth: str | None, has_ticket: bool
+) -> None:
+    env = {"SAMBATUI_AUTH": env_auth} if env_auth else {}
+    user_config = {"auth": config_auth} if config_auth else {}
+
     assert detected_default_auth(
-        env={}, user_config={}, ticket_checker=lambda: True
-    ) == ("kerberos")
-    assert detected_default_auth(
-        env={}, user_config={}, ticket_checker=lambda: False
-    ) == ("password")
+        env=env,
+        user_config=user_config,
+        ticket_checker=lambda: has_ticket,
+    ) == (env_auth or config_auth or ("kerberos" if has_ticket else "password"))

@@ -55,6 +55,14 @@ def test_domain_to_base_dn_derives_active_directory_base() -> None:
     assert domain_to_base_dn("example.com.") == "DC=example,DC=com"
 
 
+@given(DNS_NAME)
+def test_domain_to_base_dn_preserves_generated_domain_labels(domain: str) -> None:
+    base_dn = domain_to_base_dn(f" {domain}. ")
+
+    assert base_dn == ",".join(f"DC={label.strip()}" for label in domain.split("."))
+    assert ldap_dn_in_scope(base_dn, base_dn)
+
+
 def test_parse_ldap_server_defaults_to_ldaps_port() -> None:
     settings = parse_ldap_server("dc01.example.com")
 
@@ -418,6 +426,18 @@ def test_ldap_dn_in_scope_accepts_base_and_child_with_comma_whitespace() -> None
     assert not ldap_dn_in_scope("DC=evil,DC=com", "DC=example,DC=com")
 
 
+@given(DNS_LABEL, DNS_NAME)
+def test_ldap_dn_in_scope_accepts_generated_children_and_rejects_siblings(
+    child: str, domain: str
+) -> None:
+    base_dn = domain_to_base_dn(domain)
+    child_dn = f"CN={child},{base_dn}"
+    sibling_dn = f"CN={child},DC=other,DC=example"
+
+    assert ldap_dn_in_scope(child_dn, base_dn)
+    assert not ldap_dn_in_scope(sibling_dn, base_dn)
+
+
 @pytest.mark.parametrize(
     "dn", ["DC=example,DC=com", " DC=example,DC=com ", "DC=example, DC=com"]
 )
@@ -594,6 +614,16 @@ def test_entry_to_directory_row_summarizes_common_ad_attributes() -> None:
     assert row.dn == "CN=Alice Example,CN=Users,DC=example,DC=com"
     assert "alice" in row.summary
     assert "memberOf=2" in row.summary
+
+
+@given(st.text(max_size=30))
+def test_build_directory_filter_escapes_generated_search_text(text: str) -> None:
+    ldap_filter = build_directory_filter("users", text)
+
+    assert ldap_filter.startswith("(")
+    assert ldap_filter.endswith(")")
+    assert text.strip() or ldap_filter == "(&(objectCategory=person)(objectClass=user))"
+    assert "\x00" not in ldap_filter
 
 
 @given(st.text(), st.sampled_from(["off", "ldaps", "starttls", "", "BAD"]))
