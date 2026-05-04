@@ -2,6 +2,29 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.1](https://github.com/lauritsk/sambatui/compare/4e8345b9a4d3ab516685ffb6dfaa159e1e7930b5..v0.3.1) - 2026-05-04
+#### Bug Fixes
+- harden typing and private file writes - ([05270c6](https://github.com/lauritsk/sambatui/commit/05270c66a319c2c5246b9c554447db4d1fa5abf8)) - Karl Hans Laurits
+#### Documentation
+- align documentation with LDAP management - ([7f4b3c3](https://github.com/lauritsk/sambatui/commit/7f4b3c3f7087cdd11bc445401043d7a8f30732d2)) - Karl Hans Laurits
+#### Tests
+- avoid url substring assertion - ([ed091ab](https://github.com/lauritsk/sambatui/commit/ed091abdc8cd9462dae245655942792ddb0a9a9e)) - Karl Hans Laurits
+- expand hypothesis coverage - ([959bb15](https://github.com/lauritsk/sambatui/commit/959bb150be23b2f8a37e47bdfa408483074aeb23)) - Karl Hans Laurits
+- cover controllers completely - ([26fbd43](https://github.com/lauritsk/sambatui/commit/26fbd43e8a2b568e417fc5883910df8e04e5971d)) - Karl Hans Laurits
+- mirror source tree structure - ([f3c5251](https://github.com/lauritsk/sambatui/commit/f3c52518a33c682f0b0770b551dfe2800576a2e9)) - Karl Hans Laurits
+- isolate ldap add test from environment - ([c3c3bc1](https://github.com/lauritsk/sambatui/commit/c3c3bc15a22683b84d5d9075df81b4df95d43902)) - Karl Hans Laurits
+- add property coverage for edge cases - ([8350fb3](https://github.com/lauritsk/sambatui/commit/8350fb32ab23d6060666cbc552e23a827afcd294)) - Karl Hans Laurits
+- split coverage edge tests - ([389e4b6](https://github.com/lauritsk/sambatui/commit/389e4b6e9e6a8255d9c1aa6144c066b6d0ec19a5)) - Karl Hans Laurits
+#### Refactoring
+- (**core**) share common controller helpers - ([dd5e3ee](https://github.com/lauritsk/sambatui/commit/dd5e3eed84e616bcf08603e3d5b771d3b8caa1ce)) - Karl Hans Laurits
+- simplify project code - ([196ab72](https://github.com/lauritsk/sambatui/commit/196ab72c4aeab8d96ea6e1ac95802f6a2cf330bf)) - Karl Hans Laurits
+- improve test and ldap maintainability - ([7fb1113](https://github.com/lauritsk/sambatui/commit/7fb1113bd38cc75a0812d8e0eec786bd0ece6306)) - Karl Hans Laurits
+- remove legacy compatibility shims - ([1e2876b](https://github.com/lauritsk/sambatui/commit/1e2876b9053797ce23b220a3b1c1d8fedf6678cf)) - Karl Hans Laurits
+- split app controllers and views - ([1d46aea](https://github.com/lauritsk/sambatui/commit/1d46aea12b69c513f2a489205f96463133455f50)) - Karl Hans Laurits
+- simplify validation helpers - ([4e8345b](https://github.com/lauritsk/sambatui/commit/4e8345b9a4d3ab516685ffb6dfaa159e1e7930b5)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.3.0](https://github.com/lauritsk/sambatui/compare/5a7e1b967c4211903d6070423bdf88e0f7d27555..v0.3.0) - 2026-05-04
 #### Features
 - add LDAP entry management - ([1e8a4dc](https://github.com/lauritsk/sambatui/commit/1e8a4dc641369817960b1aa93842fd08da7aa435)) - Karl Hans Laurits
