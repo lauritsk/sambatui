@@ -418,10 +418,13 @@ class LdapDirectoryClient:
     def validation_error(self) -> str | None:
         return self.config.validation_error()
 
-    def check_connection(self) -> None:
+    def _raise_validation_error(self) -> None:
         error = self.validation_error()
         if error:
             raise ValueError(error)
+
+    def check_connection(self) -> None:
+        self._raise_validation_error()
 
         from ldap3.core.exceptions import LDAPException
 
@@ -455,9 +458,7 @@ class LdapDirectoryClient:
         name: str,
         attributes: Mapping[str, str],
     ) -> str:
-        error = self.validation_error()
-        if error:
-            raise ValueError(error)
+        self._raise_validation_error()
         dn, object_class, ldap_attributes = build_add_entry(
             kind, parent_dn, name, attributes
         )
@@ -472,15 +473,11 @@ class LdapDirectoryClient:
             raise ValueError("LDAP delete needs a DN.")
         if ldap_dn_equal(dn, self.config.base_dn):
             raise ValueError("Refusing to delete LDAP base DN.")
-        error = self.validation_error()
-        if error:
-            raise ValueError(error)
+        self._raise_validation_error()
         self._write(lambda connection: connection.delete(dn), "LDAP delete failed")
 
     def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
-        error = self.validation_error()
-        if error:
-            raise ValueError(error)
+        self._raise_validation_error()
         invalid = sorted(set(changes) - _ALL_LDAP_EDITABLE_ATTRIBUTES)
         if invalid:
             raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
@@ -524,9 +521,7 @@ class LdapDirectoryClient:
         max_entries: int | None = None,
         one_level: bool = False,
     ) -> list[DirectoryRow]:
-        error = self.validation_error()
-        if error:
-            raise ValueError(error)
+        self._raise_validation_error()
 
         from ldap3.core.exceptions import LDAPException
 

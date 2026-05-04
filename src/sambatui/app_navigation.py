@@ -156,7 +156,9 @@ class AppNavigationMixin(App):
 
     def page_rows(self, table: DataTable) -> int:
         height = getattr(table.size, "height", 0)
-        return max(1, height - 3) if height else 10
+        if not height:
+            return 10
+        return max(1, height - 3)
 
     def move_cursor_by(self, delta: int) -> None:
         table = self.active_table()
@@ -224,10 +226,10 @@ class AppNavigationMixin(App):
         if not self.ensure_dns_records_view():
             return
         row_index = table.cursor_row
-        self.selection_anchor = (
-            row_index if self.selection_anchor is None else self.selection_anchor
-        )
-        self.set_record_selected(row_index, row_index not in self.selected_record_rows)
+        if self.selection_anchor is None:
+            self.selection_anchor = row_index
+        is_selected = row_index in self.selected_record_rows
+        self.set_record_selected(row_index, not is_selected)
         self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
 
     def action_visual_select(self) -> None:
