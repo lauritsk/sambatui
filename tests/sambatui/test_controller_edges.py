@@ -23,6 +23,7 @@ from sambatui.samba.discovery import DiscoveredService
 from sambatui.smart_view_catalog import (
     FULL_HEALTH_VIEW_ID,
     SMART_VIEW_BY_ID,
+    SMART_VIEW_BY_SHORTCUT,
     SmartViewOptions,
 )
 from sambatui.smart_views import SmartViewRow
@@ -792,7 +793,8 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
         async def refresh_current_zone(self) -> None:
             self.commands.append(("query", self.val("zone"), []))
 
-        async def run_smart_view(self, view_id: str) -> None:
+        def action_smart_view_shortcut(self, shortcut: str) -> None:
+            view_id = SMART_VIEW_BY_SHORTCUT[shortcut].view_id
             self.smart_runs.append(view_id)
             self.current_smart_view_id = view_id
 
