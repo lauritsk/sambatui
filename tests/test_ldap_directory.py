@@ -1,6 +1,9 @@
 import ssl
+from urllib.parse import urlsplit
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from ldap3 import GSSAPI, LEVEL, MODIFY_DELETE, MODIFY_REPLACE, NONE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
@@ -17,6 +20,19 @@ from sambatui.ldap_directory import (
     ldap_server_get_info,
     ldap_server_tls,
     parse_ldap_server,
+)
+
+
+DNS_LABEL = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
+    | st.sampled_from("_-"),
+    min_size=1,
+    max_size=20,
+).filter(lambda value: value[0].isalnum() and value[-1].isalnum() and value.isascii())
+DNS_NAME = st.lists(DNS_LABEL, min_size=1, max_size=5).map(".".join)
+LDAP_KINDS = st.sampled_from(["ou", "user", "group", "computer"])
+EDITABLE_ATTRS = st.sampled_from(
+    ["description", "displayName", "mail", "telephoneNumber", "sAMAccountName"]
 )
 
 
@@ -578,3 +594,75 @@ def test_entry_to_directory_row_summarizes_common_ad_attributes() -> None:
     assert row.dn == "CN=Alice Example,CN=Users,DC=example,DC=com"
     assert "alice" in row.summary
     assert "memberOf=2" in row.summary
+
+
+@given(st.text(), st.sampled_from(["off", "ldaps", "starttls", "", "BAD"]))
+@settings(deadline=None)
+def test_parse_ldap_server_never_raises_unexpected_exception(
+    server: str, encryption: str
+) -> None:
+    try:
+        settings = parse_ldap_server(server, encryption)
+    except ValueError:
+        return
+
+    assert settings.host
+    assert isinstance(settings.port, int)
+    assert 0 < settings.port <= 65535
+
+
+@given(
+    st.sampled_from(["ldap", "ldaps"]),
+    DNS_NAME,
+    st.integers(min_value=1, max_value=65535),
+)
+def test_parse_ldap_server_preserves_valid_url_parts(
+    scheme: str, host: str, port: int
+) -> None:
+    settings = parse_ldap_server(f" {scheme}://{host}:{port} ", "off")
+
+    assert settings.host == host.casefold()
+    assert settings.port == port
+    assert settings.use_ssl is (scheme == "ldaps")
+
+
+@given(
+    LDAP_KINDS,
+    DNS_NAME,
+    DNS_NAME,
+    st.dictionaries(EDITABLE_ATTRS, st.text(max_size=30), max_size=5),
+)
+def test_build_add_entry_sets_required_attributes(
+    kind: str, parent_label: str, name: str, attributes: dict[str, str]
+) -> None:
+    parent_dn = f"OU={parent_label},DC=example,DC=com"
+    dn, object_class, ldap_attributes = build_add_entry(
+        kind, parent_dn, name, attributes
+    )
+
+    assert dn.endswith(parent_dn)
+    assert object_class
+    assert all(value != "" for value in ldap_attributes.values())
+    if kind == "ou":
+        assert ldap_attributes["ou"] == name
+    else:
+        assert ldap_attributes["cn"] == name
+    if kind == "computer":
+        assert str(ldap_attributes["sAMAccountName"]).endswith("$")
+
+
+@given(st.text())
+def test_parse_ldap_server_reports_bad_port_as_value_error(server: str) -> None:
+    try:
+        parsed_port = urlsplit(
+            server.strip() if "://" in server else f"//{server.strip()}"
+        ).port
+    except ValueError:
+        parsed_port = None
+
+    try:
+        parse_ldap_server(server)
+    except ValueError:
+        return
+
+    assert parsed_port is None or 0 < parsed_port <= 65535

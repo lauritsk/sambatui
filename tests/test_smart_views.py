@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from sambatui.ldap_directory import DirectoryRow
 from sambatui.models import DnsRow
 from sambatui.smart_views import (
@@ -10,14 +13,26 @@ from sambatui.smart_views import (
     SmartViewRow,
     dns_a_without_ptr,
     dns_duplicate_records,
+    dns_fqdn,
     dns_ptr_without_a,
     full_health_dashboard_rows,
     ldap_delete_candidate_users,
     ldap_inactive_users,
     ldap_stale_computers,
     ldap_users_without_groups,
+    normalize_dns_name,
+    normalize_dns_value,
     parse_ad_datetime,
 )
+
+DNS_LABEL = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
+    | st.sampled_from("_-"),
+    min_size=1,
+    max_size=20,
+).filter(lambda value: value[0].isalnum() and value[-1].isalnum() and value.isascii())
+DNS_NAME = st.lists(DNS_LABEL, min_size=1, max_size=5).map(".".join)
+RECORD_TYPES = st.sampled_from(["A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS"])
 
 
 def dns_row(name: str, rtype: str, value: str) -> DnsRow:
@@ -281,3 +296,52 @@ def test_ldap_users_without_groups_flags_empty_memberof() -> None:
 
     assert [finding.object for finding in findings] == ["solo"]
     assert "primaryGroupID=513" in findings[0].evidence
+
+
+@given(st.text())
+def test_normalize_dns_value_is_trimmed_lowercase_and_dotless(value: str) -> None:
+    normalized = normalize_dns_value(value)
+
+    assert normalized == normalized.casefold()
+    assert normalized == normalized.strip()
+    assert not normalized.endswith(".")
+    assert "  " not in normalized
+
+
+@given(DNS_NAME, DNS_NAME, st.booleans())
+def test_dns_fqdn_normalizes_relative_and_absolute_names(
+    name: str, zone: str, absolute: bool
+) -> None:
+    input_name = f"{name}." if absolute else name
+    fqdn = dns_fqdn(input_name, zone)
+
+    assert fqdn == fqdn.rstrip(".")
+    if absolute:
+        assert normalize_dns_name(fqdn) == normalize_dns_name(name)
+    else:
+        assert (
+            normalize_dns_name(fqdn)
+            == f"{normalize_dns_name(name)}.{normalize_dns_name(zone)}"
+        )
+
+
+@given(
+    st.dictionaries(
+        DNS_NAME,
+        st.lists(st.tuples(DNS_NAME, RECORD_TYPES, st.text(max_size=40)), max_size=8),
+        max_size=4,
+    )
+)
+def test_dns_duplicate_records_handles_generated_records(
+    records_by_zone: dict[str, list[tuple[str, str, str]]],
+) -> None:
+    rows = {
+        zone: [dns_row(name, rtype, value) for name, rtype, value in records]
+        for zone, records in records_by_zone.items()
+    }
+
+    findings = dns_duplicate_records(rows)
+
+    assert len(findings) <= sum(len(records) for records in rows.values())
+    assert all(finding.source == "dns" for finding in findings)
+    assert all(finding.severity in {"low", "medium", "high"} for finding in findings)
