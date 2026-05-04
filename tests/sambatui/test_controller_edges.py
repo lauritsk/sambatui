@@ -766,6 +766,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             self.zonelist: tuple[int, str] = (0, "")
             self.commands: list[tuple[str, str, list[str]]] = []
             self.directory_searches: list[dict[str, str]] = []
+            self.smart_runs: list[str] = []
             self.fail_ptr = False
 
         async def run_zonelist(self) -> tuple[int, str]:
@@ -790,6 +791,10 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
 
         async def refresh_current_zone(self) -> None:
             self.commands.append(("query", self.val("zone"), []))
+
+        async def run_smart_view(self, view_id: str) -> None:
+            self.smart_runs.append(view_id)
+            self.current_smart_view_id = view_id
 
     async def run_app() -> None:
         app = ViewApp()
@@ -838,6 +843,15 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             assert await app.activate_sidebar_item(
                 SidebarItem("OU", "OU=Users,DC=example,DC=com", "ldap_dn")
             )
+            assert await app.activate_sidebar_item(
+                SidebarItem("Run 1", "dns_duplicates", "smart_view")
+            )
+            assert app.smart_runs == ["dns_duplicates"]
+            app.query_one("#smart_views", DataTable).move_cursor(row=1)
+            assert await app.activate_sidebar_selection(
+                app.query_one("#smart_views", DataTable)
+            )
+            assert app.smart_runs[-1] == "dns_duplicates"
             table = app.query_one("#zones", DataTable)
             assert await app.activate_sidebar_selection(table)
 

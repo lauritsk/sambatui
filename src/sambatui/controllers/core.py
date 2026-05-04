@@ -122,6 +122,7 @@ class AppCoreMixin(AppControllerBase):
         self.update_records_title()
         self.populate_zones([])
         self.populate_ldap_structure([])
+        self.populate_smart_views_sidebar()
         self.action_focus_records()
         self.refresh_key_hints()
         self.render_records([])

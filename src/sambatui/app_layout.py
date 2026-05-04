@@ -7,16 +7,12 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Input, Label, Static, TabbedContent, TabPane
 
 from .app_constants import CONNECTION_STATE_INPUTS, KEY_HINTS
-from .smart_view_catalog import SMART_VIEWS
 from .ui.tables import DNS_COLUMNS
 
 
 class AppLayoutMixin(App):
     def smart_view_hint_text(self) -> str:
-        lines = ["Press S to pick a view, or press a number:"]
-        for view in SMART_VIEWS:
-            lines.append(f"  {view.shortcut}  {view.label}")
-        return "\n".join(lines)
+        return "Select a smart view below, or press S for picker. Number shortcuts still work."
 
     def keys_hint_for_tab(self, tab_id: str | None) -> str:
         return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
@@ -62,6 +58,9 @@ class AppLayoutMixin(App):
                     id="smart_hint",
                     classes="hint",
                 )
+                smart_views = DataTable(id="smart_views", cursor_type="row")
+                smart_views.add_columns("Run", "Smart view")
+                yield smart_views
 
     def compose_sidebar(self) -> ComposeResult:
         with Vertical(id="sidebar", classes="panel"):

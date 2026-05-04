@@ -122,6 +122,7 @@ def test_sidebar_uses_current_list_widgets() -> None:
         async with app.run_test():
             assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
+            assert app.query_one("#smart_views", DataTable).row_count == 8
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
             app.populate_ldap_structure([])
             assert app.query_one("#ldap_structure", DataTable).row_count == 1
