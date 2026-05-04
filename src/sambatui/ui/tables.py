@@ -30,8 +30,8 @@ LDAP_EMPTY_STATE = (
     "Press L to search directory; check Base DN, text, max rows.",
 )
 SMART_EMPTY_STATE = (
-    "No smart-view findings shown",
-    "Press S to pick view or 1-7 quick run; / filters findings.",
+    "No findings shown",
+    "Press S to pick a DNS/LDAP finding or 1-7 for shortcuts; / filters findings.",
 )
 
 
@@ -89,7 +89,7 @@ EMPTY_STATE_BY_VIEW_MODE = {
 }
 UNKNOWN_EMPTY_STATE = (
     "No active records view",
-    "Switch to DNS, LDAP, or smart views to show rows.",
+    "Switch to DNS, LDAP, or a finding filter to show rows.",
 )
 
 

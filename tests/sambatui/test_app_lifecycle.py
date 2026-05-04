@@ -35,9 +35,9 @@ def test_empty_states_explain_next_actions() -> None:
             assert "LDAP base DN" in str(ldap_structure.get_row_at(0)[0])
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
-            assert str(records.get_row_at(0)[1]) == "No smart-view findings shown"
+            assert str(records.get_row_at(0)[1]) == "No findings shown"
             assert "Press S" in str(records.get_row_at(0)[3])
-            assert "No smart-view findings shown" in str(details.render())
+            assert "No findings shown" in str(details.render())
 
     asyncio.run(run_app())
 
