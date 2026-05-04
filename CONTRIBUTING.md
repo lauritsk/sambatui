@@ -72,7 +72,12 @@ mise exec -- ty check path/to/file.py
 - Keep behavior covered by tests in `tests/`.
 - Prefer small, focused changes.
 - Keep UI behavior and command output stable unless tests and docs are updated.
-- Use type hints for new Python code.
+- Keep Python code fully typed and type-safe, including public APIs, internal
+  helpers, and tests.
+- Avoid unsafe `Any`, unchecked casts, and ignored type errors unless narrowly
+  justified in code.
+- Prefer Hypothesis/property-based tests whenever practical; use example-based
+  tests when properties are not a good fit.
 - Let `mise run fix` handle formatting before review.
 - Use generic examples only (`example.com`, `dc01.example.com`, documentation IP
   ranges). Never commit real hostnames, domains, usernames, passwords, network
