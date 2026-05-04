@@ -37,7 +37,9 @@ Use **uv** managed by **mise**: `mise run install`, `mise run sambatui`.
 - Source: `src/sambatui/`; tests: `tests/`.
 - Follow setup and workflow details in `CONTRIBUTING.md`.
 - Keep UI behavior and command output stable unless tests and docs change.
-- Use type hints for new Python code.
+- All Python code must be fully typed and type-safe; avoid untyped public
+  APIs and unsafe `Any`/casts unless justified.
+- Tests should use Hypothesis/property-based testing whenever practical.
 - Use Conventional Commits for commits and PR titles.
 - Squash merges only; no merge commits or fast-forward merges.
 
