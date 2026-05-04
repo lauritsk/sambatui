@@ -11,6 +11,7 @@ from textual.widgets import DataTable, Input, Static
 from sambatui.app import DnsRow, SambatuiApp
 from sambatui.controllers.core import AppCoreMixin
 from sambatui.controllers.helpers import (
+    SMART_SORT_KEYS,
     directory_sort_label,
     ldap_limit_suffix,
     next_sort_state,
@@ -98,6 +99,25 @@ def test_controller_helper_edges() -> None:
     assert next_sort_state("name", True, "type") == ("type", False)
     assert sort_direction(True) == "desc"
     assert sort_direction(False) == "asc"
+
+    row = smart_row(
+        severity="high",
+        object="Beta",
+        finding="Finding",
+        evidence="12 days old",
+        suggested_action="Fix",
+        source="LDAP",
+    )
+    assert SMART_SORT_KEYS["severity"](row) == "01:beta"
+    assert SMART_SORT_KEYS["object"](row) == "beta"
+    assert SMART_SORT_KEYS["name"](row) == "beta"
+    assert SMART_SORT_KEYS["finding"](row) == "finding"
+    assert SMART_SORT_KEYS["type"](row) == "finding"
+    assert SMART_SORT_KEYS["evidence"](row) == "12 days old"
+    assert SMART_SORT_KEYS["value"](row) == "12 days old"
+    assert SMART_SORT_KEYS["action"](row) == "fix"
+    assert SMART_SORT_KEYS["source"](row) == "ldap"
+    assert SMART_SORT_KEYS["age"](row) == "0000000012"
 
 
 def test_dns_action_query_and_add_form_edges() -> None:
@@ -235,6 +255,26 @@ def test_dns_action_add_update_delete_edges() -> None:
             await app.action_update.__wrapped__(app)
             await app.action_delete.__wrapped__(app)
             assert app.ldap_actions == ["add", "update", "delete"]
+
+            app.view_mode = "smart"
+            await app.action_add.__wrapped__(app)
+            assert "Add is unavailable" in str(
+                app.query_one("#status", Static).render()
+            )
+            await app.action_update.__wrapped__(app)
+            assert "Update is unavailable" in str(
+                app.query_one("#status", Static).render()
+            )
+            await app.action_delete.__wrapped__(app)
+            assert "Delete is unavailable" in str(
+                app.query_one("#status", Static).render()
+            )
+
+            app.view_mode = "unknown"
+            await app.action_add.__wrapped__(app)
+            await app.action_update.__wrapped__(app)
+            await app.action_delete.__wrapped__(app)
+            assert "No editable" in str(app.query_one("#status", Static).render())
 
             app.view_mode = "dns"
             app.query_one("#auto_ptr", Input).value = "off"
@@ -882,7 +922,17 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.sort_records("name")
             assert "Sorted smart view" in str(app.query_one("#status", Static).render())
             app.sort_smart_view("missing")
+            app.search_text = ""
             app.view_mode = "unknown"
+            assert "No active records view" in app.current_details_text()
+            app.refresh_current_view()
+            assert "No active records view" in str(
+                app.query_one("#status", Static).render()
+            )
+            await app.action_refresh()
+            assert "No active view to refresh" in str(
+                app.query_one("#status", Static).render()
+            )
             app.sort_records("name")
             app.populate_directory(
                 [directory_row(name="Bob"), directory_row(name="Alice")]
@@ -1132,6 +1182,11 @@ def test_ldap_action_edges() -> None:
             app.current_directory_values = {}
             assert not await app.refresh_current_directory_search()
             assert not await app.load_more_directory()
+            app.view_mode = "dns"
+            assert not await app.load_more_current_view()
+            app.view_mode = "unknown"
+            assert not await app.load_more_current_view()
+            app.view_mode = "directory"
             app.current_directory_values = values
             app.current_directory_max_rows = 5000
             assert not await app.load_more_directory()

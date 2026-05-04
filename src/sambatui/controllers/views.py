@@ -377,11 +377,15 @@ class AppViewsMixin(AppControllerBase):
 
     def current_details_text(self) -> str:
         row_index = self.records_cursor_row()
-        if self.view_mode == "directory":
-            return self.directory_details_text(row_index)
-        if self.view_mode == "smart":
-            return self.smart_details_text(row_index)
-        return self.dns_details_text(row_index)
+        match self.view_mode:
+            case "dns":
+                return self.dns_details_text(row_index)
+            case "directory":
+                return self.directory_details_text(row_index)
+            case "smart":
+                return self.smart_details_text(row_index)
+            case _:
+                return self.details_empty_text()
 
     def update_details_pane(self) -> None:
         with suppress(Exception):
@@ -446,12 +450,15 @@ class AppViewsMixin(AppControllerBase):
         )
 
     def refresh_current_view(self) -> None:
-        if self.view_mode == "directory":
-            self.refresh_directory_view()
-        elif self.view_mode == "smart":
-            self.refresh_smart_view()
-        else:
-            self.refresh_record_view()
+        match self.view_mode:
+            case "dns":
+                self.refresh_record_view()
+            case "directory":
+                self.refresh_directory_view()
+            case "smart":
+                self.refresh_smart_view()
+            case _:
+                self.set_status(self.empty_state_status(self.view_mode))
 
     @work(group="inline_search", exclusive=True)
     async def refresh_inline_search_scope(
@@ -564,21 +571,21 @@ class AppViewsMixin(AppControllerBase):
         self.set_status(f"Sorted LDAP by {directory_sort_label(field)} ({direction})")
 
     def sort_records(self, field: str) -> None:
-        if self.view_mode == "directory":
-            self.sort_directory(field)
-            return
-        if self.view_mode == "smart":
-            self.sort_smart_view(field)
-            return
-        if self.view_mode != "dns":
-            return
-        self.sort_field, self.sort_reverse = next_sort_state(
-            self.sort_field, self.sort_reverse, field
-        )
-        self.record_rows = self.sorted_records(self.record_rows)
-        self.refresh_record_view()
-        direction = sort_direction(self.sort_reverse)
-        self.set_status(f"Sorted by {field} ({direction}); selection cleared")
+        match self.view_mode:
+            case "dns":
+                self.sort_field, self.sort_reverse = next_sort_state(
+                    self.sort_field, self.sort_reverse, field
+                )
+                self.record_rows = self.sorted_records(self.record_rows)
+                self.refresh_record_view()
+                direction = sort_direction(self.sort_reverse)
+                self.set_status(f"Sorted by {field} ({direction}); selection cleared")
+            case "directory":
+                self.sort_directory(field)
+            case "smart":
+                self.sort_smart_view(field)
+            case _:
+                self.set_status(self.empty_state_status(self.view_mode))
 
     def set_record_selected(self, row_index: int, selected: bool) -> None:
         table = self.query_one("#records", DataTable)

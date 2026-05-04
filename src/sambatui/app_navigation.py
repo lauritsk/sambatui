@@ -16,6 +16,22 @@ from .app_constants import (
 )
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
 
+DNS_HEADER_SORT_FIELDS = {1: "name", 2: "type", 3: "value"}
+DIRECTORY_HEADER_SORT_FIELDS = {1: "name", 2: "type", 3: "value"}
+SMART_HEADER_SORT_FIELDS = {
+    1: "severity",
+    2: "object",
+    3: "finding",
+    4: "evidence",
+    5: "action",
+    6: "source",
+}
+HEADER_SORT_FIELDS_BY_VIEW_MODE = {
+    "dns": DNS_HEADER_SORT_FIELDS,
+    "directory": DIRECTORY_HEADER_SORT_FIELDS,
+    "smart": SMART_HEADER_SORT_FIELDS,
+}
+
 
 class AppNavigationMixin(App):
     if TYPE_CHECKING:
@@ -311,10 +327,17 @@ class AppNavigationMixin(App):
         self.pending_g = False
         table = self.focused_table()
         if table and table.id == "records":
-            if self.view_mode == "smart":
-                self.action_fix_smart()
-            else:
-                self.action_toggle_select()
+            match self.view_mode:
+                case "dns":
+                    self.action_toggle_select()
+                case "smart":
+                    self.action_fix_smart()
+                case "directory":
+                    self.set_status(
+                        "Press u to edit or d to delete the selected LDAP entry."
+                    )
+                case _:
+                    self.set_status("No active records view.")
             return
         if table and table.id in {"zones", "ldap_structure", "smart_views"}:
             await self.activate_sidebar_selection(table)
@@ -422,28 +445,14 @@ class AppNavigationMixin(App):
             return
         await self.activate_sidebar_selection(event.data_table)
 
+    def header_sort_field(self, column_index: int) -> str | None:
+        sort_fields = HEADER_SORT_FIELDS_BY_VIEW_MODE.get(self.view_mode)
+        return None if sort_fields is None else sort_fields.get(column_index)
+
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         if event.data_table.id != "records":
             return
-        if self.view_mode == "smart":
-            match event.column_index:
-                case 1:
-                    self.sort_records("severity")
-                case 2:
-                    self.sort_records("object")
-                case 3:
-                    self.sort_records("finding")
-                case 4:
-                    self.sort_records("evidence")
-                case 5:
-                    self.sort_records("action")
-                case 6:
-                    self.sort_records("source")
-            return
-        match event.column_index:
-            case 1:
-                self.sort_records("name")
-            case 2:
-                self.sort_records("type")
-            case 3:
-                self.sort_records("value")
+
+        field = self.header_sort_field(event.column_index)
+        if field is not None:
+            self.sort_records(field)
