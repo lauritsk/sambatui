@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import Any, Literal, cast
-from urllib.parse import urlparse
-import importlib
-import ssl
+from typing import Any
 
 
 def _install_pyasn1_ber_legacy_aliases() -> None:
@@ -19,411 +15,64 @@ def _install_pyasn1_ber_legacy_aliases() -> None:
 
 _install_pyasn1_ber_legacy_aliases()
 
-_ldap3_module = importlib.import_module("ldap3")
-_ldap3_conv = importlib.import_module("ldap3.utils.conv")
-_ldap3_dn = importlib.import_module("ldap3.utils.dn")
-Tls = cast(Any, _ldap3_module).Tls
-escape_filter_chars = cast(Any, _ldap3_conv).escape_filter_chars
-escape_rdn = cast(Any, _ldap3_dn).escape_rdn
-parse_dn = cast(Any, _ldap3_dn).parse_dn
-
-DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
-DirectoryAddKind = Literal["user", "group", "computer", "ou"]
-LdapAuthMode = Literal["password", "kerberos"]
-LDAP_AUTH_MODES = frozenset({"password", "kerberos"})
-LDAP_ENCRYPTION_MODES = frozenset({"off", "ldaps", "starttls"})
-LDAP_COMPATIBILITY_ON = frozenset({"on"})
-LDAP_COMPATIBILITY_OFF = frozenset({"", "off"})
-LDAP_COMPATIBILITY_TLS_CIPHERS = "DEFAULT:@SECLEVEL=0"
-LDAP_SEARCH_KINDS: tuple[DirectorySearchKind, ...] = (
-    "users",
-    "groups",
-    "computers",
-    "ous",
-    "all",
+from sambatui.ldap.config import (  # noqa: E402
+    domain_to_base_dn as domain_to_base_dn,
+    gssapi_cred_store as gssapi_cred_store,
+    ldap_compatibility_enabled as ldap_compatibility_enabled,
+    ldap_server_get_info as ldap_server_get_info,
+    ldap_server_scheme as ldap_server_scheme,
+    parse_ldap_server as parse_ldap_server,
 )
-DEFAULT_LDAP_ATTRIBUTES = (
-    "cn",
-    "name",
-    "sAMAccountName",
-    "userPrincipalName",
-    "displayName",
-    "description",
-    "mail",
-    "memberOf",
-    "member",
-    "objectClass",
-    "distinguishedName",
-    "userAccountControl",
-    "lastLogonTimestamp",
-    "lastLogon",
-    "whenCreated",
-    "whenChanged",
-    "pwdLastSet",
-    "accountExpires",
-    "primaryGroupID",
-    "dNSHostName",
-    "servicePrincipalName",
-    "proxyAddresses",
+from sambatui.ldap.connection import (  # noqa: E402
+    bind_connection,
+    ldap_connection_kwargs as ldap_connection_kwargs,
+    ldap_exception_message,
+    ldap_result_message,
+    new_ldap_connection,
+    paged_search_cookie,
+    search_connection,
+    start_tls_if_needed,
+    unbind_suppressing_ldap_error,
 )
-LDAP_EDITABLE_ATTRIBUTES = {
-    "user": ("displayName", "mail", "description"),
-    "group": ("description", "mail"),
-    "computer": ("description",),
-    "ou": ("description",),
-}
-_ALL_LDAP_EDITABLE_ATTRIBUTES = frozenset(
-    attr for attrs in LDAP_EDITABLE_ATTRIBUTES.values() for attr in attrs
+from sambatui.ldap.dn import (  # noqa: E402
+    build_add_entry as build_add_entry,
+    ldap_dn_equal,
+    ldap_dn_in_scope as ldap_dn_in_scope,
+    normalized_ldap_dn_parts as normalized_ldap_dn_parts,
 )
-
-_KIND_FILTERS: Mapping[str, str] = {
-    "users": "(&(objectCategory=person)(objectClass=user))",
-    "groups": "(objectCategory=group)",
-    "computers": "(objectCategory=computer)",
-    "ous": "(objectClass=organizationalUnit)",
-    "all": "(|(&(objectCategory=person)(objectClass=user))(objectCategory=group)(objectCategory=computer)(objectClass=organizationalUnit))",
-}
-
-_CHILD_CONTAINER_FILTER = "(|(objectClass=organizationalUnit)(objectClass=container)(objectClass=builtinDomain))"
-
-_KIND_LABELS = {
-    "users": "user",
-    "groups": "group",
-    "computers": "computer",
-    "ous": "ou",
-    "all": "object",
-}
-LDAP_ADD_KINDS: tuple[DirectoryAddKind, ...] = ("user", "group", "computer", "ou")
-LDAP_ADD_OBJECT_CLASSES: Mapping[str, tuple[str, ...]] = {
-    "user": ("top", "person", "organizationalPerson", "user"),
-    "group": ("top", "group"),
-    "computer": ("top", "person", "organizationalPerson", "user", "computer"),
-    "ou": ("top", "organizationalUnit"),
-}
-
-
-@dataclass(frozen=True)
-class LdapSearchConfig:
-    server: str
-    user: str = ""
-    password: str = ""
-    base_dn: str = ""
-    encryption: str = "ldaps"
-    auth_mode: str = "password"
-    krb5_ccache: str = ""
-    compatibility: str = "off"
-    page_size: int = 200
-    timeout: int = 10
-
-    @property
-    def normalized_encryption(self) -> str:
-        return (self.encryption or "ldaps").casefold()
-
-    @property
-    def normalized_auth_mode(self) -> str:
-        return (self.auth_mode or "password").casefold()
-
-    @property
-    def normalized_compatibility(self) -> str:
-        return (self.compatibility or "off").casefold()
-
-    @property
-    def compatibility_enabled(self) -> bool:
-        return ldap_compatibility_enabled(self.compatibility)
-
-    def validation_error(self) -> str | None:
-        auth_mode = self.normalized_auth_mode
-        encryption = self.normalized_encryption
-        compatibility = self.normalized_compatibility
-
-        error = _ldap_mode_error(auth_mode, encryption, compatibility)
-        if error:
-            return error
-        error = _ldap_server_error(self.server, encryption)
-        if error:
-            return error
-        if auth_mode == "password":
-            error = _ldap_password_auth_error(self.user, self.password, encryption)
-            if error:
-                return error
-        if not self.base_dn:
-            return "Enter LDAP base DN, e.g. DC=example,DC=com."
-        return None
-
-
-@dataclass(frozen=True)
-class LdapServerSettings:
-    host: str
-    port: int
-    use_ssl: bool
-
-
-@dataclass(frozen=True)
-class DirectoryRow:
-    dn: str
-    kind: str
-    name: str
-    summary: str
-    attributes: Mapping[str, Sequence[str]]
-
-
-def _ldap_mode_error(auth_mode: str, encryption: str, compatibility: str) -> str | None:
-    if auth_mode not in LDAP_AUTH_MODES:
-        return "LDAP auth mode must be password or kerberos."
-    if encryption not in LDAP_ENCRYPTION_MODES:
-        return "LDAP encryption must be off, ldaps, or starttls."
-    if compatibility not in LDAP_COMPATIBILITY_ON | LDAP_COMPATIBILITY_OFF:
-        return "LDAP compatibility must be on or off."
-    return None
-
-
-def _ldap_server_error(server: str, encryption: str) -> str | None:
-    if not server:
-        return "Enter LDAP server/DC."
-    scheme = ldap_server_scheme(server)
-    if scheme == "ldap" and encryption == "ldaps":
-        return "ldap:// server URLs require LDAP encryption starttls or off."
-    if scheme == "ldaps" and encryption != "ldaps":
-        return "ldaps:// server URLs require LDAP encryption ldaps."
-    return None
-
-
-def _ldap_password_auth_error(user: str, password: str, encryption: str) -> str | None:
-    if encryption == "off":
-        return "LDAP password bind requires ldaps or starttls."
-    if not user:
-        return "LDAP search needs a username."
-    if not password:
-        return "LDAP search needs a password or auth mode kerberos."
-    return None
-
-
-def domain_to_base_dn(domain: str) -> str:
-    labels = [label.strip() for label in domain.strip().rstrip(".").split(".")]
-    if not labels or any(not label for label in labels):
-        return ""
-    return ",".join(f"DC={label}" for label in labels)
-
-
-def ldap_server_scheme(server: str) -> str:
-    return urlparse(server.strip()).scheme.casefold()
-
-
-def parse_ldap_server(server: str, encryption: str = "ldaps") -> LdapServerSettings:
-    value = server.strip()
-    normalized_encryption = (encryption or "ldaps").casefold()
-    if "://" not in value:
-        value = f"//{value}"
-    parsed = urlparse(value)
-    scheme = parsed.scheme.casefold()
-    if scheme and scheme not in {"ldap", "ldaps"}:
-        raise ValueError("LDAP server URL scheme must be ldap or ldaps.")
-    use_ssl = scheme == "ldaps" or (not scheme and normalized_encryption == "ldaps")
-    default_port = 636 if use_ssl else 389
-    host = parsed.hostname or parsed.path
-    if not host:
-        raise ValueError("Enter LDAP server/DC.")
-    port = parsed.port
-    if port == 0:
-        raise ValueError("LDAP server port must be between 1 and 65535.")
-    return LdapServerSettings(host=host, port=port or default_port, use_ssl=use_ssl)
-
-
-def gssapi_cred_store(krb5_ccache: str) -> dict[str, str] | None:
-    if not krb5_ccache:
-        return None
-    ccache = krb5_ccache if ":" in krb5_ccache else f"FILE:{krb5_ccache}"
-    return {"ccache": ccache}
-
-
-def ldap_compatibility_enabled(value: str) -> bool:
-    return (value or "off").casefold() in LDAP_COMPATIBILITY_ON
-
-
-def ldap_server_get_info(config: LdapSearchConfig) -> str:
-    from ldap3 import ALL, NONE
-
-    return NONE if config.compatibility_enabled else ALL
-
-
-class LdapCompatibilityTls(Tls):
-    def __init__(self) -> None:
-        super().__init__(
-            validate=ssl.CERT_NONE,
-            version=ssl.PROTOCOL_TLS_CLIENT,
-            ciphers=LDAP_COMPATIBILITY_TLS_CIPHERS,
-        )
-
-    def wrap_socket(self, connection: Any, do_handshake: bool = False) -> None:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        _allow_compatibility_tls_versions(context)
-        with suppress(ssl.SSLError):
-            context.set_ciphers(LDAP_COMPATIBILITY_TLS_CIPHERS)
-        connection.socket = context.wrap_socket(
-            connection.socket,
-            server_side=False,
-            do_handshake_on_connect=do_handshake,
-        )
-
-
-def _allow_compatibility_tls_versions(context: ssl.SSLContext) -> None:
-    minimum = getattr(ssl.TLSVersion, "MINIMUM_SUPPORTED", None)
-    if minimum is not None:
-        with suppress(ValueError, ssl.SSLError):
-            context.minimum_version = minimum
-    for option_name in ("OP_NO_TLSv1", "OP_NO_TLSv1_1"):
-        option = getattr(ssl, option_name, 0)
-        if option:
-            context.options &= ~option
-
-
-def ldap_server_tls(config: LdapSearchConfig) -> LdapCompatibilityTls | None:
-    if config.normalized_encryption == "off" or not config.compatibility_enabled:
-        return None
-    return LdapCompatibilityTls()
-
-
-def ldap_connection_kwargs(
-    config: LdapSearchConfig, *, read_only: bool = True
-) -> dict[str, Any]:
-    from ldap3 import GSSAPI, NTLM, SASL, SIMPLE
-
-    common: dict[str, Any] = {
-        "receive_timeout": config.timeout,
-        "auto_bind": False,
-        "read_only": read_only,
-    }
-    if config.normalized_auth_mode == "kerberos":
-        common.update(
-            authentication=SASL,
-            sasl_mechanism=GSSAPI,
-            user=config.user or None,
-            sasl_credentials=(False,),
-            cred_store=gssapi_cred_store(config.krb5_ccache),
-        )
-        return common
-
-    common.update(
-        user=config.user,
-        password=config.password,
-        authentication=NTLM if "\\" in config.user else SIMPLE,
-    )
-    return common
-
-
-def build_directory_filter(kind: str, text: str = "") -> str:
-    normalized_kind = kind.casefold() or "users"
-    base_filter = _KIND_FILTERS.get(normalized_kind)
-    if base_filter is None:
-        valid = ", ".join(LDAP_SEARCH_KINDS)
-        raise ValueError(f"LDAP search type must be one of: {valid}.")
-    needle = text.strip()
-    if not needle:
-        return base_filter
-    escaped = escape_filter_chars(needle)
-    text_filter = (
-        f"(|(cn=*{escaped}*)(name=*{escaped}*)(sAMAccountName=*{escaped}*)"
-        f"(userPrincipalName=*{escaped}*)(displayName=*{escaped}*)"
-        f"(mail=*{escaped}*)(proxyAddresses=*{escaped}*)"
-        f"(dNSHostName=*{escaped}*)(distinguishedName=*{escaped}*))"
-    )
-    return f"(&{base_filter}{text_filter})"
-
-
-def _split_dn_parts(dn: str) -> tuple[str, ...]:
-    parts: list[str] = []
-    current: list[str] = []
-    escaped = False
-    for char in dn.strip():
-        if escaped:
-            current.append(char)
-            escaped = False
-            continue
-        if char == "\\":
-            current.append(char)
-            escaped = True
-            continue
-        if char == ",":
-            part = "".join(current).strip()
-            if part:
-                parts.append(part)
-            current = []
-            continue
-        current.append(char)
-    part = "".join(current).strip()
-    if part:
-        parts.append(part)
-    return tuple(parts)
-
-
-def normalized_ldap_dn_parts(dn: str) -> tuple[tuple[str, str], ...]:
-    """Return comparable DN parts, accepting harmless whitespace around commas."""
-    compact_dn = ",".join(_split_dn_parts(dn))
-    return tuple(
-        (attr.casefold(), value.casefold())
-        for attr, value, _separator in parse_dn(compact_dn, escape=True)
-    )
-
-
-def ldap_dn_in_scope(dn: str, base_dn: str) -> bool:
-    try:
-        dn_parts = normalized_ldap_dn_parts(dn)
-        base_parts = normalized_ldap_dn_parts(base_dn)
-    except Exception:
-        return False
-    return (
-        bool(base_parts)
-        and len(dn_parts) >= len(base_parts)
-        and dn_parts[-len(base_parts) :] == base_parts
-    )
-
-
-def ldap_dn_equal(left: str, right: str) -> bool:
-    try:
-        return normalized_ldap_dn_parts(left) == normalized_ldap_dn_parts(right)
-    except Exception:
-        return False
-
-
-def build_add_entry(
-    kind: str, parent_dn: str, name: str, attributes: Mapping[str, str]
-) -> tuple[str, tuple[str, ...], dict[str, Any]]:
-    normalized_kind = kind.casefold()
-    object_class = LDAP_ADD_OBJECT_CLASSES.get(normalized_kind)
-    if object_class is None:
-        valid = ", ".join(LDAP_ADD_KINDS)
-        raise ValueError(f"LDAP add type must be one of: {valid}.")
-    clean_name = name.strip()
-    clean_parent = parent_dn.strip()
-    if not clean_name:
-        raise ValueError("LDAP add needs a name.")
-    if not clean_parent:
-        raise ValueError("LDAP add needs a parent DN.")
-
-    rdn_attr = "OU" if normalized_kind == "ou" else "CN"
-    dn = f"{rdn_attr}={escape_rdn(clean_name)},{clean_parent}"
-    ldap_attributes: dict[str, Any] = _clean_add_attributes(attributes)
-    if normalized_kind == "ou":
-        ldap_attributes["ou"] = clean_name
-    else:
-        ldap_attributes["cn"] = clean_name
-    if normalized_kind == "user":
-        ldap_attributes.setdefault("sAMAccountName", clean_name)
-    elif normalized_kind == "group":
-        ldap_attributes.setdefault("sAMAccountName", clean_name)
-        ldap_attributes.setdefault("groupType", -2147483646)
-    elif normalized_kind == "computer":
-        account = ldap_attributes.get("sAMAccountName") or clean_name
-        account = str(account).rstrip("$") + "$"
-        ldap_attributes["sAMAccountName"] = account
-        ldap_attributes.setdefault("userAccountControl", 4128)
-    return dn, object_class, ldap_attributes
-
-
-def _clean_add_attributes(attributes: Mapping[str, str]) -> dict[str, str]:
-    return {key: value for key, value in attributes.items() if value != ""}
+from sambatui.ldap.entries import (  # noqa: E402
+    directory_summary as directory_summary,
+    entry_to_directory_row,
+    first_attr as first_attr,
+    infer_kind as infer_kind,
+    normalize_attribute_values as normalize_attribute_values,
+    normalize_entry_attributes as normalize_entry_attributes,
+)
+from sambatui.ldap.filters import (  # noqa: E402
+    CHILD_CONTAINER_FILTER,
+    build_directory_filter as build_directory_filter,
+)
+from sambatui.ldap.tls import (  # noqa: E402
+    LdapCompatibilityTls as LdapCompatibilityTls,
+    ldap_server_tls as ldap_server_tls,
+    ssl as ssl,
+)
+from sambatui.ldap.types import (  # noqa: E402
+    ALL_LDAP_EDITABLE_ATTRIBUTES,
+    LDAP_ADD_KINDS as LDAP_ADD_KINDS,
+    LDAP_AUTH_MODES as LDAP_AUTH_MODES,
+    LDAP_COMPATIBILITY_OFF as LDAP_COMPATIBILITY_OFF,
+    LDAP_COMPATIBILITY_ON as LDAP_COMPATIBILITY_ON,
+    LDAP_EDITABLE_ATTRIBUTES as LDAP_EDITABLE_ATTRIBUTES,
+    LDAP_ENCRYPTION_MODES as LDAP_ENCRYPTION_MODES,
+    LDAP_SEARCH_KINDS as LDAP_SEARCH_KINDS,
+    DirectoryAddKind as DirectoryAddKind,
+    DirectoryRow,
+    DirectorySearchKind as DirectorySearchKind,
+    LdapAuthMode as LdapAuthMode,
+    LdapSearchConfig,
+    LdapServerSettings as LdapServerSettings,
+)
 
 
 class LdapDirectoryClient:
@@ -441,15 +90,12 @@ class LdapDirectoryClient:
     def check_connection(self) -> None:
         self._raise_validation_error()
 
-        from ldap3.core.exceptions import LDAPException
-
-        connection, settings = _new_ldap_connection(self.config)
+        connection, settings = new_ldap_connection(self.config)
         try:
-            _start_tls_if_needed(connection, self.config, settings)
-            _bind_connection(connection)
+            start_tls_if_needed(connection, self.config, settings)
+            bind_connection(connection)
         finally:
-            with suppress(LDAPException):
-                connection.unbind()
+            unbind_suppressing_ldap_error(connection)
 
     def search(
         self, kind: str, text: str = "", max_entries: int | None = None
@@ -460,7 +106,7 @@ class LdapDirectoryClient:
 
     def child_containers(self, max_entries: int | None = None) -> list[DirectoryRow]:
         return self._search_rows(
-            _CHILD_CONTAINER_FILTER,
+            CHILD_CONTAINER_FILTER,
             "all",
             max_entries=max_entries,
             one_level=True,
@@ -493,7 +139,7 @@ class LdapDirectoryClient:
 
     def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
         self._raise_validation_error()
-        invalid = sorted(set(changes) - _ALL_LDAP_EDITABLE_ATTRIBUTES)
+        invalid = sorted(set(changes) - ALL_LDAP_EDITABLE_ATTRIBUTES)
         if invalid:
             raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
         if not changes:
@@ -512,21 +158,20 @@ class LdapDirectoryClient:
     def _write(self, operation: Any, failure_message: str) -> None:
         from ldap3.core.exceptions import LDAPException
 
-        connection, settings = _new_ldap_connection(self.config, read_only=False)
+        connection, settings = new_ldap_connection(self.config, read_only=False)
         try:
-            _start_tls_if_needed(connection, self.config, settings)
-            _bind_connection(connection)
+            start_tls_if_needed(connection, self.config, settings)
+            bind_connection(connection)
             try:
                 ok = operation(connection)
             except LDAPException as exc:
-                raise ValueError(_ldap_exception_message(exc, failure_message)) from exc
+                raise ValueError(ldap_exception_message(exc, failure_message)) from exc
             if not ok:
                 raise ValueError(
-                    _ldap_result_message(connection.result, failure_message)
+                    ldap_result_message(connection.result, failure_message)
                 )
         finally:
-            with suppress(LDAPException):
-                connection.unbind()
+            unbind_suppressing_ldap_error(connection)
 
     def _search_rows(
         self,
@@ -538,13 +183,11 @@ class LdapDirectoryClient:
     ) -> list[DirectoryRow]:
         self._raise_validation_error()
 
-        from ldap3.core.exceptions import LDAPException
-
-        connection, settings = _new_ldap_connection(self.config)
+        connection, settings = new_ldap_connection(self.config)
         try:
-            _start_tls_if_needed(connection, self.config, settings)
-            _bind_connection(connection)
-            entries = _search_connection(
+            start_tls_if_needed(connection, self.config, settings)
+            bind_connection(connection)
+            entries = search_connection(
                 connection,
                 self.config,
                 search_filter,
@@ -553,184 +196,14 @@ class LdapDirectoryClient:
             )
             return [entry_to_directory_row(entry, kind) for entry in entries]
         finally:
-            with suppress(LDAPException):
-                connection.unbind()
+            unbind_suppressing_ldap_error(connection)
 
 
-def _new_ldap_connection(
-    config: LdapSearchConfig, *, read_only: bool = True
-) -> tuple[Any, LdapServerSettings]:
-    from ldap3 import Connection, Server
-
-    settings = parse_ldap_server(config.server, config.normalized_encryption)
-    server = Server(
-        settings.host,
-        port=settings.port,
-        use_ssl=settings.use_ssl,
-        get_info=ldap_server_get_info(config),
-        tls=ldap_server_tls(config),
-        connect_timeout=config.timeout,
-    )
-    return Connection(
-        server, **ldap_connection_kwargs(config, read_only=read_only)
-    ), settings
-
-
-def _start_tls_if_needed(
-    connection: Any, config: LdapSearchConfig, settings: LdapServerSettings
-) -> None:
-    if config.normalized_encryption != "starttls" or settings.use_ssl:
-        return
-
-    from ldap3.core.exceptions import LDAPException
-
-    try:
-        tls_started = connection.start_tls()
-    except LDAPException as exc:
-        raise ValueError(_ldap_exception_message(exc, "LDAP StartTLS failed")) from exc
-    if not tls_started:
-        raise ValueError(
-            _ldap_result_message(connection.result, "LDAP StartTLS failed")
-        )
-
-
-def _bind_connection(connection: Any) -> None:
-    from ldap3.core.exceptions import LDAPException, LDAPPackageUnavailableError
-
-    try:
-        bound = connection.bind()
-    except LDAPPackageUnavailableError as exc:
-        raise ValueError(
-            "LDAP Kerberos bind needs optional package. Install sambatui[kerberos]."
-        ) from exc
-    except LDAPException as exc:
-        raise ValueError(_ldap_exception_message(exc, "LDAP bind failed")) from exc
-    if not bound:
-        raise ValueError(_ldap_result_message(connection.result, "LDAP bind failed"))
-
-
-def _search_connection(
-    connection: Any,
-    config: LdapSearchConfig,
-    search_filter: str,
-    max_entries: int | None = None,
-    *,
-    one_level: bool = False,
-) -> list[Any]:
-    from ldap3 import LEVEL, SUBTREE
-    from ldap3.core.exceptions import LDAPException
-
-    search_scope = LEVEL if one_level else SUBTREE
-    rows: list[Any] = []
-    cookie: bytes | str | None = None
-    while True:
-        try:
-            ok = connection.search(
-                config.base_dn,
-                search_filter,
-                search_scope=search_scope,
-                attributes=list(DEFAULT_LDAP_ATTRIBUTES),
-                paged_size=config.page_size,
-                paged_cookie=cookie,
-            )
-        except LDAPException as exc:
-            raise ValueError(
-                _ldap_exception_message(exc, "LDAP search failed")
-            ) from exc
-        if not ok:
-            raise ValueError(
-                _ldap_result_message(connection.result, "LDAP search failed")
-            )
-        for entry in connection.entries:
-            if max_entries is not None and len(rows) >= max_entries:
-                return rows
-            rows.append(entry)
-        cookie = _paged_search_cookie(connection.result)
-        if not cookie:
-            return rows
-
-
-def _paged_search_cookie(result: Mapping[str, Any] | None) -> bytes | str | None:
-    if result is None:
-        return None
-    control = result.get("controls", {}).get("1.2.840.113556.1.4.319", {})
-    value = control.get("value", {}) if isinstance(control, Mapping) else {}
-    cookie = value.get("cookie") if isinstance(value, Mapping) else None
-    return cookie or None
-
-
-def entry_to_directory_row(entry: Any, kind: str = "all") -> DirectoryRow:
-    attrs = normalize_entry_attributes(entry.entry_attributes_as_dict)
-    dn = str(entry.entry_dn)
-    name = first_attr(attrs, "displayName", "cn", "name", "sAMAccountName") or dn
-    row_kind = infer_kind(attrs, kind)
-    summary = directory_summary(attrs)
-    return DirectoryRow(
-        dn=dn, kind=row_kind, name=name, summary=summary, attributes=attrs
-    )
-
-
-def normalize_entry_attributes(
-    attributes: Mapping[str, Any],
-) -> dict[str, tuple[str, ...]]:
-    return {
-        str(key): normalize_attribute_values(value) for key, value in attributes.items()
-    }
-
-
-def normalize_attribute_values(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, (list, tuple, set)):
-        return tuple(str(item) for item in value if item is not None)
-    return (str(value),)
-
-
-def first_attr(attrs: Mapping[str, Sequence[str]], *names: str) -> str:
-    for name in names:
-        values = attrs.get(name, ())
-        if values:
-            return values[0]
-    return ""
-
-
-def infer_kind(attrs: Mapping[str, Sequence[str]], requested_kind: str = "all") -> str:
-    classes = {value.casefold() for value in attrs.get("objectClass", ())}
-    if "computer" in classes:
-        return "computer"
-    if "group" in classes:
-        return "group"
-    if "organizationalunit" in classes:
-        return "ou"
-    if "container" in classes or "builtindomain" in classes:
-        return "container"
-    if "user" in classes and "person" in classes:
-        return "user"
-    return _KIND_LABELS.get(requested_kind.casefold(), "object")
-
-
-def directory_summary(attrs: Mapping[str, Sequence[str]]) -> str:
-    parts = [
-        first_attr(attrs, "sAMAccountName"),
-        first_attr(attrs, "userPrincipalName"),
-        first_attr(attrs, "mail"),
-        first_attr(attrs, "description"),
-    ]
-    member_of = attrs.get("memberOf", ())
-    if member_of:
-        parts.append(f"memberOf={len(member_of)}")
-    return " · ".join(part for part in parts if part)
-
-
-def _ldap_result_message(result: Mapping[str, Any] | None, fallback: str) -> str:
-    if result is None:
-        return fallback
-    description = str(result.get("description") or "").strip()
-    message = str(result.get("message") or "").strip()
-    detail = ": ".join(part for part in (description, message) if part)
-    return f"{fallback}: {detail}" if detail else fallback
-
-
-def _ldap_exception_message(exc: Exception, fallback: str) -> str:
-    message = str(exc).strip()
-    return f"{fallback}: {message}" if message else fallback
+# Backwards-compatible private aliases for tests and downstream users that imported them.
+_new_ldap_connection = new_ldap_connection
+_start_tls_if_needed = start_tls_if_needed
+_bind_connection = bind_connection
+_search_connection = search_connection
+_paged_search_cookie = paged_search_cookie
+_ldap_result_message = ldap_result_message
+_ldap_exception_message = ldap_exception_message

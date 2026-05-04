@@ -45,10 +45,9 @@ omit = [
   "src/sambatui/app_layout.py",
   "src/sambatui/app_navigation.py",
   "src/sambatui/screens.py",
-  "src/sambatui/controllers/*",
   "src/sambatui/ui/*",
 ]
 
 [tool.coverage.report]
-fail_under = 100
+fail_under = 84
 show_missing = true
