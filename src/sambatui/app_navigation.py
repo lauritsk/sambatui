@@ -113,9 +113,17 @@ class AppNavigationMixin(App):
         self.pending_g = False
         self.query_one(f"#{self.sidebar_table_id()}", DataTable).focus()
 
+    def records_table(self) -> DataTable:
+        return self.query_one("#records", DataTable)
+
+    def focus_records_table(self) -> DataTable:
+        table = self.records_table()
+        table.focus()
+        return table
+
     def action_focus_records(self) -> None:
         self.pending_g = False
-        self.query_one("#records", DataTable).focus()
+        self.focus_records_table()
 
     def action_next_table(self) -> None:
         table = self.focused_table()
@@ -163,12 +171,12 @@ class AppNavigationMixin(App):
     def update_visual_selection(self) -> None:
         if not self.visual_selecting or self.selection_anchor is None:
             return
-        table = self.query_one("#records", DataTable)
+        table = self.records_table()
         if self.focused_table() is table:
             self.select_record_range(self.selection_anchor, table.cursor_row)
 
     def active_table(self) -> DataTable:
-        return self.focused_table() or self.query_one("#records", DataTable)
+        return self.focused_table() or self.records_table()
 
     def page_rows(self, table: DataTable) -> int:
         height = getattr(table.size, "height", 0)
@@ -234,12 +242,22 @@ class AppNavigationMixin(App):
         self.set_status("Selection only applies to DNS records.")
         return False
 
+    def record_selection_table(
+        self, *, focus: bool = False, require_records_focus: bool = False
+    ) -> DataTable | None:
+        table = self.focus_records_table() if focus else self.active_table()
+        if require_records_focus and table.id != "records":
+            return None
+        if not table.row_count:
+            return None
+        if not self.ensure_dns_records_view():
+            return None
+        return table
+
     def action_toggle_select(self) -> None:
         self.pending_g = False
-        table = self.focused_table() or self.query_one("#records", DataTable)
-        if table.id != "records" or not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
+        table = self.record_selection_table(require_records_focus=True)
+        if table is None:
             return
         row_index = table.cursor_row
         if self.selection_anchor is None:
@@ -250,11 +268,8 @@ class AppNavigationMixin(App):
 
     def action_visual_select(self) -> None:
         self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
+        table = self.record_selection_table(focus=True)
+        if table is None:
             return
         if self.visual_selecting:
             self.visual_selecting = False
@@ -269,11 +284,8 @@ class AppNavigationMixin(App):
 
     def action_select_range(self) -> None:
         self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not table.row_count:
-            return
-        if not self.ensure_dns_records_view():
+        table = self.record_selection_table(focus=True)
+        if table is None:
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
@@ -281,9 +293,8 @@ class AppNavigationMixin(App):
 
     def extend_selection_by(self, delta: int) -> None:
         self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not self.ensure_dns_records_view():
+        table = self.record_selection_table(focus=True)
+        if table is None:
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
