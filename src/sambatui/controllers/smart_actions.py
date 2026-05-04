@@ -332,11 +332,11 @@ class AppSmartActionsMixin(AppControllerBase):
         return []
 
     async def dashboard_ldap_rows(
-        self, client: LdapDirectoryClient, kind: str
+        self, client: LdapDirectoryClient, kind: str, max_rows: int
     ) -> tuple[list[DirectoryRow] | None, str]:
         async with self.busy():
             try:
-                return await asyncio.to_thread(client.search, kind, ""), ""
+                return await asyncio.to_thread(client.search, kind, "", max_rows), ""
             except ValueError as exc:
                 return None, str(exc)
 
@@ -435,9 +435,11 @@ class AppSmartActionsMixin(AppControllerBase):
         if validation_error:
             return self.ldap_dashboard_validation_results(validation_error)
 
-        user_rows, user_error = await self.dashboard_ldap_rows(client, "users")
+        user_rows, user_error = await self.dashboard_ldap_rows(
+            client, "users", options.max_rows
+        )
         computer_rows, computer_error = await self.dashboard_ldap_rows(
-            client, "computers"
+            client, "computers", options.max_rows
         )
         return self.ldap_dashboard_results(
             user_rows, user_error, computer_rows, computer_error, options

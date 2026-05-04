@@ -1544,7 +1544,10 @@ def test_smart_dns_ldap_dashboard_and_directory_edges(
         def validation_error(self) -> str:
             return self.error
 
-        def search(self, kind: str, text: str) -> list[DirectoryRow]:
+        def search(
+            self, kind: str, text: str, max_entries: int | None = None
+        ) -> list[DirectoryRow]:
+            assert max_entries == 5
             if kind == "computers":
                 raise ValueError("computer error")
             return [directory_row()]
@@ -1660,9 +1663,9 @@ def test_smart_dns_ldap_dashboard_and_directory_edges(
                 "ldap_users_without_groups", [directory_row()], options
             )
 
-            assert await app.dashboard_ldap_rows(cast(Any, FakeClient()), "users")
+            assert await app.dashboard_ldap_rows(cast(Any, FakeClient()), "users", 5)
             rows, error = await app.dashboard_ldap_rows(
-                cast(Any, FakeClient()), "computers"
+                cast(Any, FakeClient()), "computers", 5
             )
             assert rows is None and error == "computer error"
 
