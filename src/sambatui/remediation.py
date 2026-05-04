@@ -34,7 +34,7 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
         "press Ctrl+O and set User, or switch auth to kerberos",
     ),
     (
-        lambda message: "enter password" in message or "needs a password" in message,
+        _contains_any("enter password", "needs a password"),
         "press p to load password, Ctrl+O to edit, or use kerberos",
     ),
     (
@@ -103,4 +103,6 @@ def bounded_int(
     except ValueError:
         return default
     number = max(minimum, number)
-    return min(number, maximum) if maximum is not None else number
+    if maximum is not None:
+        return min(number, maximum)
+    return number

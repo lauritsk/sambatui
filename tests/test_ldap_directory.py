@@ -132,6 +132,13 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
     )
 
 
+def test_client_search_raises_validation_error_before_connecting() -> None:
+    client = LdapDirectoryClient(LdapSearchConfig(server="dc01.example.com"))
+
+    with pytest.raises(ValueError, match="LDAP search needs a username"):
+        client.search("users")
+
+
 def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
     kwargs = ldap_connection_kwargs(
         LdapSearchConfig(
