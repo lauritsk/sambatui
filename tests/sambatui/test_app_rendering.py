@@ -98,7 +98,7 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
             )
 
         async def dashboard_ldap_rows(
-            self, client, kind: str
+            self, client, kind: str, max_rows: int
         ) -> tuple[list[DirectoryRow] | None, str]:
             if kind == "computers":
                 return None, "LDAP timeout"
