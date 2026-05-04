@@ -14,21 +14,20 @@ from textual.widgets import (
     TabbedContent,
 )
 
-from ..dns import (
-    parse_records,
-    parse_zones,
+from ..dns.parsing import parse_records, parse_zones
+from ..dns.ptr import (
     ptr_target_for_name as dns_ptr_target_for_name,
     reverse_record_for_ipv4 as dns_reverse_record_for_ipv4,
 )
-from ..ldap_directory import (
+from ..ldap.client import (
     DirectoryRow,
 )
-from ..ldap_sidebar import (
+from ..ldap.sidebar import (
     SidebarItem,
     active_ldap_sidebar_item,
     ldap_sidebar_items,
 )
-from ..models import DnsRow
+from ..core.models import DnsRow
 from ..smart_views import (
     SmartViewRow,
 )

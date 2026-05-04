@@ -1,4 +1,4 @@
-from sambatui.screens import ConfirmScreen
+from sambatui.ui.screens import ConfirmScreen
 
 
 def test_confirmation_keys_match_yes_no_and_default() -> None:

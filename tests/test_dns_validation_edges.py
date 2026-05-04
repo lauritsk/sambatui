@@ -6,13 +6,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui import dns as dns_module
-from sambatui.dns import (
-    ptr_target_for_name,
-    reverse_record_for_ipv4,
-    valid_dns_name,
-    validate_record,
-)
+from sambatui.dns import validation as validation_module
+from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
+from sambatui.dns.validation import valid_dns_name, validate_record
 
 DNS_LABEL = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
@@ -30,7 +26,7 @@ def test_dns_value_error_path_and_mx_shape(monkeypatch: pytest.MonkeyPatch) -> N
     def raise_value_error(_rtype: str, _value: str) -> str | None:
         raise ValueError("bad rdata")
 
-    monkeypatch.setattr(dns_module, "_record_value_error", raise_value_error)
+    monkeypatch.setattr(validation_module, "_record_value_error", raise_value_error)
     assert validate_record("www", "A", "192.0.2.1") == "bad rdata"
 
 

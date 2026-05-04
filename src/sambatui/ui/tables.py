@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TypeAlias
 
-from sambatui.ldap_directory import DirectoryRow
-from sambatui.models import DnsRow
+from sambatui.ldap.client import DirectoryRow
+from sambatui.core.models import DnsRow
 from sambatui.smart_views import SmartViewRow
 
 DNS_COLUMNS = ("✓", "Name", "Type", "Value", "TTL", "Records", "Children")

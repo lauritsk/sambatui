@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 
-from sambatui.ldap_directory import DirectoryRow
-from sambatui.models import DnsRow
+from sambatui.ldap.client import DirectoryRow
+from sambatui.core.models import DnsRow
 from sambatui.smart_views import SmartViewRow
 
 LDAP_DETAIL_ATTRIBUTES = (

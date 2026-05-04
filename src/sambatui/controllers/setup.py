@@ -4,24 +4,22 @@ import asyncio
 
 from textual import work
 
-from ..config import (
+from ..core.config import (
     password_file_warning,
     read_password_file,
     user_config_validation_error,
 )
-from ..discovery import (
+from ..samba.discovery import (
     DiscoveredService,
     discover_ad_services,
     normalize_domain,
     preferred_domain_controller,
 )
-from ..dns import (
-    parse_zones,
-)
-from ..ldap_directory import (
+from ..dns.parsing import parse_zones
+from ..ldap.client import (
     domain_to_base_dn,
 )
-from ..screens import (
+from ..ui.screens import (
     FormField,
 )
 from ..app_constants import (

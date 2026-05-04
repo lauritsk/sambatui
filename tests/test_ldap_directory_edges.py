@@ -5,8 +5,8 @@ from typing import Any
 import pytest
 from ldap3.core.exceptions import LDAPException
 
-from sambatui import ldap_directory as ldap_module
-from sambatui.ldap_directory import (
+from sambatui.ldap import client as ldap_module
+from sambatui.ldap.client import (
     LdapCompatibilityTls,
     LdapDirectoryClient,
     LdapSearchConfig,

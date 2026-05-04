@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sambatui.discovery import (
+from sambatui.samba.discovery import (
     DiscoveredService,
     _services_from_answer,
     preferred_domain_controller,

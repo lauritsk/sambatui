@@ -4,16 +4,14 @@ import asyncio
 
 from textual import work
 
-from ..dns import (
-    parse_records,
-    validate_record,
-)
-from ..ldap_directory import (
+from ..dns.parsing import parse_records
+from ..dns.validation import validate_record
+from ..ldap.client import (
     DirectoryRow,
     LdapDirectoryClient,
 )
-from ..models import DnsRow
-from ..screens import (
+from ..core.models import DnsRow
+from ..ui.screens import (
     FormField,
     SmartViewChoice,
     SmartViewPickerScreen,

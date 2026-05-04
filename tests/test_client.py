@@ -1,8 +1,8 @@
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 
-from sambatui.client import SambaToolClient, SambaToolConfig, parse_samba_options
-from sambatui.config import (
+from sambatui.samba.client import SambaToolClient, SambaToolConfig, parse_samba_options
+from sambatui.core.config import (
     detected_default_auth,
     fix_password_file_permissions,
     has_valid_kerberos_ticket,

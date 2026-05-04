@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .config import (
+from .core.config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
     DEFAULT_CONFIGFILE,
@@ -24,9 +24,9 @@ from .config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
-from .ldap_directory import DirectoryRow
-from .models import DnsRow
-from .screens import CommandPaletteChoice, FormField
+from .ldap.client import DirectoryRow
+from .core.models import DnsRow
+from .ui.screens import CommandPaletteChoice, FormField
 from .smart_view_catalog import SMART_VIEWS
 
 KEY_HINTS = {

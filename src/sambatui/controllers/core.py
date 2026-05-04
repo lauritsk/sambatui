@@ -15,8 +15,8 @@ from textual.widgets import (
     Static,
 )
 
-from ..client import SambaToolClient, SambaToolConfig
-from ..config import (
+from ..samba.client import SambaToolClient, SambaToolConfig
+from ..core.config import (
     fix_password_file_permissions,
     is_reverse_dns_zone,
     password_file_permissions_too_open,
@@ -24,23 +24,21 @@ from ..config import (
     read_password_file,
     save_user_config,
 )
-from ..discovery import (
+from ..samba.discovery import (
     normalize_domain,
 )
-from ..dns import (
-    parse_records,
-)
-from ..ldap_directory import (
+from ..dns.parsing import parse_records
+from ..ldap.client import (
     DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
 )
-from ..ldap_sidebar import (
+from ..ldap.sidebar import (
     SidebarItem,
 )
-from ..models import DnsRow
-from ..remediation import actionable_error
-from ..screens import (
+from ..core.models import DnsRow
+from ..core.remediation import actionable_error
+from ..ui.screens import (
     CommandPaletteScreen,
     ConfirmScreen,
     FormField,
@@ -49,7 +47,7 @@ from ..screens import (
     HelpScreen,
     infer_domain_from_server,
 )
-from ..settings import ConnectionSettings
+from ..core.settings import ConnectionSettings
 from ..smart_views import (
     SmartViewRow,
 )

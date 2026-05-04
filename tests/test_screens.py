@@ -1,4 +1,4 @@
-from sambatui.screens import infer_domain_from_server
+from sambatui.ui.screens import infer_domain_from_server
 
 
 def test_infer_domain_from_server_fqdn() -> None:

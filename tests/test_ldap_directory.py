@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 from ldap3 import GSSAPI, LEVEL, MODIFY_DELETE, MODIFY_REPLACE, NONE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
-from sambatui.ldap_directory import (
+from sambatui.ldap.client import (
     LdapDirectoryClient,
     LdapSearchConfig,
     build_add_entry,

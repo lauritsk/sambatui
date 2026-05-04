@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from sambatui import smart_views as smart_module
-from sambatui.ldap_directory import DirectoryRow
-from sambatui.models import DnsRow
+from sambatui.ldap.client import DirectoryRow
+from sambatui.core.models import DnsRow
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
     disabled_user_evidence,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .remediation import bounded_int
+from .core.remediation import bounded_int
 
 
 FULL_HEALTH_VIEW_ID = "full_health_dashboard"

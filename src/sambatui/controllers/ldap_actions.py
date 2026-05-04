@@ -4,7 +4,7 @@ import asyncio
 
 from textual import work
 
-from ..ldap_directory import (
+from ..ldap.client import (
     LDAP_ADD_KINDS,
     LDAP_EDITABLE_ATTRIBUTES,
     DirectoryRow,
@@ -12,8 +12,8 @@ from ..ldap_directory import (
     domain_to_base_dn,
     ldap_dn_in_scope,
 )
-from ..remediation import bounded_int
-from ..screens import (
+from ..core.remediation import bounded_int
+from ..ui.screens import (
     FormField,
 )
 from ..app_constants import (

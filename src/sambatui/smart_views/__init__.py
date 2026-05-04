@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from ..dns import reverse_record_for_ipv4 as reverse_record_for_ipv4
-from ..models import DnsRow
+from ..dns.ptr import reverse_record_for_ipv4 as reverse_record_for_ipv4
+from ..core.models import DnsRow
 from . import dns as _dns
 from .dashboard import (
     dashboard_detail_row,

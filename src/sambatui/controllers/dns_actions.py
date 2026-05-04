@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from textual import work
 
-from ..dns import (
-    validate_record,
-)
-from ..screens import (
+from ..dns.validation import validate_record
+from ..ui.screens import (
     FormField,
 )
 from ..app_constants import (

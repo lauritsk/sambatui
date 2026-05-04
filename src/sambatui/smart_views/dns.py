@@ -9,8 +9,8 @@ import dns.exception
 import dns.name
 import dns.reversename
 
-from ..dns import reverse_record_for_ipv4
-from ..models import DnsRow
+from ..dns.ptr import reverse_record_for_ipv4
+from ..core.models import DnsRow
 from .models import SmartViewRow
 
 
