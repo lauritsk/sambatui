@@ -31,6 +31,16 @@ HEADER_SORT_FIELDS_BY_VIEW_MODE = {
     "directory": DIRECTORY_HEADER_SORT_FIELDS,
     "smart": SMART_HEADER_SORT_FIELDS,
 }
+SIDEBAR_TABLE_IDS = frozenset(
+    {"zones", "ldap_structure", "dns_findings", "ldap_findings"}
+)
+NEXT_TABLE_BY_ID = {
+    "zones": "dns_findings",
+    "dns_findings": "records",
+    "ldap_structure": "ldap_findings",
+    "ldap_findings": "records",
+}
+VISUAL_SELECTION_OFF_STATUS = "Visual selection off; selected {count} record(s)"
 
 
 class AppNavigationMixin(App):
@@ -125,19 +135,21 @@ class AppNavigationMixin(App):
         self.pending_g = False
         self.focus_records_table()
 
+    def focus_table(self, table_id: str) -> DataTable:
+        table = self.query_one(f"#{table_id}", DataTable)
+        table.focus()
+        return table
+
+    def next_table_id(self, table_id: str | None) -> str | None:
+        return NEXT_TABLE_BY_ID.get(table_id or "")
+
     def action_next_table(self) -> None:
         table = self.focused_table()
-        if table and table.id in {"zones", "dns_findings"}:
-            self.query_one(
-                "#dns_findings" if table.id == "zones" else "#records", DataTable
-            ).focus()
-        elif table and table.id in {"ldap_structure", "ldap_findings"}:
-            self.query_one(
-                "#ldap_findings" if table.id == "ldap_structure" else "#records",
-                DataTable,
-            ).focus()
-        else:
+        table_id = self.next_table_id(str(table.id)) if table is not None else None
+        if table_id is None:
             self.action_focus_zones()
+            return
+        self.focus_table(table_id)
 
     def action_previous_table(self) -> None:
         table = self.focused_table()
@@ -280,9 +292,7 @@ class AppNavigationMixin(App):
             return
         if self.visual_selecting:
             self.visual_selecting = False
-            self.set_status(
-                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
-            )
+            self.set_visual_selection_off_status()
             return
         self.visual_selecting = True
         self.selection_anchor = table.cursor_row
@@ -327,9 +337,7 @@ class AppNavigationMixin(App):
             return
         if self.visual_selecting:
             self.visual_selecting = False
-            self.set_status(
-                f"Visual selection off; selected {len(self.selected_record_rows)} record(s)"
-            )
+            self.set_visual_selection_off_status()
             return
         if self.selected_record_rows:
             self.clear_record_selection()
@@ -343,6 +351,14 @@ class AppNavigationMixin(App):
             self.set_status("Search cleared")
             return
         self.action_focus_records()
+
+    def set_visual_selection_off_status(self) -> None:
+        self.set_status(
+            VISUAL_SELECTION_OFF_STATUS.format(count=len(self.selected_record_rows))
+        )
+
+    def is_sidebar_table(self, table: DataTable | None) -> bool:
+        return table is not None and table.id in SIDEBAR_TABLE_IDS
 
     async def action_activate_row(self) -> None:
         self.pending_g = False
@@ -360,12 +376,7 @@ class AppNavigationMixin(App):
                 case _:
                     self.set_status("No active records view.")
             return
-        if table and table.id in {
-            "zones",
-            "ldap_structure",
-            "dns_findings",
-            "ldap_findings",
-        }:
+        if table is not None and self.is_sidebar_table(table):
             await self.activate_sidebar_selection(table)
 
     async def on_key(self, event: Key) -> None:
@@ -467,12 +478,7 @@ class AppNavigationMixin(App):
             self.update_details_pane()
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id not in {
-            "zones",
-            "ldap_structure",
-            "dns_findings",
-            "ldap_findings",
-        }:
+        if not self.is_sidebar_table(event.data_table):
             return
         await self.activate_sidebar_selection(event.data_table)
 
