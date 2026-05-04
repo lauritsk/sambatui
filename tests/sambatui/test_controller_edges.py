@@ -864,7 +864,10 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.sort_records("type")
             app.populate_smart_view("x", [smart_row()])
             app.sort_records("name")
-            assert "read-only" in str(app.query_one("#status", Static).render())
+            assert "Sorted smart view" in str(app.query_one("#status", Static).render())
+            app.sort_smart_view("missing")
+            app.view_mode = "unknown"
+            app.sort_records("name")
             app.populate_directory(
                 [directory_row(name="Bob"), directory_row(name="Alice")]
             )
@@ -905,6 +908,39 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
                 app.view_mode = mode
                 app.refresh_current_view()
             await app.action_load_zones()
+
+    asyncio.run(run_app())
+
+
+def test_smart_view_default_sort_and_user_override() -> None:
+    async def run_app() -> None:
+        app = NotificationApp()
+        async with app.run_test():
+            rows = [
+                smart_row(object="recent", evidence="lastLogonTimestamp 100 days ago"),
+                smart_row(object="oldest", evidence="lastLogonTimestamp 300 days ago"),
+                smart_row(object="older", evidence="lastLogonTimestamp 200 days ago"),
+            ]
+            app.current_smart_view_id = "ldap_inactive_users"
+            app.populate_smart_view("LDAP inactive enabled users", rows)
+            assert [row.object for row in app.smart_view_rows] == [
+                "oldest",
+                "older",
+                "recent",
+            ]
+
+            app.sort_records("name")
+            assert [row.object for row in app.smart_view_rows] == [
+                "older",
+                "oldest",
+                "recent",
+            ]
+            app.populate_smart_view("LDAP inactive enabled users", rows)
+            assert [row.object for row in app.smart_view_rows] == [
+                "older",
+                "oldest",
+                "recent",
+            ]
 
     asyncio.run(run_app())
 

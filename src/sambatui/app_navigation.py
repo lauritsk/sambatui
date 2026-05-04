@@ -426,6 +426,21 @@ class AppNavigationMixin(App):
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         if event.data_table.id != "records":
             return
+        if self.view_mode == "smart":
+            match event.column_index:
+                case 1:
+                    self.sort_records("severity")
+                case 2:
+                    self.sort_records("object")
+                case 3:
+                    self.sort_records("finding")
+                case 4:
+                    self.sort_records("evidence")
+                case 5:
+                    self.sort_records("action")
+                case 6:
+                    self.sort_records("source")
+            return
         match event.column_index:
             case 1:
                 self.sort_records("name")

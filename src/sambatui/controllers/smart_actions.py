@@ -164,6 +164,7 @@ class AppSmartActionsMixin(AppControllerBase):
                 directory_rows,
                 SmartViewOptions.from_values(values),
             )
+        rows = self.sorted_smart_view(rows)
         self.populate_smart_view(view.label, rows[: self.current_smart_max_rows])
         self.notify("Refreshed smart-view findings")
 
@@ -220,6 +221,7 @@ class AppSmartActionsMixin(AppControllerBase):
         self, label: str, rows: list[SmartViewRow], max_rows: int
     ) -> None:
         self.set_search_text("", refresh=False)
+        rows = self.sorted_smart_view(rows)
         self.populate_smart_view(label, rows[:max_rows])
         self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
@@ -404,6 +406,8 @@ class AppSmartActionsMixin(AppControllerBase):
         options = SmartViewOptions.from_values(values)
         self.apply_smart_view_options(view, options)
         self.current_smart_view_id = view.view_id
+        self.current_smart_sort_field = ""
+        self.current_smart_sort_reverse = False
         self.current_smart_max_rows = options.max_rows
         self.current_smart_values = values
 

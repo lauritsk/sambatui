@@ -62,10 +62,13 @@ from ..app_constants import (
 )
 from .base import AppControllerBase
 from .helpers import (
+    SMART_DEFAULT_SORTS,
+    SMART_SORT_KEYS,
     TableRow,
     directory_sort_label,
     ldap_limit_suffix,
     next_sort_state,
+    smart_sort_label,
     sort_direction,
 )
 
@@ -280,7 +283,7 @@ class AppViewsMixin(AppControllerBase):
             self.refresh_key_hints()
         self.set_records_columns(SMART_COLUMNS)
         self.query_one("#records_title", Label).update(f"Smart View: {title}")
-        self.smart_view_rows = rows
+        self.smart_view_rows = self.sorted_smart_view(rows)
         self.refresh_smart_view()
         self.set_status(f"Loaded {len(rows)} smart-view findings")
 
@@ -502,6 +505,30 @@ class AppViewsMixin(AppControllerBase):
             reverse=self.directory_sort_reverse,
         )
 
+    def smart_sort_state(self) -> tuple[str, bool]:
+        if self.current_smart_sort_field:
+            return self.current_smart_sort_field, self.current_smart_sort_reverse
+        return SMART_DEFAULT_SORTS.get(self.current_smart_view_id, ("", False))
+
+    def sorted_smart_view(self, rows: list[SmartViewRow]) -> list[SmartViewRow]:
+        field, reverse = self.smart_sort_state()
+        if not field:
+            return rows
+        return sorted(rows, key=SMART_SORT_KEYS[field], reverse=reverse)
+
+    def sort_smart_view(self, field: str) -> None:
+        if field not in SMART_SORT_KEYS:
+            return
+        self.current_smart_sort_field, self.current_smart_sort_reverse = (
+            next_sort_state(
+                self.current_smart_sort_field, self.current_smart_sort_reverse, field
+            )
+        )
+        self.smart_view_rows = self.sorted_smart_view(self.smart_view_rows)
+        self.refresh_smart_view()
+        direction = sort_direction(self.current_smart_sort_reverse)
+        self.set_status(f"Sorted smart view by {smart_sort_label(field)} ({direction})")
+
     def sort_directory(self, field: str) -> None:
         if field not in DIRECTORY_SORT_KEYS:
             return
@@ -517,8 +544,10 @@ class AppViewsMixin(AppControllerBase):
         if self.view_mode == "directory":
             self.sort_directory(field)
             return
+        if self.view_mode == "smart":
+            self.sort_smart_view(field)
+            return
         if self.view_mode != "dns":
-            self.set_status("Current view is read-only; sorting applies to rows.")
             return
         self.sort_field, self.sort_reverse = next_sort_state(
             self.sort_field, self.sort_reverse, field
