@@ -7,7 +7,7 @@ from typing import Any, Protocol
 import dns.exception
 import dns.resolver
 
-from .dns import valid_dns_name
+from sambatui.dns.validation import valid_dns_name
 
 
 class SrvResolver(Protocol):

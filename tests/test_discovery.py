@@ -6,7 +6,7 @@ import dns.rdatatype
 import dns.resolver
 import pytest
 
-from sambatui.discovery import (
+from sambatui.samba.discovery import (
     ad_srv_query_names,
     discover_ad_services,
     normalize_domain,

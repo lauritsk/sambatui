@@ -2,27 +2,21 @@ from __future__ import annotations
 
 from textual.app import App
 
-from .client import SambaToolClient, SambaToolConfig, parse_samba_options
-from .config import (
+from .samba.client import SambaToolClient, SambaToolConfig, parse_samba_options
+from .core.config import (
     password_file_warning,
     read_password_file,
 )
-from .dns import (
-    NAME_RE,
-    REC_RE,
-    parse_records,
-    parse_zones,
-    valid_dns_name,
-    validate_record,
-)
-from .ldap_sidebar import (
+from .dns.parsing import NAME_RE, REC_RE, parse_records, parse_zones
+from .dns.validation import valid_dns_name, validate_record
+from .ldap.sidebar import (
     ldap_structure_labels,
     ldap_structure_nodes,
     split_ldap_dn,
 )
-from .models import DnsRow
-from .remediation import actionable_error
-from .screens import (
+from .core.models import DnsRow
+from .core.remediation import actionable_error
+from .ui.screens import (
     CommandPaletteScreen,
     ConfirmScreen,
     FormField,

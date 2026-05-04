@@ -6,8 +6,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui import config as config_module
-from sambatui.config import (
+from sambatui.core import config as config_module
+from sambatui.core.config import (
     _default_domain,
     password_file_permissions_too_open,
     password_file_warning,

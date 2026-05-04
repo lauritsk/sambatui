@@ -11,7 +11,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import Suggester
 from textual.widgets import Button, Input, Static
 
-from ...ldap_directory import domain_to_base_dn
+from ...ldap.client import domain_to_base_dn
 from .base import FocusedModalScreen
 
 

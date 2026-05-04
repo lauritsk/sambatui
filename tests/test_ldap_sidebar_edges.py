@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from sambatui.ldap_directory import DirectoryRow
-from sambatui.ldap_sidebar import ldap_structure_nodes
-from sambatui.settings import ConnectionSettings
+from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.sidebar import ldap_structure_nodes
+from sambatui.core.settings import ConnectionSettings
 
 
 def test_ldap_sidebar_and_settings_exception_branches() -> None:

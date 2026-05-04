@@ -1,5 +1,5 @@
-from sambatui.ldap_directory import DirectoryRow
-from sambatui.ldap_sidebar import (
+from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.sidebar import (
     SidebarItem,
     active_ldap_sidebar_item,
     ldap_sidebar_items,

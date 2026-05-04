@@ -8,8 +8,8 @@ import pytest
 from ldap3 import NTLM, SIMPLE
 from ldap3.core.exceptions import LDAPPackageUnavailableError
 
-from sambatui.client import SambaToolClient, SambaToolConfig
-from sambatui.config import (
+from sambatui.samba.client import SambaToolClient, SambaToolConfig
+from sambatui.core.config import (
     DEFAULT_AUTH,
     load_user_config,
     password_file_warning,
@@ -17,15 +17,10 @@ from sambatui.config import (
     save_user_config,
     user_config_validation_error,
 )
-from sambatui.dns import (
-    parse_records,
-    parse_zones,
-    ptr_target_for_name,
-    reverse_record_for_ipv4,
-    valid_dns_name,
-    validate_record,
-)
-from sambatui.ldap_directory import (
+from sambatui.dns.parsing import parse_records, parse_zones
+from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
+from sambatui.dns.validation import valid_dns_name, validate_record
+from sambatui.ldap.client import (
     DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
@@ -41,8 +36,8 @@ from sambatui.ldap_directory import (
     normalize_entry_attributes,
     parse_ldap_server,
 )
-from sambatui.remediation import actionable_error, bounded_int
-from sambatui.settings import ConnectionSettings
+from sambatui.core.remediation import actionable_error, bounded_int
+from sambatui.core.settings import ConnectionSettings
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
     age_text,
@@ -62,7 +57,7 @@ from sambatui.smart_views import (
     normalized_now,
     parse_ad_datetime,
 )
-from sambatui.models import DnsRow
+from sambatui.core.models import DnsRow
 
 
 def dns_row(name: str, rtype: str, value: str) -> DnsRow:

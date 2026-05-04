@@ -15,10 +15,11 @@ from sambatui.app import (
 )
 from textual.widgets import Button, DataTable, Input, Static
 
-from sambatui.discovery import DiscoveredService
-from sambatui.dns import ptr_target_for_name, reverse_record_for_ipv4, valid_dns_name
-from sambatui.ldap_directory import DirectoryRow, LdapDirectoryClient
-from sambatui.screens import (
+from sambatui.samba.discovery import DiscoveredService
+from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
+from sambatui.dns.validation import valid_dns_name
+from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
+from sambatui.ui.screens import (
     CommandPaletteScreen,
     ConfirmScreen,
     FormField,

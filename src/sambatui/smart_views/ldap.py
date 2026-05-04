@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 
-from ..ldap_directory import DirectoryRow, first_attr
+from ..ldap.client import DirectoryRow, first_attr
 from .models import SmartViewRow
 
 

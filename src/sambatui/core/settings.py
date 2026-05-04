@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-from .client import SambaToolConfig, parse_samba_options
+from sambatui.samba.client import SambaToolConfig, parse_samba_options
 from .config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
@@ -22,7 +22,7 @@ from .config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
-from .ldap_directory import LdapSearchConfig, domain_to_base_dn
+from sambatui.ldap.config import LdapSearchConfig, domain_to_base_dn
 
 FormField: TypeAlias = tuple[str, str, str, str]
 FieldTemplate: TypeAlias = tuple[str, str, str]
