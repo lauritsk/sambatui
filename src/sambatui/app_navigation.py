@@ -161,14 +161,17 @@ class AppNavigationMixin(App):
             return 10
         return max(1, height - 3)
 
+    def finish_cursor_move(self) -> None:
+        self.update_visual_selection()
+        self.update_details_pane()
+
     def move_cursor_by(self, delta: int) -> None:
         table = self.active_table()
         if not table.row_count:
             return
         row = max(0, min(table.cursor_row + delta, table.row_count - 1))
         table.move_cursor(row=row)
-        self.update_visual_selection()
-        self.update_details_pane()
+        self.finish_cursor_move()
 
     def action_cursor_down(self) -> None:
         self.pending_g = False
@@ -202,16 +205,14 @@ class AppNavigationMixin(App):
         self.pending_g = False
         table = self.active_table()
         table.move_cursor(row=0)
-        self.update_visual_selection()
-        self.update_details_pane()
+        self.finish_cursor_move()
 
     def action_cursor_bottom(self) -> None:
         self.pending_g = False
         table = self.active_table()
         if table.row_count:
             table.move_cursor(row=table.row_count - 1)
-            self.update_visual_selection()
-            self.update_details_pane()
+            self.finish_cursor_move()
 
     def ensure_dns_records_view(self) -> bool:
         if self.view_mode == "dns":

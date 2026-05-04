@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from typing import TypeVar
 
 from textual import work
 
@@ -28,6 +30,9 @@ from .base import AppControllerBase
 from .helpers import (
     ldap_limit_suffix,
 )
+
+
+_LdapThreadResult = TypeVar("_LdapThreadResult")
 
 
 class AppLdapActionsMixin(AppControllerBase):
@@ -91,6 +96,21 @@ class AppLdapActionsMixin(AppControllerBase):
             self.populate_ldap_structure(self.ldap_structure_rows)
         self.save_preferences()
 
+    async def ldap_thread_result(
+        self,
+        operation: Callable[[], _LdapThreadResult],
+        *,
+        report_error: bool = True,
+    ) -> tuple[_LdapThreadResult | None, str]:
+        async with self.busy():
+            try:
+                return await asyncio.to_thread(operation), ""
+            except ValueError as exc:
+                error = str(exc)
+                if report_error:
+                    self.report_error(error)
+                return None, error
+
     async def directory_search_rows(
         self,
         client: LdapDirectoryClient,
@@ -98,21 +118,18 @@ class AppLdapActionsMixin(AppControllerBase):
         text: str,
         max_entries: int | None = None,
     ) -> list[DirectoryRow] | None:
-        async with self.busy():
-            try:
-                return await asyncio.to_thread(client.search, kind, text, max_entries)
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return None
+        rows, _error = await self.ldap_thread_result(
+            lambda: client.search(kind, text, max_entries)
+        )
+        return rows
 
     async def directory_container_rows(
         self, client: LdapDirectoryClient
     ) -> list[DirectoryRow]:
-        async with self.busy():
-            try:
-                return await asyncio.to_thread(client.child_containers, LDAP_MAX_ROWS)
-            except ValueError:
-                return []
+        rows, _error = await self.ldap_thread_result(
+            lambda: client.child_containers(LDAP_MAX_ROWS), report_error=False
+        )
+        return rows or []
 
     def ldap_search_max_rows(self, values: dict[str, str]) -> int:
         return bounded_int(
@@ -265,14 +282,11 @@ class AppLdapActionsMixin(AppControllerBase):
         ):
             self.notify("LDAP edit cancelled")
             return
-        async with self.busy():
-            try:
-                await asyncio.to_thread(
-                    self.ldap_client().modify_attributes, row.dn, changes
-                )
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return
+        _result, error = await self.ldap_thread_result(
+            lambda: self.ldap_client().modify_attributes(row.dn, changes)
+        )
+        if error:
+            return
         self.notify("LDAP entry updated")
         await self.refresh_current_directory_search()
 
@@ -356,18 +370,16 @@ class AppLdapActionsMixin(AppControllerBase):
         if not await self.confirm(self.ldap_add_preview(values), default_confirm=True):
             self.notify("LDAP add cancelled")
             return
-        async with self.busy():
-            try:
-                dn = await asyncio.to_thread(
-                    self.ldap_client().add_entry,
-                    values["kind"],
-                    values["parent_dn"],
-                    values["name"],
-                    self.ldap_add_attributes(values),
-                )
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return
+        dn, error = await self.ldap_thread_result(
+            lambda: self.ldap_client().add_entry(
+                values["kind"],
+                values["parent_dn"],
+                values["name"],
+                self.ldap_add_attributes(values),
+            )
+        )
+        if error:
+            return
         self.notify(f"LDAP entry added: {dn}")
         await self.refresh_current_directory_search()
 
@@ -385,11 +397,10 @@ class AppLdapActionsMixin(AppControllerBase):
         if not await self.confirm(self.ldap_delete_preview(row)):
             self.notify("LDAP delete cancelled")
             return
-        async with self.busy():
-            try:
-                await asyncio.to_thread(self.ldap_client().delete_entry, row.dn)
-            except ValueError as exc:
-                self.report_error(str(exc))
-                return
+        _result, error = await self.ldap_thread_result(
+            lambda: self.ldap_client().delete_entry(row.dn)
+        )
+        if error:
+            return
         self.notify("LDAP entry deleted")
         await self.refresh_current_directory_search()
