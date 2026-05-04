@@ -34,18 +34,41 @@ def smart_age_sort_key(row: SmartViewRow) -> str:
     return f"{days:010d}"
 
 
+def smart_severity_sort_key(row: SmartViewRow) -> str:
+    rank = SEVERITY_RANK.get(row.severity.casefold(), 99)
+    return f"{rank:02d}:{row.object.casefold()}"
+
+
+def smart_object_sort_key(row: SmartViewRow) -> str:
+    return row.object.casefold()
+
+
+def smart_finding_sort_key(row: SmartViewRow) -> str:
+    return row.finding.casefold()
+
+
+def smart_evidence_sort_key(row: SmartViewRow) -> str:
+    return row.evidence.casefold()
+
+
+def smart_action_sort_key(row: SmartViewRow) -> str:
+    return row.suggested_action.casefold()
+
+
+def smart_source_sort_key(row: SmartViewRow) -> str:
+    return row.source.casefold()
+
+
 SMART_SORT_KEYS: dict[str, Callable[[SmartViewRow], str]] = {
-    "severity": lambda row: (
-        f"{SEVERITY_RANK.get(row.severity.casefold(), 99):02d}:{row.object.casefold()}"
-    ),
-    "object": lambda row: row.object.casefold(),
-    "name": lambda row: row.object.casefold(),
-    "finding": lambda row: row.finding.casefold(),
-    "type": lambda row: row.finding.casefold(),
-    "evidence": lambda row: row.evidence.casefold(),
-    "value": lambda row: row.evidence.casefold(),
-    "action": lambda row: row.suggested_action.casefold(),
-    "source": lambda row: row.source.casefold(),
+    "severity": smart_severity_sort_key,
+    "object": smart_object_sort_key,
+    "name": smart_object_sort_key,
+    "finding": smart_finding_sort_key,
+    "type": smart_finding_sort_key,
+    "evidence": smart_evidence_sort_key,
+    "value": smart_evidence_sort_key,
+    "action": smart_action_sort_key,
+    "source": smart_source_sort_key,
     "age": smart_age_sort_key,
 }
 DNS_SMART_ROW_BUILDERS = {
