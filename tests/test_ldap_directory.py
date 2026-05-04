@@ -7,11 +7,13 @@ from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 from sambatui.ldap_directory import (
     LdapDirectoryClient,
     LdapSearchConfig,
+    build_add_entry,
     build_directory_filter,
     domain_to_base_dn,
     entry_to_directory_row,
     gssapi_cred_store,
     ldap_connection_kwargs,
+    ldap_dn_in_scope,
     ldap_server_get_info,
     ldap_server_tls,
     parse_ldap_server,
@@ -322,6 +324,131 @@ def test_modify_attributes_replaces_and_deletes_allowed_attributes(
             "mail": [(MODIFY_DELETE, [])],
         },
     )
+
+
+def test_add_entry_builds_ad_user_defaults_and_escapes_rdn() -> None:
+    dn, object_class, attributes = build_add_entry(
+        "user",
+        "CN=Users,DC=example,DC=com",
+        "Doe, Jane",
+        {"userPrincipalName": "jane@example.com", "description": ""},
+    )
+
+    assert dn == r"CN=Doe\, Jane,CN=Users,DC=example,DC=com"
+    assert object_class == ("top", "person", "organizationalPerson", "user")
+    assert attributes == {
+        "userPrincipalName": "jane@example.com",
+        "cn": "Doe, Jane",
+        "sAMAccountName": "Doe, Jane",
+    }
+
+
+def test_add_entry_calls_ldap_add_writable_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections = []
+
+    class FakeConnection:
+        result = {}
+
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.added: tuple[str, object, object] | None = None
+            connections.append(self)
+
+        def bind(self) -> bool:
+            return True
+
+        def add(self, dn: str, object_class: object, attributes: object) -> bool:
+            self.added = (dn, object_class, attributes)
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    dn = client.add_entry("ou", "DC=example,DC=com", "Servers", {})
+
+    assert dn == "OU=Servers,DC=example,DC=com"
+    assert connections[0].kwargs["read_only"] is False
+    assert connections[0].added == (
+        "OU=Servers,DC=example,DC=com",
+        ("top", "organizationalUnit"),
+        {"ou": "Servers"},
+    )
+
+
+def test_ldap_dn_in_scope_accepts_base_and_child_with_comma_whitespace() -> None:
+    assert ldap_dn_in_scope("DC=example, DC=com", " DC=example,DC=com ")
+    assert ldap_dn_in_scope("OU=Users, DC=example, DC=com", "DC=example,DC=com")
+    assert not ldap_dn_in_scope("DC=evil,DC=com", "DC=example,DC=com")
+
+
+@pytest.mark.parametrize(
+    "dn", ["DC=example,DC=com", " DC=example,DC=com ", "DC=example, DC=com"]
+)
+def test_delete_entry_rejects_base_dn(dn: str) -> None:
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    with pytest.raises(ValueError, match="Refusing to delete LDAP base DN"):
+        client.delete_entry(dn)
+
+
+def test_delete_entry_calls_ldap_delete(monkeypatch: pytest.MonkeyPatch) -> None:
+    connections = []
+
+    class FakeConnection:
+        result = {}
+
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.deleted = ""
+            connections.append(self)
+
+        def bind(self) -> bool:
+            return True
+
+        def delete(self, dn: str) -> bool:
+            self.deleted = dn
+            return True
+
+        def unbind(self) -> bool:
+            return True
+
+    monkeypatch.setattr("ldap3.Connection", FakeConnection)
+    monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
+
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    client.delete_entry("CN=Alice,DC=example,DC=com")
+
+    assert connections[0].kwargs["read_only"] is False
+    assert connections[0].deleted == "CN=Alice,DC=example,DC=com"
 
 
 def test_modify_attributes_rejects_unlisted_attributes() -> None:

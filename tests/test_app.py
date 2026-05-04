@@ -344,6 +344,165 @@ def test_update_ldap_entry_edits_changed_allowlisted_attributes() -> None:
     asyncio.run(run_app())
 
 
+def test_add_ldap_entry_creates_entry_and_refreshes() -> None:
+    class FakeLdapClient:
+        def __init__(self, app: Any) -> None:
+            self.app = app
+
+        def add_entry(
+            self, kind: str, parent_dn: str, name: str, attributes: dict[str, str]
+        ) -> str:
+            self.app.added = (kind, parent_dn, name, attributes)
+            return f"CN={name},{parent_dn}"
+
+    class LdapAddApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.added: tuple[str, str, str, dict[str, str]] | None = None
+            self.confirm_message = ""
+            self.refreshed = False
+
+        async def form(
+            self,
+            title: str,
+            hint: str,
+            fields: list[FormField],
+            submit_label: str = "Continue",
+            validator: FormValidator | None = None,
+        ) -> dict[str, str] | None:
+            assert title == "Add LDAP entry"
+            assert submit_label == "Preview"
+            assert validator is not None
+            values = {
+                "kind": "user",
+                "parent_dn": "CN=Users,DC=example,DC=com",
+                "name": "Alice",
+                "sAMAccountName": "alice",
+                "userPrincipalName": "alice@example.com",
+                "mail": "",
+                "description": "Admin",
+            }
+            assert validator(values) is None
+            return values
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            self.confirm_message = message
+            assert default_confirm is True
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> Any:
+            assert base_dn == ""
+            return FakeLdapClient(self)
+
+        async def refresh_current_directory_search(self) -> bool:
+            self.refreshed = True
+            return True
+
+    async def run_app() -> None:
+        app = LdapAddApp()
+        async with app.run_test():
+            await app.add_ldap_entry()
+
+            assert app.added == (
+                "user",
+                "CN=Users,DC=example,DC=com",
+                "Alice",
+                {
+                    "sAMAccountName": "alice",
+                    "userPrincipalName": "alice@example.com",
+                    "mail": "",
+                    "description": "Admin",
+                },
+            )
+            assert "Add LDAP entry?" in app.confirm_message
+            assert app.refreshed
+
+    asyncio.run(run_app())
+
+
+def test_ldap_add_error_rejects_parent_outside_current_search_base() -> None:
+    app = SambatuiApp()
+    app.current_directory_values = {
+        "base_dn": "DC=example,DC=com",
+        "search_base_dn": "OU=Users,DC=example,DC=com",
+    }
+
+    error = app.ldap_add_error(
+        {"kind": "user", "parent_dn": "OU=Other,DC=example,DC=com", "name": "Alice"}
+    )
+
+    assert (
+        error
+        == "Parent DN must be at or below LDAP search base: OU=Users,DC=example,DC=com."
+    )
+    assert (
+        app.ldap_add_error(
+            {"kind": "user", "parent_dn": "OU=Other,DC=evil,DC=com", "name": "Alice"}
+        )
+        == "Parent DN must be at or below LDAP base: DC=example,DC=com."
+    )
+    assert (
+        app.ldap_add_error(
+            {
+                "kind": "user",
+                "parent_dn": "CN=Staff, OU=Users, DC=example,DC=com",
+                "name": "Alice",
+            }
+        )
+        is None
+    )
+
+
+def test_delete_ldap_entry_deletes_selected_dn() -> None:
+    class FakeLdapClient:
+        def __init__(self, app: Any) -> None:
+            self.app = app
+
+        def delete_entry(self, dn: str) -> None:
+            self.app.deleted = dn
+
+    class LdapDeleteApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.deleted = ""
+            self.confirm_message = ""
+            self.refreshed = False
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            self.confirm_message = message
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> Any:
+            return FakeLdapClient(self)
+
+        async def refresh_current_directory_search(self) -> bool:
+            self.refreshed = True
+            return True
+
+    async def run_app() -> None:
+        app = LdapDeleteApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    )
+                ]
+            )
+
+            await app.delete_ldap_entry()
+
+            assert app.deleted == "CN=Alice,DC=example,DC=com"
+            assert "DELETE selected LDAP entry?" in app.confirm_message
+            assert app.refreshed
+
+    asyncio.run(run_app())
+
+
 def test_ldap_container_expansion_failure_does_not_report_error() -> None:
     class FailingContainerClient:
         def child_containers(
