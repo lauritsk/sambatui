@@ -118,8 +118,12 @@ def test_sidebar_uses_current_list_widgets() -> None:
         async with app.run_test():
             assert list(app.query(Button)) == []
             assert app.query_one("#zones", DataTable).row_count == 1
-            assert app.query_one("#dns_findings", DataTable).row_count == 3
-            assert app.query_one("#ldap_findings", DataTable).row_count == 4
+            dns_findings = app.query_one("#dns_findings", DataTable)
+            ldap_findings = app.query_one("#ldap_findings", DataTable)
+            assert dns_findings.row_count == 3
+            assert ldap_findings.row_count == 4
+            assert len(dns_findings.get_row_at(0)) == 1
+            assert len(ldap_findings.get_row_at(0)) == 1
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
             app.populate_ldap_structure([])
             assert app.query_one("#ldap_structure", DataTable).row_count == 1

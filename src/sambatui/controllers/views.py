@@ -165,14 +165,16 @@ class AppViewsMixin(AppControllerBase):
     def populate_finding_sidebar(self, table_id: str, source: str) -> None:
         views = [view for view in SMART_VIEWS if view.source == source]
         items = [
-            SidebarItem(f"Run {view.shortcut}", view.view_id, "smart_view")
+            SidebarItem(
+                view.label.removeprefix(f"{source} "), view.view_id, "smart_view"
+            )
             for view in views
         ]
         table = self.query_one(f"#{table_id}", DataTable)
         self.sidebar_items[table_id] = items
         table.clear()
-        for view in views:
-            table.add_row(f"Run {view.shortcut}", view.label.removeprefix(f"{source} "))
+        for item in items:
+            table.add_row(item.label)
 
     def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
         return ldap_sidebar_items(rows, self.ldap_base_default())

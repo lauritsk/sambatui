@@ -12,7 +12,7 @@ from .ui.tables import DNS_COLUMNS
 
 class AppLayoutMixin(App):
     def findings_hint_text(self) -> str:
-        return "Saved hygiene filters. Enter runs; Esc clears active finding."
+        return "Saved hygiene filters. Enter opens; Esc clears active finding."
 
     def keys_hint_for_tab(self, tab_id: str | None) -> str:
         return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
@@ -45,7 +45,7 @@ class AppLayoutMixin(App):
                     self.findings_hint_text(), id="dns_findings_hint", classes="hint"
                 )
                 dns_findings = DataTable(id="dns_findings", cursor_type="row")
-                dns_findings.add_columns("Run", "DNS finding")
+                dns_findings.add_columns("DNS finding")
                 yield dns_findings
 
     def compose_ldap_tab(self) -> ComposeResult:
@@ -60,7 +60,7 @@ class AppLayoutMixin(App):
                     self.findings_hint_text(), id="ldap_findings_hint", classes="hint"
                 )
                 ldap_findings = DataTable(id="ldap_findings", cursor_type="row")
-                ldap_findings.add_columns("Run", "LDAP finding")
+                ldap_findings.add_columns("LDAP finding")
                 yield ldap_findings
 
     def compose_sidebar(self) -> ComposeResult:

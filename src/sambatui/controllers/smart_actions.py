@@ -36,8 +36,11 @@ from ..smart_views import (
     ldap_users_without_groups,
 )
 from ..app_constants import (
+    DEFAULT_LDAP_COMPATIBILITY,
+    DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_SMART_DAYS,
     DEFAULT_SMART_DISABLED_DAYS,
+    DEFAULT_SMART_MAX_ROWS,
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
     LDAP_LOAD_MORE_ROWS,
     LDAP_MAX_ROWS,
@@ -99,6 +102,30 @@ class AppSmartActionsMixin(AppControllerBase):
             fields.extend(self.ldap_connection_fields(self.ldap_base_default()))
         fields.append(self.smart_max_rows_field())
         return fields
+
+    def smart_view_default_values(self, view: SmartViewDefinition) -> dict[str, str]:
+        values = {"max_rows": self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS}
+        if view.needs_days:
+            values["days"] = self.val("smart_days") or DEFAULT_SMART_DAYS
+        if view.needs_disabled_days:
+            values["disabled_days"] = (
+                self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS
+            )
+        if view.needs_never_logged_days:
+            values["never_logged_days"] = (
+                self.val("smart_never_logged_days") or DEFAULT_SMART_NEVER_LOGGED_DAYS
+            )
+        if view.needs_ldap:
+            values.update(
+                {
+                    "base_dn": self.ldap_base_default(),
+                    "ldap_encryption": self.val("ldap_encryption")
+                    or DEFAULT_LDAP_ENCRYPTION,
+                    "ldap_compatibility": self.val("ldap_compatibility")
+                    or DEFAULT_LDAP_COMPATIBILITY,
+                }
+            )
+        return values
 
     async def dns_records_with_failures_for_smart_view(
         self,
@@ -422,15 +449,7 @@ class AppSmartActionsMixin(AppControllerBase):
 
     async def run_smart_view(self, view_id: str) -> None:
         view = SMART_VIEW_BY_ID[view_id]
-        values = await self.form(
-            view.label,
-            f"{view.description}\nRead-only hygiene findings. No deletes/changes are performed.",
-            self.smart_view_fields(view),
-            "Run",
-        )
-        if not values:
-            return
-
+        values = self.smart_view_default_values(view)
         options = SmartViewOptions.from_values(values)
         self.apply_smart_view_options(view, options)
         self.remember_current_smart_view(view, values, options)

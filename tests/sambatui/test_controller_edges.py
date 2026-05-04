@@ -886,7 +886,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
                 SidebarItem("OU", "OU=Users,DC=example,DC=com", "ldap_dn")
             )
             assert await app.activate_sidebar_item(
-                SidebarItem("Run 1", "dns_duplicates", "smart_view")
+                SidebarItem("duplicates/conflicts", "dns_duplicates", "smart_view")
             )
             assert app.smart_runs == ["dns_duplicates"]
             app.query_one("#dns_findings", DataTable).move_cursor(row=1)
