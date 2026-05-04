@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from sambatui import config as config_module
 from sambatui.config import (
@@ -10,6 +12,25 @@ from sambatui.config import (
     password_file_permissions_too_open,
     password_file_warning,
     user_config_value_error,
+)
+
+CONFIG_KEYS = st.sampled_from(
+    [
+        "server",
+        "domain",
+        "zone",
+        "auth",
+        "kerberos",
+        "auto_ptr",
+        "ldap_base",
+        "ldap_encryption",
+        "ldap_compatibility",
+        "smart_days",
+        "smart_disabled_days",
+        "smart_never_logged_days",
+        "smart_max_rows",
+        "unknown",
+    ]
 )
 
 
@@ -35,3 +56,12 @@ def test_config_last_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert password_file_warning(error_path) == (
         "Cannot inspect password file /secret/password: denied"
     )
+
+
+@given(CONFIG_KEYS, st.one_of(st.text(), st.integers(), st.booleans(), st.none()))
+def test_user_config_value_error_accepts_any_preference_value(
+    key: str, value: object
+) -> None:
+    error = user_config_value_error(key, value)
+
+    assert error is None or isinstance(error, str)
