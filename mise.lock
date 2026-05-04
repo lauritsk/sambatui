@@ -107,44 +107,44 @@ url = "https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-window
 provenance = "cosign"
 
 [[tools."github:lauritsk/sambatui"]]
-version = "0.3.1"
+version = "0.4.0"
 backend = "github:lauritsk/sambatui"
 
 [tools."github:lauritsk/sambatui"."platforms.linux-arm64"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [tools."github:lauritsk/sambatui"."platforms.linux-arm64-musl"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [tools."github:lauritsk/sambatui"."platforms.linux-x64"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [tools."github:lauritsk/sambatui"."platforms.linux-x64-musl"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [tools."github:lauritsk/sambatui"."platforms.macos-arm64"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 provenance = "github-attestations"
 
 [tools."github:lauritsk/sambatui"."platforms.macos-x64"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [tools."github:lauritsk/sambatui"."platforms.windows-x64"]
-checksum = "sha256:5af8c2029c67e0f8639f493892d5f6da0b270669161ddc85cd20744a09b805fd"
-url = "https://github.com/lauritsk/sambatui/releases/download/v0.3.1/sambatui-0.3.1.tar.gz"
-url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411847197"
+checksum = "sha256:0c7bf0fc7e490fac2731985903c4eaf2e40bbbec36efafe76359d84a66fc4fc5"
+url = "https://github.com/lauritsk/sambatui/releases/download/v0.4.0/sambatui-0.4.0.tar.gz"
+url_api = "https://api.github.com/repos/lauritsk/sambatui/releases/assets/411889999"
 
 [[tools.goreleaser]]
 version = "2.15.4"
