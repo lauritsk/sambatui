@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.2.0](https://github.com/lauritsk/sambatui/compare/40e2d75361a18e1ebd76df0864e6deafc9d6ae06..v0.2.0) - 2026-05-01
+#### Features
+- edit allowlisted LDAP attributes - ([64ae8d2](https://github.com/lauritsk/sambatui/commit/64ae8d2f52ea6c7bc89d0114d4ed0c9c4fa6541d)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- add prod version of sambatui tool - ([40e2d75](https://github.com/lauritsk/sambatui/commit/40e2d75361a18e1ebd76df0864e6deafc9d6ae06)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.1.1](https://github.com/lauritsk/sambatui/compare/e563a379796a4e0fe0098917be267992ee58d446..v0.1.1) - 2026-05-01
 #### Bug Fixes
 - (**release**) restore multi-arch image build - ([e563a37](https://github.com/lauritsk/sambatui/commit/e563a379796a4e0fe0098917be267992ee58d446)) - Karl Hans Laurits
