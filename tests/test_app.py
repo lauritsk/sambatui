@@ -401,6 +401,7 @@ def test_add_ldap_entry_creates_entry_and_refreshes() -> None:
     async def run_app() -> None:
         app = LdapAddApp()
         async with app.run_test():
+            app.current_directory_values = {"base_dn": "DC=example,DC=com"}
             await app.add_ldap_entry()
 
             assert app.added == (
