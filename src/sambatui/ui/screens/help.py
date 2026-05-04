@@ -38,8 +38,8 @@ Main tabs
   LDAP      Search AD directory over LDAP; a/u/d add, edit, delete entries, run LDAP findings
   L         Search LDAP from anywhere
   m         Load 200 more rows for the last LDAP search
-  S         Pick a smart view from a list
-  1-8       Run smart views directly; 8 runs full health dashboard
+  S         Pick a DNS/LDAP finding filter from a list
+  1-8       Open finding filters directly; 8 runs full health dashboard
   z         Load DNS zones
 
 Navigation
@@ -54,7 +54,7 @@ Records / directory
   q         Query records
   a/d       Add or delete DNS records / LDAP entries
   u         Update DNS record or selected LDAP attributes
-  /         Inline search source records; filters loaded smart findings
+  /         Inline search source records; filters loaded findings
   n/t/e     Sort by name/type/value
   Space     Toggle record selection
   v/V       Visual/range select

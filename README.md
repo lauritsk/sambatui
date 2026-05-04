@@ -8,7 +8,7 @@ directory browsing, and guarded LDAP entry management.
 
 `sambatui` wraps Samba's supported `samba-tool` CLI in a keyboard-friendly TUI,
 uses Python `ldap3` for directory operations, adds safe confirmations for write
-operations, and provides smart views for common DNS and AD hygiene checks.
+operations, and provides DNS/LDAP findings for common hygiene checks.
 
 ## Features
 
@@ -18,8 +18,8 @@ operations, and provides smart views for common DNS and AD hygiene checks.
 - Create matching PTR records for A records when a reverse zone is available.
 - Run DNS hygiene checks for duplicate records, missing PTRs, and orphan PTRs.
 - Search AD users, groups, computers, and OUs over LDAP.
-- Run LDAP smart views for inactive users, stale computers, cleanup candidates,
-  and users without secondary groups.
+- Run LDAP findings for inactive users, stale computers, cleanup candidates, and
+  users without secondary groups.
 - Add LDAP users, groups, computers, and OUs; edit allowlisted attributes; and
   delete selected LDAP entries after confirmation.
 - Use password or Kerberos authentication, with preference persistence for
@@ -181,10 +181,11 @@ palette.
 | `z` | Load DNS zones |
 | `c` | Discover domain controllers |
 | `L` | Search AD directory over LDAP |
-| `S` | Open smart-view picker |
-| `8` from smart views | Run full health dashboard |
-| `r` | Refresh current zone or rerun current smart view |
-| `f` | Apply a guided smart-view fix when available |
+| `S` | Open DNS/LDAP findings picker |
+| `1`-`7` | Open DNS/LDAP finding filters directly |
+| `8` | Run full health dashboard |
+| `r` | Refresh current zone or rerun current finding view |
+| `f` | Apply a guided finding fix when available |
 | `q` | Query one DNS name/type |
 | `a` | Add DNS record with guided picker and command preview, or add an LDAP entry |
 | `u` | Update selected DNS record or edit allowlisted LDAP attributes |

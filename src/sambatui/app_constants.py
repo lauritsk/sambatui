@@ -159,7 +159,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "connection",
         "Open connection settings",
         "Ctrl+O",
-        "Edit server, zone, auth, LDAP, and smart-view defaults.",
+        "Edit server, zone, auth, LDAP, and finding defaults.",
     ),
     (
         "load_password",
@@ -184,7 +184,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "refresh",
         "Refresh current view",
         "r",
-        "Reload the current DNS zone or rerun the active smart view.",
+        "Reload the current DNS zone or rerun the active finding view.",
     ),
     ("query_record", "Query DNS records", "q", "Query one DNS name and type."),
     (
@@ -209,7 +209,7 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
         "filter_results",
         "Search/filter results",
         "/",
-        "Focus inline search for DNS, LDAP, or smart-view rows.",
+        "Focus inline search for DNS, LDAP, or finding rows.",
     ),
     (
         "ldap_search",
@@ -243,14 +243,14 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
     ),
     (
         "smart_view_picker",
-        "Pick smart view",
+        "Pick finding filter",
         "S",
-        "Choose a DNS or LDAP health view from a list.",
+        "Choose a DNS or LDAP finding filter from a list.",
     ),
     *(
         (
             f"smart_view_{view.shortcut}",
-            f"Run smart view: {view.label}",
+            f"Open finding filter: {view.label}",
             view.shortcut,
             view.description,
         )
@@ -258,9 +258,9 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
     ),
     (
         "fix_smart",
-        "Fix selected smart finding",
+        "Fix selected finding",
         "f",
-        "Apply the available guided fix for the selected smart-view finding.",
+        "Apply the available guided fix for the selected finding.",
     ),
 )
 PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[str, ...]]] = {

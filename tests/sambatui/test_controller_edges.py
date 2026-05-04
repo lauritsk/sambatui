@@ -909,7 +909,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.view_mode = "directory"
             assert "No LDAP" in app.directory_details_text(99)
             app.view_mode = "smart"
-            assert "No smart" in app.smart_details_text(99)
+            assert "No findings" in app.smart_details_text(99)
 
             app.set_visible_status(0, 1, "records", "dns")
             app.search_text = "www"
