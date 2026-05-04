@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.0](https://github.com/lauritsk/sambatui/compare/5a7e1b967c4211903d6070423bdf88e0f7d27555..v0.3.0) - 2026-05-04
+#### Features
+- add LDAP entry management - ([1e8a4dc](https://github.com/lauritsk/sambatui/commit/1e8a4dc641369817960b1aa93842fd08da7aa435)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- update mise tools - ([9897ee2](https://github.com/lauritsk/sambatui/commit/9897ee2383829c9b461aa03a49f1f40fd38a922d)) - Karl Hans Laurits
+- update local sambatui version - ([5a7e1b9](https://github.com/lauritsk/sambatui/commit/5a7e1b967c4211903d6070423bdf88e0f7d27555)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.2.0](https://github.com/lauritsk/sambatui/compare/40e2d75361a18e1ebd76df0864e6deafc9d6ae06..v0.2.0) - 2026-05-01
 #### Features
 - edit allowlisted LDAP attributes - ([64ae8d2](https://github.com/lauritsk/sambatui/commit/64ae8d2f52ea6c7bc89d0114d4ed0c9c4fa6541d)) - Karl Hans Laurits
