@@ -4,8 +4,9 @@ import os
 import subprocess
 import tomllib
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
 USER_CONFIG_PATH = Path(
     os.getenv("SAMBATUI_USER_CONFIG", "~/.config/sambatui/config.toml")
@@ -71,6 +72,12 @@ VALIDATED_USER_CONFIG_KEYS = (
 )
 
 
+class CompletedProcessRunner(Protocol):
+    def __call__(
+        self, cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]: ...
+
+
 def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -80,7 +87,7 @@ def load_user_config(path: Path = USER_CONFIG_PATH) -> dict[str, str]:
     return _safe_user_config_values(data)
 
 
-def _preference_value(value: Any) -> str:
+def _preference_value(value: object) -> str:
     if isinstance(value, bool):
         return "on" if value else "off"
     if isinstance(value, int):
@@ -96,23 +103,40 @@ def _toml_string(value: str) -> str:
 
 
 def save_user_config(
-    values: Mapping[str, Any], path: Path = USER_CONFIG_PATH
+    values: Mapping[str, object], path: Path = USER_CONFIG_PATH
 ) -> dict[str, str]:
     safe_values = _safe_user_config_values(values)
+    content = "".join(
+        f"{key} = {_toml_string(safe_values[key])}\n" for key in sorted(safe_values)
+    )
+    write_private_text(path, content)
+    return safe_values
+
+
+def write_private_text(path: Path, content: str) -> None:
     parent_exists = path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not parent_exists:
         path.parent.chmod(0o700)
-    content = "".join(
-        f"{key} = {_toml_string(safe_values[key])}\n" for key in sorted(safe_values)
-    )
+
     tmp_path = path.with_name(f".{path.name}.tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    tmp_path.replace(path)
-    return safe_values
+    file_descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as file:
+            file_descriptor = -1
+            file.write(content)
+        tmp_path.chmod(0o600)
+        tmp_path.replace(path)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            tmp_path.unlink()
+        raise
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
 
 
-def _safe_user_config_values(values: Mapping[str, Any]) -> dict[str, str]:
+def _safe_user_config_values(values: Mapping[str, object]) -> dict[str, str]:
     safe_values: dict[str, str] = {}
     for key, value in values.items():
         normalized = _safe_user_config_value(key, value)
@@ -121,7 +145,7 @@ def _safe_user_config_values(values: Mapping[str, Any]) -> dict[str, str]:
     return safe_values
 
 
-def _safe_user_config_value(key: str, value: Any) -> str:
+def _safe_user_config_value(key: str, value: object) -> str:
     normalized = _preference_value(value)
     if key not in USER_CONFIG_KEYS or not normalized:
         return ""
@@ -144,7 +168,7 @@ def _normalized_on_off(value: str) -> str:
     return ""
 
 
-def user_config_value_error(key: str, value: Any) -> str | None:
+def user_config_value_error(key: str, value: object) -> str | None:
     normalized = _preference_value(value)
     if not normalized or key not in USER_CONFIG_KEYS | frozenset({"kerberos"}):
         return None
@@ -161,7 +185,7 @@ def user_config_value_error(key: str, value: Any) -> str | None:
     return None
 
 
-def user_config_validation_error(values: Mapping[str, Any]) -> str | None:
+def user_config_validation_error(values: Mapping[str, object]) -> str | None:
     for key in VALIDATED_USER_CONFIG_KEYS:
         error = user_config_value_error(key, values.get(key, ""))
         if error:
@@ -209,10 +233,11 @@ def _default_zone() -> str:
 
 
 def has_valid_kerberos_ticket(
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: CompletedProcessRunner | None = None,
 ) -> bool:
+    check_runner = runner or subprocess.run
     try:
-        result = runner(
+        result = check_runner(
             ["klist", "-s"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
