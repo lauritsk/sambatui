@@ -255,7 +255,7 @@ class AppViewsMixin(AppControllerBase):
         if item.action == "ldap_dn":
             return await self.activate_ldap_sidebar("all", search_base_dn=item.value)
         if item.action == "smart_view" and item.value in SMART_VIEW_BY_ID:
-            await self.run_smart_view(item.value)
+            self.action_smart_view_shortcut(SMART_VIEW_BY_ID[item.value].shortcut)
             return True
         return False
 
