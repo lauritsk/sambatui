@@ -190,9 +190,20 @@ class AppLdapActionsMixin(AppControllerBase):
             action="Refreshed",
         )
 
+    async def load_more_current_view(self) -> bool:
+        match self.view_mode:
+            case "directory":
+                return await self.load_more_directory()
+            case "smart":
+                return await self.load_more_smart_view()
+            case "dns":
+                self.set_status("Load more is unavailable for DNS records.")
+                return False
+            case _:
+                self.set_status("No active view to load more rows for.")
+                return False
+
     async def load_more_directory(self) -> bool:
-        if self.view_mode == "smart":
-            return await self.load_more_smart_view()
         if not self.current_directory_values:
             self.set_status("No LDAP search to extend. Press L to search directory.")
             return False
@@ -218,7 +229,7 @@ class AppLdapActionsMixin(AppControllerBase):
 
     @work
     async def action_load_more_directory(self) -> None:
-        await self.load_more_directory()
+        await self.load_more_current_view()
 
     def selected_directory_row(self) -> DirectoryRow | None:
         row = self.visible_row_at(self.visible_directory(), self.records_cursor_row())

@@ -175,9 +175,20 @@ class AppDnsActionsMixin(AppControllerBase):
 
     @work
     async def action_add(self) -> None:
-        if self.view_mode == "directory":
-            await self.add_ldap_entry()
-            return
+        match self.view_mode:
+            case "directory":
+                await self.add_ldap_entry()
+                return
+            case "smart":
+                self.set_status(
+                    "Add is unavailable in smart views; press f to fix DNS findings."
+                )
+                return
+            case "dns":
+                pass
+            case _:
+                self.set_status("No editable records view active.")
+                return
         record_values = await self.add_record_form_values()
         if record_values is None:
             return
@@ -266,9 +277,20 @@ class AppDnsActionsMixin(AppControllerBase):
 
     @work
     async def action_update(self) -> None:
-        if self.view_mode == "directory":
-            await self.update_ldap_entry()
-            return
+        match self.view_mode:
+            case "directory":
+                await self.update_ldap_entry()
+                return
+            case "smart":
+                self.set_status(
+                    "Update is unavailable in smart views; press f to fix DNS findings."
+                )
+                return
+            case "dns":
+                pass
+            case _:
+                self.set_status("No editable records view active.")
+                return
         selected = self.selected_record_for_update()
         if selected is None:
             return
@@ -299,9 +321,20 @@ class AppDnsActionsMixin(AppControllerBase):
 
     @work
     async def action_delete(self) -> None:
-        if self.view_mode == "directory":
-            await self.delete_ldap_entry()
-            return
+        match self.view_mode:
+            case "directory":
+                await self.delete_ldap_entry()
+                return
+            case "smart":
+                self.set_status(
+                    "Delete is unavailable in smart views; press f to fix DNS findings."
+                )
+                return
+            case "dns":
+                pass
+            case _:
+                self.set_status("No editable records view active.")
+                return
         records = self.selected_records()
         if not records:
             self.notify(

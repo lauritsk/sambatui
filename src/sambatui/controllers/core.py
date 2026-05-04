@@ -404,10 +404,12 @@ class AppCoreMixin(AppControllerBase):
             return code
 
     async def action_refresh(self) -> None:
-        if self.view_mode == "smart":
-            await self.refresh_current_smart_view()
-            return
-        if self.view_mode == "directory":
-            await self.refresh_current_directory_search()
-            return
-        await self.refresh_current_zone()
+        match self.view_mode:
+            case "dns":
+                await self.refresh_current_zone()
+            case "directory":
+                await self.refresh_current_directory_search()
+            case "smart":
+                await self.refresh_current_smart_view()
+            case _:
+                self.set_status("No active view to refresh.")

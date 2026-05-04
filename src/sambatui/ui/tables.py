@@ -82,17 +82,24 @@ def smart_search_values(row: SmartViewRow) -> RowValues:
     )
 
 
+EMPTY_STATE_BY_VIEW_MODE = {
+    "dns": DNS_EMPTY_STATE,
+    "directory": LDAP_EMPTY_STATE,
+    "smart": SMART_EMPTY_STATE,
+}
+UNKNOWN_EMPTY_STATE = (
+    "No active records view",
+    "Switch to DNS, LDAP, or smart views to show rows.",
+)
+
+
 def empty_state_text(view_mode: str, search_text: str = "") -> tuple[str, str]:
     if search_text:
         return (
             "No matches",
             f"Esc clears /{search_text}/; / changes search text.",
         )
-    if view_mode == "directory":
-        return LDAP_EMPTY_STATE
-    if view_mode == "smart":
-        return SMART_EMPTY_STATE
-    return DNS_EMPTY_STATE
+    return EMPTY_STATE_BY_VIEW_MODE.get(view_mode, UNKNOWN_EMPTY_STATE)
 
 
 def matches_search(values: Iterable[str], search_text: str) -> bool:

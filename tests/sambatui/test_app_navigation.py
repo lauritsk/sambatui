@@ -263,7 +263,7 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
             }
             app.populate_smart_view("LDAP inactive enabled users", [])
 
-            assert await app.load_more_directory()
+            assert await app.load_more_current_view()
 
             assert app.view_mode == "smart"
             assert app.current_smart_view_id == "ldap_inactive_users"
@@ -282,12 +282,12 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
             await app.refresh_current_smart_view()
 
             app.current_smart_view_id = ""
-            assert not await app.load_more_directory()
+            assert not await app.load_more_current_view()
 
             app.current_smart_values = {"max_rows": "5000"}
             app.current_smart_view_id = "ldap_inactive_users"
             app.current_smart_max_rows = 5000
-            assert not await app.load_more_directory()
+            assert not await app.load_more_current_view()
 
     asyncio.run(run_app())
 
