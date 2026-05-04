@@ -181,25 +181,24 @@ class AppNavigationMixin(App):
         self.pending_g = False
         self.move_cursor_by(-1)
 
-    def action_cursor_page_down(self) -> None:
+    def move_cursor_by_page(self, direction: int, *, half_page: bool = False) -> None:
         self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(self.page_rows(table))
+        rows = self.page_rows(self.active_table())
+        if half_page:
+            rows = max(1, rows // 2)
+        self.move_cursor_by(direction * rows)
+
+    def action_cursor_page_down(self) -> None:
+        self.move_cursor_by_page(1)
 
     def action_cursor_page_up(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(-self.page_rows(table))
+        self.move_cursor_by_page(-1)
 
     def action_cursor_half_page_down(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(max(1, self.page_rows(table) // 2))
+        self.move_cursor_by_page(1, half_page=True)
 
     def action_cursor_half_page_up(self) -> None:
-        self.pending_g = False
-        table = self.active_table()
-        self.move_cursor_by(-max(1, self.page_rows(table) // 2))
+        self.move_cursor_by_page(-1, half_page=True)
 
     def action_cursor_top(self) -> None:
         self.pending_g = False
@@ -265,7 +264,7 @@ class AppNavigationMixin(App):
             self.selection_anchor = table.cursor_row
         self.select_record_range(self.selection_anchor, table.cursor_row)
 
-    def action_extend_up(self) -> None:
+    def extend_selection_by(self, delta: int) -> None:
         self.pending_g = False
         table = self.query_one("#records", DataTable)
         table.focus()
@@ -273,19 +272,14 @@ class AppNavigationMixin(App):
             return
         if self.selection_anchor is None:
             self.selection_anchor = table.cursor_row
-        self.move_cursor_by(-1)
+        self.move_cursor_by(delta)
         self.select_record_range(self.selection_anchor, table.cursor_row)
 
+    def action_extend_up(self) -> None:
+        self.extend_selection_by(-1)
+
     def action_extend_down(self) -> None:
-        self.pending_g = False
-        table = self.query_one("#records", DataTable)
-        table.focus()
-        if not self.ensure_dns_records_view():
-            return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
-        self.move_cursor_by(1)
-        self.select_record_range(self.selection_anchor, table.cursor_row)
+        self.extend_selection_by(1)
 
     def action_clear_navigation_state(self) -> None:
         self.pending_g = False

@@ -125,9 +125,9 @@ class AppViewsMixin(AppControllerBase):
 
     def sidebar_item_at(self, table_id: str, row_index: int) -> SidebarItem | None:
         items = self.sidebar_items.get(table_id, [])
-        if row_index < 0 or row_index >= len(items):
-            return None
-        return items[row_index]
+        if 0 <= row_index < len(items):
+            return items[row_index]
+        return None
 
     def select_sidebar_cursor(self, table_id: str, target: SidebarItem) -> bool:
         table = self.query_one(f"#{table_id}", DataTable)
@@ -325,9 +325,9 @@ class AppViewsMixin(AppControllerBase):
         return 0
 
     def visible_row_at(self, rows: list[TableRow], row_index: int) -> TableRow | None:
-        if row_index < 0 or row_index >= len(rows):
-            return None
-        return rows[row_index]
+        if 0 <= row_index < len(rows):
+            return rows[row_index]
+        return None
 
     def dns_details_text(self, row_index: int) -> str:
         row = self.visible_row_at(self.visible_records(), row_index)
@@ -530,7 +530,7 @@ class AppViewsMixin(AppControllerBase):
 
     def set_record_selected(self, row_index: int, selected: bool) -> None:
         table = self.query_one("#records", DataTable)
-        if row_index < 0 or row_index >= table.row_count:
+        if not 0 <= row_index < table.row_count:
             return
         if selected:
             self.selected_record_rows.add(row_index)

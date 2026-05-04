@@ -103,23 +103,29 @@ class ConnectionSettings:
             except KeyError, LookupError:
                 return ""
 
+        def value_or_default(key: str, default: str) -> str:
+            return value(key) or default
+
         return cls(
             server=value("server"),
             domain=value("domain"),
             zone=value("zone"),
             user=value("user"),
             password=value("password"),
-            auth=value("auth") or DEFAULT_AUTH,
-            kerberos=value("kerberos") or DEFAULT_KERBEROS,
+            auth=value_or_default("auth", DEFAULT_AUTH),
+            kerberos=value_or_default("kerberos", DEFAULT_KERBEROS),
             krb5_ccache=value("krb5_ccache"),
             configfile=value("configfile"),
             options=value("options"),
             ldap_base=value("ldap_base"),
-            ldap_encryption=value("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            ldap_compatibility=value("ldap_compatibility")
-            or DEFAULT_LDAP_COMPATIBILITY,
-            auto_ptr=value("auto_ptr") or DEFAULT_AUTO_PTR,
-            password_file=value("password_file") or str(DEFAULT_PASSWORD_FILE),
+            ldap_encryption=value_or_default(
+                "ldap_encryption", DEFAULT_LDAP_ENCRYPTION
+            ),
+            ldap_compatibility=value_or_default(
+                "ldap_compatibility", DEFAULT_LDAP_COMPATIBILITY
+            ),
+            auto_ptr=value_or_default("auto_ptr", DEFAULT_AUTO_PTR),
+            password_file=value_or_default("password_file", str(DEFAULT_PASSWORD_FILE)),
         )
 
     @property
