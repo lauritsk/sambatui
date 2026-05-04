@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import inspect
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from textual.app import App
+from textual.events import Key
 from textual.widgets import Button, DataTable, Input, TabbedContent
 
 from .app_constants import (
@@ -27,9 +28,9 @@ class AppNavigationMixin(App):
         visual_selecting: bool
         zones: list[str]
 
-        def action_fix_smart(self) -> Any: ...
+        def action_fix_smart(self) -> object: ...
 
-        def action_smart_view_shortcut(self, shortcut: str) -> Any: ...
+        def action_smart_view_shortcut(self, shortcut: str) -> object: ...
 
         async def activate_sidebar_selection(self, table: DataTable) -> bool: ...
 
@@ -41,7 +42,7 @@ class AppNavigationMixin(App):
 
         def refresh_inline_search_scope(
             self, search_text: str, view_mode: str
-        ) -> Any: ...
+        ) -> object: ...
 
         def select_record_range(self, start: int, end: int) -> None: ...
 
@@ -324,14 +325,14 @@ class AppNavigationMixin(App):
         if table and table.id in {"zones", "ldap_structure"}:
             await self.activate_sidebar_selection(table)
 
-    async def on_key(self, event: Any) -> None:
+    async def on_key(self, event: Key) -> None:
         if self.handle_inline_search_key(event):
             event.prevent_default()
             event.stop()
             return
         if self.should_ignore_key_event(event):
             return
-        handled = await self.handle_key(event.key, getattr(event, "character", None))
+        handled = await self.handle_key(event.key, event.character)
         if handled:
             event.prevent_default()
             event.stop()
@@ -339,7 +340,7 @@ class AppNavigationMixin(App):
     def focused_inline_search(self) -> bool:
         return isinstance(self.focused, Input) and self.focused.id == "inline_search"
 
-    def handle_inline_search_key(self, event: Any) -> bool:
+    def handle_inline_search_key(self, event: Key) -> bool:
         if not self.focused_inline_search():
             return False
         if event.key == "escape":
@@ -351,7 +352,7 @@ class AppNavigationMixin(App):
             return True
         return False
 
-    def should_ignore_key_event(self, event: Any) -> bool:
+    def should_ignore_key_event(self, event: Key) -> bool:
         if isinstance(self.focused, Input):
             return True
         return isinstance(self.focused, Button) and event.key in {"enter", "space"}
@@ -403,7 +404,7 @@ class AppNavigationMixin(App):
         await self.invoke_action(action_name)
         return True
 
-    async def invoke_action(self, action_name: str, *args: Any) -> None:
+    async def invoke_action(self, action_name: str, *args: object) -> None:
         result = getattr(self, action_name)(*args)
         if inspect.isawaitable(result):
             await result

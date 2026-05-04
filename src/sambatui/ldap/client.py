@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
-from typing import Any
 
 
 def _install_pyasn1_ber_legacy_aliases() -> None:
@@ -24,6 +23,7 @@ from sambatui.ldap.config import (  # noqa: E402
     parse_ldap_server as parse_ldap_server,
 )
 from sambatui.ldap.connection import (  # noqa: E402
+    LdapConnection,
     bind_connection,
     ldap_connection_kwargs as ldap_connection_kwargs,
     ldap_exception_message,
@@ -155,7 +155,9 @@ class LdapDirectoryClient:
             lambda connection: connection.modify(dn, ldap_changes), "LDAP modify failed"
         )
 
-    def _write(self, operation: Any, failure_message: str) -> None:
+    def _write(
+        self, operation: Callable[[LdapConnection], bool], failure_message: str
+    ) -> None:
         from ldap3.core.exceptions import LDAPException
 
         connection, settings = new_ldap_connection(self.config, read_only=False)

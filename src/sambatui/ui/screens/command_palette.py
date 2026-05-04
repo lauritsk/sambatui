@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 from textual.app import ComposeResult
+from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, Static
 
@@ -95,7 +96,7 @@ class CommandPaletteScreen(FocusedModalScreen[str | None]):
             event.stop()
             self.render_choices(event.value)
 
-    def on_key(self, event: Any) -> None:
+    def on_key(self, event: Key) -> None:
         if event.key == "escape":
             event.prevent_default()
             event.stop()
