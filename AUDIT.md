@@ -17,8 +17,8 @@ Whole-repository security review of sambatui.
 
 ### VULN-001 Credentials exposed in process arguments (Medium)
 
-**Location**: `src/sambatui/client.py:88`, executed at
-`src/sambatui/app.py:790`
+**Location**: `src/sambatui/samba/client.py:88`, executed at
+`src/sambatui/controllers/core.py:340`
 
 **Confidence**: High
 

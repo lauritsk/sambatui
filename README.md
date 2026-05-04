@@ -3,12 +3,12 @@
 [![Check](https://github.com/lauritsk/sambatui/actions/workflows/check.yml/badge.svg)](https://github.com/lauritsk/sambatui/actions/workflows/check.yml)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 
-A Textual terminal UI for Samba Active Directory DNS administration and read-only
-LDAP directory browsing.
+A Textual terminal UI for Samba Active Directory DNS administration, LDAP
+directory browsing, and guarded LDAP entry management.
 
 `sambatui` wraps Samba's supported `samba-tool` CLI in a keyboard-friendly TUI,
-adds safe confirmations for write operations, and provides smart views for common
-DNS and AD hygiene checks.
+uses Python `ldap3` for directory operations, adds safe confirmations for write
+operations, and provides smart views for common DNS and AD hygiene checks.
 
 ## Features
 
@@ -17,15 +17,18 @@ DNS and AD hygiene checks.
 - Add, update, query, sort, search, and bulk-delete DNS records.
 - Create matching PTR records for A records when a reverse zone is available.
 - Run DNS hygiene checks for duplicate records, missing PTRs, and orphan PTRs.
-- Search AD users, groups, computers, and OUs over read-only LDAP.
+- Search AD users, groups, computers, and OUs over LDAP.
 - Run LDAP smart views for inactive users, stale computers, cleanup candidates,
   and users without secondary groups.
+- Add LDAP users, groups, computers, and OUs; edit allowlisted attributes; and
+  delete selected LDAP entries after confirmation.
 - Use password or Kerberos authentication, with preference persistence for
   non-secret settings.
 
 > [!IMPORTANT]
 > `sambatui` can change Samba AD DNS records. Review command previews and
-> confirmations before applying destructive actions. LDAP features are read-only.
+> confirmations before applying destructive actions. LDAP add, edit, and delete
+> actions also modify directory data.
 
 ## Requirements
 
@@ -34,7 +37,7 @@ A normal host install needs:
 - Python 3.14+
 - `samba-tool` in `PATH`
 - network access to a Samba AD DNS/domain controller endpoint
-- credentials allowed to manage Samba AD DNS
+- credentials allowed to manage Samba AD DNS and any LDAP objects you edit
 - Kerberos client configuration and tickets when using Kerberos auth
 - LDAPS or StartTLS access when using LDAP directory search
 
@@ -84,9 +87,9 @@ pipx install 'sambatui[kerberos]'
 
 ## Docker
 
-The Docker image includes `sambatui`, `samba-tool`, Kerberos tools, DNS lookup
-tools, LDAP CLI tools, and `smbclient`. You still provide network access,
-credentials, and any site-specific AD configuration.
+Docker image `ghcr.io/lauritsk/sambatui` includes `sambatui`, `samba-tool`,
+Kerberos tools, DNS lookup tools, LDAP CLI tools, and `smbclient`. You still
+provide network access, credentials, and any site-specific AD configuration.
 
 Password mode:
 
@@ -96,7 +99,7 @@ docker run --rm -it \
   -e SAMBATUI_ZONE=example.com \
   -e SAMBATUI_USER='EXAMPLE\administrator' \
   -e SAMBATUI_PASSWORD='replace-with-your-password' \
-  sambatui
+  ghcr.io/lauritsk/sambatui
 ```
 
 Kerberos mode using host config and ticket cache:
@@ -113,7 +116,7 @@ docker run --rm -it \
   -e KRB5CCNAME=/tmp/krb5cc \
   -v /etc/krb5.conf:/etc/krb5.conf:ro \
   -v "$KRB5CCACHE_PATH:/tmp/krb5cc:ro" \
-  sambatui
+  ghcr.io/lauritsk/sambatui
 ```
 
 Custom Samba config:
@@ -122,7 +125,7 @@ Custom Samba config:
 docker run --rm -it \
   -e SAMBATUI_CONFIGFILE=/workspace/smb.conf \
   -v "$PWD/smb.conf:/workspace/smb.conf:ro" \
-  sambatui
+  ghcr.io/lauritsk/sambatui
 ```
 
 ## Configuration
@@ -141,6 +144,7 @@ sambatui
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SAMBATUI_SERVER` | Samba AD DNS server/DC | empty |
+| `SAMBATUI_DOMAIN` | AD DNS domain used for setup, discovery, and LDAP defaults | empty, or saved non-reverse zone |
 | `SAMBATUI_ZONE` | Initial DNS zone | empty |
 | `SAMBATUI_USER` | Samba/LDAP username. UPN form (`user@example.com`) is preferred for LDAP password binds. | empty |
 | `SAMBATUI_AUTH` | `password` or `kerberos`; unset auto-detects a valid `klist -s` ticket | ticket => `kerberos`, else `password` |
@@ -182,9 +186,10 @@ palette.
 | `r` | Refresh current zone or rerun current smart view |
 | `f` | Apply a guided smart-view fix when available |
 | `q` | Query one DNS name/type |
-| `a` | Add DNS record with guided picker and command preview |
-| `u` | Update selected DNS record |
-| `d` | Delete selected DNS records |
+| `a` | Add DNS record with guided picker and command preview, or add an LDAP entry |
+| `u` | Update selected DNS record or edit allowlisted LDAP attributes |
+| `d` | Delete selected DNS records or selected LDAP entry |
+| `m` | Load 200 more LDAP rows from the last LDAP search |
 | `/` | Focus inline search; `Esc` clears it |
 | `n` / `t` / `e` | Sort by name, type, or value |
 | `h` / `l`, `Tab` / `Shift+Tab` | Move focus between zones and records |
@@ -218,11 +223,11 @@ chmod 600 ~/.config/sambatui/password
 > Kerberos on shared systems where process arguments may be visible to other
 > users. Never commit password files or `.env` files.
 
-## LDAP directory search
+## LDAP directory search and management
 
-LDAP search is read-only and uses Python `ldap3` against a base DN such as
+LDAP search and entry management use Python `ldap3` against a base DN such as
 `DC=example,DC=com`. If `SAMBATUI_LDAP_BASE` is empty, the UI proposes a base DN
-from the current DNS zone.
+from the configured AD domain or current DNS zone.
 
 - `SAMBATUI_AUTH=password` uses the configured username/password and requires
   `ldaps` or `starttls`; cleartext simple bind is intentionally unsupported.
@@ -230,6 +235,9 @@ from the current DNS zone.
   cache. Install `sambatui[kerberos]` first.
 - Set `SAMBATUI_LDAP_COMPATIBILITY=on` only for legacy servers that need relaxed
   TLS settings or fail schema probing.
+- In the LDAP view, `a` creates a user, group, computer, or OU under the chosen
+  parent DN; `u` edits allowlisted attributes; `d` deletes the selected entry;
+  and `m` loads more rows from the last search.
 
 ## AD discovery
 
