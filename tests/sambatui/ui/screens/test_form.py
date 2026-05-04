@@ -1,10 +1,27 @@
+import asyncio
+
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui.ui.screens import infer_domain_from_server
+from sambatui.ui.screens import FormScreen, infer_domain_from_server
 
 DNS_LABEL = st.from_regex(r"[a-z](?:[a-z-]{0,18}[a-z])?", fullmatch=True)
 DNS_NAME = st.lists(DNS_LABEL, min_size=2, max_size=4).map(".".join)
+
+
+def test_upn_suggester_uses_initial_domain_before_widgets_mount() -> None:
+    form = FormScreen(
+        "First-run setup wizard",
+        "",
+        [
+            ("Domain", "domain", "example.com", "example.com"),
+            ("User", "user", "admin@example.com", ""),
+        ],
+    )
+    suggester = form.input_suggester("user")
+
+    assert suggester is not None
+    assert asyncio.run(suggester.get_suggestion("admin")) == "admin@example.com"
 
 
 @given(DNS_LABEL, DNS_NAME)

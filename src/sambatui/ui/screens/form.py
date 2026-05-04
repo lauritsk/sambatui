@@ -7,6 +7,7 @@ from typing import TypeAlias
 from urllib.parse import urlparse
 
 from textual.app import ComposeResult
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import Suggester
@@ -95,6 +96,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
         self.hint = hint
         self.fields = fields
         self._field_ids = {field_id for _, field_id, _, _ in fields}
+        self._initial_values = {field_id: value for _, field_id, _, value in fields}
         self.submit_label = submit_label
         self.validator = validator
         self._autofilled: dict[str, str] = {}
@@ -141,7 +143,10 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
         )
 
     def upn_domain(self) -> str:
-        return self.query_one("#domain", Input).value.strip()
+        try:
+            return self.query_one("#domain", Input).value.strip()
+        except NoMatches:
+            return self._initial_values.get("domain", "").strip()
 
     def input_suggester(self, field_id: str) -> Suggester | None:
         if field_id == "user" and self.should_suggest_upn_domain():
