@@ -358,56 +358,71 @@ class AppViewsMixin(AppControllerBase):
     def reset_render_state(self) -> None:
         self.selected_record_rows.clear()
         self.selected_directory_rows.clear()
+        self.selected_smart_rows.clear()
         self.selection_anchor = None
         self.directory_selection_anchor = None
+        self.smart_selection_anchor = None
         self.visual_selecting = False
 
     def selection_count_label(self) -> str:
-        count = (
-            len(self.selected_directory_rows)
-            if self.view_mode == "directory"
-            else len(self.selected_record_rows)
-        )
         if self.view_mode == "directory":
+            count = len(self.selected_directory_rows)
             label = "LDAP entry" if count == 1 else "LDAP entries"
             return f"{count} {label}"
-        return f"{count} record(s)"
+        if self.view_mode == "smart":
+            count = len(self.selected_smart_rows)
+            label = "smart finding" if count == 1 else "smart findings"
+            return f"{count} {label}"
+        return f"{len(self.selected_record_rows)} record(s)"
 
     def selected_rows_for_current_view(self) -> set[int]:
         if self.view_mode == "directory":
             return self.selected_directory_rows
+        if self.view_mode == "smart":
+            return self.selected_smart_rows
         return self.selected_record_rows
 
     def current_selection_anchor(self) -> int | None:
         if self.view_mode == "directory":
             return self.directory_selection_anchor
+        if self.view_mode == "smart":
+            return self.smart_selection_anchor
         return self.selection_anchor
 
     def set_current_selection_anchor(self, row_index: int | None) -> None:
         if self.view_mode == "directory":
             self.directory_selection_anchor = row_index
+        elif self.view_mode == "smart":
+            self.smart_selection_anchor = row_index
         else:
             self.selection_anchor = row_index
 
     def set_current_row_selected(self, row_index: int, selected: bool) -> None:
         if self.view_mode == "directory":
             self.set_directory_selected(row_index, selected)
+        elif self.view_mode == "smart":
+            self.set_smart_selected(row_index, selected)
         else:
             self.set_record_selected(row_index, selected)
 
     def clear_current_selection(self) -> None:
         if self.view_mode == "directory":
             self.clear_directory_selection()
+        elif self.view_mode == "smart":
+            self.clear_smart_selection()
         elif self.view_mode == "dns":
             self.clear_record_selection()
         else:
             self.visual_selecting = False
             self.selection_anchor = None
             self.directory_selection_anchor = None
+            self.smart_selection_anchor = None
 
     def select_current_range(self, start: int, end: int) -> None:
         if self.view_mode == "directory":
             self.select_directory_range(start, end)
+        elif self.view_mode == "smart":
+            self.select_smart_range(start, end)
         else:
             self.select_record_range(start, end)
 
@@ -846,6 +861,26 @@ class AppViewsMixin(AppControllerBase):
         self.visual_selecting = False
         self.directory_selection_anchor = None
 
+    def set_smart_selected(self, row_index: int, selected: bool) -> None:
+        table = self.query_one("#records", DataTable)
+        if not 0 <= row_index < table.row_count:
+            return
+        if selected:
+            self.selected_smart_rows.add(row_index)
+        else:
+            self.selected_smart_rows.discard(row_index)
+        table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
+        table.refresh_row(row_index)
+
+    def clear_smart_selection(self) -> None:
+        if self.view_mode == "smart":
+            for row_index in list(self.selected_smart_rows):
+                self.set_smart_selected(row_index, False)
+        else:
+            self.selected_smart_rows.clear()
+        self.visual_selecting = False
+        self.smart_selection_anchor = None
+
     def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
         table = self.query_one("#records", DataTable)
         if not table.row_count:
@@ -872,6 +907,19 @@ class AppViewsMixin(AppControllerBase):
         low, high = sorted((start, end))
         for row_index in range(low, high + 1):
             self.set_directory_selected(row_index, True)
+        self.set_status(f"Selected {self.selection_count_label()}")
+
+    def select_smart_range(self, start: int, end: int, *, clear: bool = True) -> None:
+        table = self.query_one("#records", DataTable)
+        if not table.row_count:
+            return
+        start = max(0, min(start, table.row_count - 1))
+        end = max(0, min(end, table.row_count - 1))
+        if clear:
+            self.clear_smart_selection()
+        low, high = sorted((start, end))
+        for row_index in range(low, high + 1):
+            self.set_smart_selected(row_index, True)
         self.set_status(f"Selected {self.selection_count_label()}")
 
     def row_to_record(self, row_index: int) -> dict[str, str] | None:

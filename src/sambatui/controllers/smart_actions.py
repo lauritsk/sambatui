@@ -230,10 +230,22 @@ class AppSmartActionsMixin(AppControllerBase):
         await self.refresh_current_smart_view()
         return True
 
-    def selected_smart_row(self) -> SmartViewRow | None:
+    def selected_smart_rows_for_fix(self) -> list[SmartViewRow]:
         if self.view_mode != "smart":
-            return None
-        return self.visible_row_at(self.visible_smart_view(), self.records_cursor_row())
+            return []
+        visible_rows = self.visible_smart_view()
+        if self.selected_smart_rows:
+            rows = [
+                self.visible_row_at(visible_rows, row_index)
+                for row_index in sorted(self.selected_smart_rows)
+            ]
+        else:
+            rows = [self.visible_row_at(visible_rows, self.records_cursor_row())]
+        return [row for row in rows if isinstance(row, SmartViewRow)]
+
+    def selected_smart_row(self) -> SmartViewRow | None:
+        rows = self.selected_smart_rows_for_fix()
+        return rows[0] if len(rows) == 1 else None
 
     @work
     async def action_smart_view(self) -> None:
@@ -577,8 +589,9 @@ class AppSmartActionsMixin(AppControllerBase):
 
     @work
     async def action_fix_smart(self) -> None:
-        row = self.selected_smart_row()
-        if row is None:
+        rows = self.selected_smart_rows_for_fix()
+        if not rows:
             self.notify("Select a smart-view finding first.", severity="error")
             return
-        await self.apply_smart_fix(row)
+        for row in rows:
+            await self.apply_smart_fix(row)
