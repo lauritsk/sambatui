@@ -9,7 +9,8 @@ from sambatui.app import (
 )
 from textual.widgets import DataTable, Input, Static
 
-from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_view_catalog import SmartViewOptions
 from sambatui.smart_views import SmartViewRow
 

@@ -30,10 +30,10 @@ from ..samba.discovery import (
 )
 from ..dns.parsing import parse_records
 from ..ldap.client import (
-    DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
 )
+from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
 )

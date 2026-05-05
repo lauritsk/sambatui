@@ -7,10 +7,8 @@ from textual import work
 from ..dns.names import is_ipv4_reverse_zone
 from ..dns.parsing import parse_records
 from ..dns.validation import validate_record
-from ..ldap.client import (
-    DirectoryRow,
-    LdapDirectoryClient,
-)
+from ..ldap.client import LdapDirectoryClient
+from ..ldap.rows import DirectoryRow
 from ..core.models import DnsRow
 from ..ui.screens import (
     FormField,

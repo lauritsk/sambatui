@@ -27,7 +27,7 @@ from .dns.record_types import (
     DNS_RECORD_TYPE_SPECS,
     SUPPORTED_DNS_RECORD_TYPES,
 )
-from .ldap.client import DirectoryRow
+from .ldap.rows import DirectoryRow
 from .core.models import DnsRow
 from .ui.screens import CommandPaletteChoice
 from .smart_view_catalog import SMART_VIEWS
