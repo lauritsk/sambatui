@@ -270,9 +270,14 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
             app.query_one("#user", Input).value = "admin"
             app.query_one("#password", Input).value = "secret"
             app.query_one("#auth", Input).value = "kerberos"
+            app.query_one("#kerberos", Input).value = "required"
+            app.query_one("#krb5_ccache", Input).value = "/tmp/krb5cc_1000"
+            app.query_one("#configfile", Input).value = "/etc/samba/smb.conf"
+            app.query_one("#options", Input).value = "--debuglevel=1"
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
             app.query_one("#auto_ptr", Input).value = "off"
             app.query_one("#smart_days", Input).value = "120"
+            app.query_one("#password_file", Input).value = "~/.config/sambatui/pw"
 
             prefs = app.preference_values()
 
@@ -280,9 +285,14 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
             assert prefs["domain"] == "example.com"
             assert prefs["zone"] == "example.com"
             assert prefs["last_zone"] == "2.0.192.in-addr.arpa"
+            assert prefs["user"] == "admin"
+            assert prefs["kerberos"] == "required"
+            assert prefs["krb5_ccache"] == "/tmp/krb5cc_1000"
+            assert prefs["configfile"] == "/etc/samba/smb.conf"
+            assert prefs["options"] == "--debuglevel=1"
+            assert prefs["password_file"] == "~/.config/sambatui/pw"
             assert prefs["auto_ptr"] == "off"
             assert prefs["smart_days"] == "120"
             assert "password" not in prefs
-            assert "user" not in prefs
 
     asyncio.run(run_app())

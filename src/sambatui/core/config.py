@@ -5,30 +5,48 @@ import subprocess
 import tomllib
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol, TypeAlias
 
 from ..dns.names import is_reverse_dns_zone
 
 USER_CONFIG_PATH = Path(
     os.getenv("SAMBATUI_USER_CONFIG", "~/.config/sambatui/config.toml")
 ).expanduser()
-USER_CONFIG_KEYS = frozenset(
-    {
-        "server",
-        "domain",
-        "zone",
-        "auth",
-        "ldap_base",
-        "ldap_encryption",
-        "ldap_compatibility",
-        "auto_ptr",
-        "last_zone",
-        "smart_days",
-        "smart_disabled_days",
-        "smart_never_logged_days",
-        "smart_max_rows",
-    }
+UserConfigValidation: TypeAlias = Literal["choice", "on_off", "integer"]
+
+
+@dataclass(frozen=True)
+class UserConfigField:
+    key: str
+    validation: UserConfigValidation | None = None
+
+
+USER_CONFIG_FIELDS = (
+    UserConfigField("server"),
+    UserConfigField("domain"),
+    UserConfigField("zone"),
+    UserConfigField("last_zone"),
+    UserConfigField("user"),
+    UserConfigField("auth", "choice"),
+    UserConfigField("kerberos", "choice"),
+    UserConfigField("krb5_ccache"),
+    UserConfigField("configfile"),
+    UserConfigField("options"),
+    UserConfigField("ldap_base"),
+    UserConfigField("ldap_encryption", "choice"),
+    UserConfigField("ldap_compatibility", "on_off"),
+    UserConfigField("auto_ptr", "choice"),
+    UserConfigField("smart_days", "integer"),
+    UserConfigField("smart_disabled_days", "integer"),
+    UserConfigField("smart_never_logged_days", "integer"),
+    UserConfigField("smart_max_rows", "integer"),
+    UserConfigField("password_file"),
+)
+USER_CONFIG_KEYS = frozenset(field.key for field in USER_CONFIG_FIELDS)
+VALIDATED_USER_CONFIG_KEYS = tuple(
+    field.key for field in USER_CONFIG_FIELDS if field.validation is not None
 )
 CHOICE_VALUES = {
     "auth": frozenset({"password", "kerberos"}),
@@ -61,17 +79,6 @@ FIELD_LABELS = {
     "smart_never_logged_days": "Smart never-logged days",
     "smart_max_rows": "Smart max rows",
 }
-VALIDATED_USER_CONFIG_KEYS = (
-    "auth",
-    "kerberos",
-    "ldap_encryption",
-    "ldap_compatibility",
-    "auto_ptr",
-    "smart_days",
-    "smart_disabled_days",
-    "smart_never_logged_days",
-    "smart_max_rows",
-)
 
 
 class CompletedProcessRunner(Protocol):
@@ -172,7 +179,7 @@ def _normalized_on_off(value: str) -> str:
 
 def user_config_value_error(key: str, value: object) -> str | None:
     normalized = _preference_value(value)
-    if not normalized or key not in USER_CONFIG_KEYS | frozenset({"kerberos"}):
+    if not normalized or key not in USER_CONFIG_KEYS:
         return None
     if key == "ldap_compatibility":
         if _normalized_on_off(normalized):
@@ -272,12 +279,12 @@ def fix_password_file_permissions(path: Path) -> None:
 DEFAULT_SERVER = _default("SAMBATUI_SERVER", "server", "")
 DEFAULT_DOMAIN = _default_domain()
 DEFAULT_ZONE = _default_zone()
-DEFAULT_USER = os.getenv("SAMBATUI_USER", "")
+DEFAULT_USER = _default("SAMBATUI_USER", "user", "")
 DEFAULT_AUTH = detected_default_auth()
-DEFAULT_KERBEROS = os.getenv("SAMBATUI_KERBEROS", "off")
-DEFAULT_KRB5_CCACHE = os.getenv("SAMBATUI_KRB5_CCACHE", "")
-DEFAULT_CONFIGFILE = os.getenv("SAMBATUI_CONFIGFILE", "")
-DEFAULT_OPTIONS = os.getenv("SAMBATUI_OPTIONS", "")
+DEFAULT_KERBEROS = _default("SAMBATUI_KERBEROS", "kerberos", "off")
+DEFAULT_KRB5_CCACHE = _default("SAMBATUI_KRB5_CCACHE", "krb5_ccache", "")
+DEFAULT_CONFIGFILE = _default("SAMBATUI_CONFIGFILE", "configfile", "")
+DEFAULT_OPTIONS = _default("SAMBATUI_OPTIONS", "options", "")
 DEFAULT_LDAP_BASE = _default("SAMBATUI_LDAP_BASE", "ldap_base", "")
 DEFAULT_LDAP_ENCRYPTION = _default(
     "SAMBATUI_LDAP_ENCRYPTION", "ldap_encryption", "ldaps"
@@ -295,7 +302,7 @@ DEFAULT_SMART_NEVER_LOGGED_DAYS = _default(
 )
 DEFAULT_SMART_MAX_ROWS = _default("SAMBATUI_SMART_MAX_ROWS", "smart_max_rows", "500")
 DEFAULT_PASSWORD_FILE = Path(
-    os.getenv("SAMBATUI_PASSWORD_FILE", "~/.config/sambatui/password")
+    _default("SAMBATUI_PASSWORD_FILE", "password_file", "~/.config/sambatui/password")
 ).expanduser()
 
 

@@ -143,11 +143,16 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
             "zone": "example.com",
             "last_zone": "2.0.192.in-addr.arpa",
             "auth": "kerberos",
+            "kerberos": "required",
+            "krb5_ccache": "/tmp/krb5cc_1000",
+            "configfile": "/etc/samba/smb.conf",
+            "options": "--debuglevel=1",
             "ldap_base": "DC=example,DC=com",
             "ldap_encryption": "starttls",
             "auto_ptr": "ask",
             "smart_days": "120",
             "smart_max_rows": "250",
+            "password_file": str(tmp_path / "password"),
             "password": "secret",
             "user": "admin",
         },
@@ -155,7 +160,12 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
     )
 
     assert "password" not in saved
-    assert "user" not in saved
+    assert saved["user"] == "admin"
+    assert saved["kerberos"] == "required"
+    assert saved["krb5_ccache"] == "/tmp/krb5cc_1000"
+    assert saved["configfile"] == "/etc/samba/smb.conf"
+    assert saved["options"] == "--debuglevel=1"
+    assert saved["password_file"] == str(tmp_path / "password")
     assert load_user_config(path) == saved
     assert "secret" not in path.read_text(encoding="utf-8")
 
@@ -168,12 +178,17 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
     )
     assert load_user_config(path) == {"auto_ptr": "on", "smart_days": "120"}
     path.write_text(
-        'auth = "bad"\nldap_encryption = "plain"\nsmart_max_rows = 99999\ndomain = "example.com"\nzone = "example.com"\n',
+        'auth = "bad"\nkerberos = "bad"\nldap_encryption = "plain"\nsmart_max_rows = 99999\ndomain = "example.com"\nzone = "example.com"\n',
         encoding="utf-8",
     )
     assert load_user_config(path) == {"domain": "example.com", "zone": "example.com"}
     assert save_user_config(
-        {"auto_ptr": "always", "ldap_compatibility": "on", "smart_days": "0"},
+        {
+            "auto_ptr": "always",
+            "kerberos": "maybe",
+            "ldap_compatibility": "on",
+            "smart_days": "0",
+        },
         path,
     ) == {"ldap_compatibility": "on"}
     assert user_config_validation_error({"auth": "bad"}) == (
