@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from hypothesis import given
@@ -161,6 +162,35 @@ def test_dns_duplicate_records_flags_identical_records_and_cname_conflicts() -> 
         "Duplicate DNS record",
         "CNAME conflicts with other records",
     ]
+
+
+def test_dns_a_without_ptr_uses_explicit_reverse_record_resolver() -> None:
+    rows = {"example.com": [dns_row("host", "A", "192.0.2.10")]}
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def resolver(ip_value: str, zones: Sequence[str]) -> tuple[str, str] | None:
+        calls.append((ip_value, tuple(zones)))
+        return "custom-reverse.example.com", "10"
+
+    findings = dns_a_without_ptr(rows, reverse_record_resolver=resolver)
+
+    assert calls == [("192.0.2.10", ("example.com",))]
+    assert [finding.finding for finding in findings] == [
+        "No loaded reverse zone for A record"
+    ]
+    assert (
+        findings[0].evidence
+        == "Expected PTR zone custom-reverse.example.com not loaded."
+    )
+
+
+def test_dns_a_without_ptr_ignores_records_without_resolved_reverse_name() -> None:
+    rows = {"example.com": [dns_row("host", "A", "192.0.2.10")]}
+
+    def resolver(_ip_value: str, _zones: Sequence[str]) -> tuple[str, str] | None:
+        return None
+
+    assert dns_a_without_ptr(rows, reverse_record_resolver=resolver) == []
 
 
 def test_dns_a_without_ptr_flags_missing_and_wrong_ptr() -> None:

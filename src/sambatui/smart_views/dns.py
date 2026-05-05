@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import ipaddress
 
@@ -36,6 +36,8 @@ class DnsRecordRef:
     def fqdn(self) -> str:
         return dns_fqdn(self.row.name, self.zone)
 
+
+ReverseRecordResolver = Callable[[str, Sequence[str]], tuple[str, str] | None]
 
 SEVERITY_ORDER = {"error": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -111,6 +113,8 @@ def cname_conflict_findings(
 
 def dns_a_without_ptr(
     records_by_zone: Mapping[str, Sequence[DnsRow]],
+    *,
+    reverse_record_resolver: ReverseRecordResolver = reverse_record_for_ipv4,
 ) -> list[SmartViewRow]:
     zones = tuple(records_by_zone)
     zone_names = {normalize_dns_name(zone) for zone in zones}
@@ -118,7 +122,9 @@ def dns_a_without_ptr(
     findings: list[SmartViewRow] = []
 
     for record in iter_dns_records(records_by_zone):
-        finding = a_record_ptr_finding(record, zones, zone_names, ptr_targets)
+        finding = a_record_ptr_finding(
+            record, zones, zone_names, ptr_targets, reverse_record_resolver
+        )
         if finding is not None:
             findings.append(finding)
     return findings
@@ -129,12 +135,14 @@ def a_record_ptr_finding(
     zones: Sequence[str],
     zone_names: set[str],
     ptr_targets: Mapping[tuple[str, str], set[str]],
+    reverse_record_resolver: ReverseRecordResolver,
 ) -> SmartViewRow | None:
     if record.rtype != "A" or not valid_ipv4(record.value):
         return None
 
-    expected = reverse_record_for_ipv4(record.value, zones)
-    assert expected is not None
+    expected = reverse_record_resolver(record.value, zones)
+    if expected is None:
+        return None
     ptr_zone, ptr_name = expected
     object_name = f"{record.fqdn} A {record.value}"
     if normalize_dns_name(ptr_zone) not in zone_names:

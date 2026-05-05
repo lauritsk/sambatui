@@ -100,7 +100,6 @@ __all__ = [
     "parse_ad_datetime",
     "ptr_record_forward_finding",
     "ptr_targets_by_reverse_key",
-    "reverse_record_for_ipv4",
     "severity_count_text",
     "severity_rank",
     "sorted_details",
