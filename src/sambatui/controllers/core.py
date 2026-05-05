@@ -49,6 +49,7 @@ from ..ui.screens import (
     infer_domain_from_server,
 )
 from ..core.settings import ConnectionSettings
+from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
 from ..smart_views import (
     SmartViewRow,
 )
@@ -104,7 +105,7 @@ class AppCoreMixin(AppControllerBase):
         self.current_directory_max_rows = LDAP_DEFAULT_MAX_ROWS
         self.smart_view_rows: list[SmartViewRow] = []
         self.current_smart_view_id = ""
-        self.current_smart_max_rows = 500
+        self.current_smart_max_rows = SMART_ROW_LIMIT_DEFAULT
         self.current_smart_values: dict[str, str] = {}
         self.current_smart_sort_field = ""
         self.current_smart_sort_reverse = False

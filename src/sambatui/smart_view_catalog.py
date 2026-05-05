@@ -17,6 +17,9 @@ FULL_HEALTH_LDAP_VIEW_IDS = (
     "ldap_users_without_groups",
     "ldap_delete_candidates",
 )
+SMART_ROW_LIMIT_DEFAULT = 500
+SMART_ROW_LIMIT_STEP = 200
+SMART_ROW_LIMIT_MAX = 5000
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,9 @@ class SmartViewDefinition:
     needs_disabled_days: bool = False
     needs_never_logged_days: bool = False
     needs_ldap_connection: bool = False
+    default_sort_field: str = "severity"
+    default_sort_reverse: bool = False
+    directory_kind: str = "users"
 
     @property
     def needs_ldap(self) -> bool:
@@ -49,7 +55,11 @@ class SmartViewOptions:
             days=bounded_int(values.get("days"), 90),
             disabled_days=bounded_int(values.get("disabled_days"), 180),
             never_logged_days=bounded_int(values.get("never_logged_days"), 30),
-            max_rows=bounded_int(values.get("max_rows"), 500, maximum=5000),
+            max_rows=bounded_int(
+                values.get("max_rows"),
+                SMART_ROW_LIMIT_DEFAULT,
+                maximum=SMART_ROW_LIMIT_MAX,
+            ),
         )
 
 
@@ -64,6 +74,7 @@ SMART_VIEWS = (
         needs_disabled_days=True,
         needs_never_logged_days=True,
         needs_ldap_connection=True,
+        default_sort_field="",
     ),
     SmartViewDefinition(
         "dns_duplicates",
@@ -93,6 +104,8 @@ SMART_VIEWS = (
         "LDAP inactive enabled users",
         "Enabled users whose last logon is older than the inactivity threshold.",
         needs_days=True,
+        default_sort_field="age",
+        default_sort_reverse=True,
     ),
     SmartViewDefinition(
         "ldap_delete_candidates",
@@ -102,6 +115,8 @@ SMART_VIEWS = (
         "Disabled users past retention, plus enabled users that never logged in.",
         needs_disabled_days=True,
         needs_never_logged_days=True,
+        default_sort_field="age",
+        default_sort_reverse=True,
     ),
     SmartViewDefinition(
         "ldap_stale_computers",
@@ -110,6 +125,9 @@ SMART_VIEWS = (
         "LDAP stale computer accounts",
         "Computer accounts with old or missing last-logon data.",
         needs_days=True,
+        default_sort_field="age",
+        default_sort_reverse=True,
+        directory_kind="computers",
     ),
     SmartViewDefinition(
         "ldap_users_without_groups",
@@ -117,9 +135,26 @@ SMART_VIEWS = (
         "LDAP",
         "LDAP users with no secondary groups",
         "Enabled users whose memberOf list is empty except for their primary group.",
+        default_sort_field="object",
     ),
 )
 
 SMART_VIEW_BY_ID = {view.view_id: view for view in SMART_VIEWS}
 SMART_VIEW_BY_SHORTCUT = {view.shortcut: view for view in SMART_VIEWS}
 SMART_VIEW_LABELS = {view.view_id: view.label for view in SMART_VIEWS}
+SMART_DEFAULT_SORTS = {
+    view.view_id: (view.default_sort_field, view.default_sort_reverse)
+    for view in SMART_VIEWS
+    if view.default_sort_field
+}
+
+
+def smart_views_for_source(source: str) -> tuple[SmartViewDefinition, ...]:
+    return tuple(view for view in SMART_VIEWS if view.source == source)
+
+
+def smart_view_shortcut_range(source: str) -> str:
+    shortcuts = [view.shortcut for view in smart_views_for_source(source)]
+    if not shortcuts:
+        return ""
+    return shortcuts[0] if len(shortcuts) == 1 else f"{shortcuts[0]}-{shortcuts[-1]}"

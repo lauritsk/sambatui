@@ -7,6 +7,14 @@ from hypothesis import strategies as st
 
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
+from sambatui.smart_view_catalog import (
+    SMART_DEFAULT_SORTS,
+    SMART_ROW_LIMIT_DEFAULT,
+    SMART_ROW_LIMIT_MAX,
+    SmartViewOptions,
+    smart_view_shortcut_range,
+    smart_views_for_source,
+)
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
     SmartViewCheckResult,
@@ -65,6 +73,20 @@ def directory_row(
 def filetime_for(value: datetime) -> str:
     ad_epoch = datetime(1601, 1, 1, tzinfo=UTC)
     return str(int((value - ad_epoch).total_seconds() * 10_000_000))
+
+
+def test_smart_view_catalog_centralizes_shortcuts_defaults_and_row_limits() -> None:
+    assert smart_view_shortcut_range("DNS") == "1-3"
+    assert smart_view_shortcut_range("LDAP") == "4-7"
+    assert smart_view_shortcut_range("missing") == ""
+    assert [view.source for view in smart_views_for_source("DNS")] == ["DNS"] * 3
+    assert SMART_DEFAULT_SORTS["ldap_inactive_users"] == ("age", True)
+    assert SMART_DEFAULT_SORTS["ldap_users_without_groups"] == ("object", False)
+
+    options = SmartViewOptions.from_values({"max_rows": "999999"})
+
+    assert options.max_rows == SMART_ROW_LIMIT_MAX
+    assert SmartViewOptions.from_values({}).max_rows == SMART_ROW_LIMIT_DEFAULT
 
 
 def test_full_health_dashboard_rows_show_summary_failures_then_details() -> None:

@@ -22,6 +22,8 @@ from ..smart_view_catalog import (
     SMART_VIEW_BY_ID,
     SMART_VIEW_BY_SHORTCUT,
     SMART_VIEWS,
+    SMART_ROW_LIMIT_MAX,
+    SMART_ROW_LIMIT_STEP,
     SmartViewDefinition,
     SmartViewOptions,
 )
@@ -41,8 +43,6 @@ from ..app_constants import (
     DEFAULT_SMART_DISABLED_DAYS,
     DEFAULT_SMART_MAX_ROWS,
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
-    LDAP_LOAD_MORE_ROWS,
-    LDAP_MAX_ROWS,
 )
 from .base import AppControllerBase
 from .helpers import (
@@ -227,9 +227,11 @@ class AppSmartActionsMixin(AppControllerBase):
         if not self.current_smart_values or not self.current_smart_view_id:
             self.set_status("No smart view to extend. Press S to run a smart view.")
             return False
-        max_rows = min(self.current_smart_max_rows + LDAP_LOAD_MORE_ROWS, LDAP_MAX_ROWS)
+        max_rows = min(
+            self.current_smart_max_rows + SMART_ROW_LIMIT_STEP, SMART_ROW_LIMIT_MAX
+        )
         if max_rows == self.current_smart_max_rows:
-            self.set_status(f"Smart-view row limit already at {LDAP_MAX_ROWS}.")
+            self.set_status(f"Smart-view row limit already at {SMART_ROW_LIMIT_MAX}.")
             return False
         self.current_smart_max_rows = max_rows
         self.current_smart_values = {
@@ -320,7 +322,7 @@ class AppSmartActionsMixin(AppControllerBase):
         return await self.directory_search_rows(client, kind, "", max_rows)
 
     def ldap_smart_view_kind(self, view: SmartViewDefinition) -> str:
-        return "computers" if view.view_id == LDAP_STALE_COMPUTERS_VIEW_ID else "users"
+        return view.directory_kind
 
     async def build_smart_view_rows(
         self,

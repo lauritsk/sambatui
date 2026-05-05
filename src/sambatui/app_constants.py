@@ -30,11 +30,13 @@ from .dns.record_types import (
 from .ldap.rows import DirectoryRow
 from .core.models import DnsRow
 from .ui.screens import CommandPaletteChoice
-from .smart_view_catalog import SMART_VIEWS
+from .smart_view_catalog import SMART_VIEWS, smart_view_shortcut_range
 
+DNS_FINDING_SHORTCUTS = smart_view_shortcut_range("DNS")
+LDAP_FINDING_SHORTCUTS = smart_view_shortcut_range("LDAP")
 KEY_HINTS = {
-    "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  1-3 findings  q query  a add  u update  d delete  / search",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  4-7 findings  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
+    "dns_tab": f"DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  {DNS_FINDING_SHORTCUTS} findings  q query  a add  u update  d delete  / search",
+    "ldap_tab": f"LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  {LDAP_FINDING_SHORTCUTS} findings  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
 CONNECTION_STATE_INPUTS = (

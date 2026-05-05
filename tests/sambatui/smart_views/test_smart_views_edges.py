@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui import smart_views as smart_module
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
 from sambatui.smart_views import (
@@ -66,11 +64,8 @@ def test_disabled_user_evidence_reports_generated_age(
     assert ("created" in evidence) is not prefer_changed
 
 
-def test_smart_view_remaining_edges(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(smart_module, "reverse_record_for_ipv4", lambda *_args: None)
-    assert (
-        dns_a_without_ptr({"example.com": [dns_row("host", "A", "192.0.2.10")]}) == []
-    )
+def test_smart_view_remaining_edges() -> None:
+    assert dns_a_without_ptr({"example.com": [dns_row("host", "A", "bad-ip")]}) == []
 
     now = datetime(2026, 4, 30, tzinfo=UTC)
     recent_disabled = directory_row(
