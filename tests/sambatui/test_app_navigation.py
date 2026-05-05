@@ -11,7 +11,7 @@ from sambatui.app import (
 )
 from textual.widgets import Button, DataTable, Input
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_views import SmartViewRow
 from sambatui.ui.screens import (
     CommandPaletteScreen,

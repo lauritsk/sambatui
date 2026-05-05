@@ -23,7 +23,6 @@ from sambatui.dns.parsing import parse_records, parse_zones
 from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
 from sambatui.dns.validation import valid_dns_name, validate_record
 from sambatui.ldap.client import (
-    DirectoryRow,
     LdapDirectoryClient,
     LdapSearchConfig,
     build_directory_filter,
@@ -38,6 +37,7 @@ from sambatui.ldap.client import (
     normalize_entry_attributes,
     parse_ldap_server,
 )
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.remediation import actionable_error, bounded_int
 from sambatui.core.settings import ConnectionSettings
 from sambatui.smart_views import (

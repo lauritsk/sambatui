@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TypeAlias
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
 from sambatui.smart_views import SmartViewRow
 

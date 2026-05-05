@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
 from sambatui.smart_views import (
     ACCOUNTDISABLE,

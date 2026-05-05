@@ -1,7 +1,7 @@
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.ldap.sidebar import (
     SidebarItem,
     active_ldap_sidebar_item,

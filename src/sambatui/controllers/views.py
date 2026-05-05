@@ -20,9 +20,7 @@ from ..dns.ptr import (
     ptr_target_for_name as dns_ptr_target_for_name,
     reverse_record_for_ipv4 as dns_reverse_record_for_ipv4,
 )
-from ..ldap.client import (
-    DirectoryRow,
-)
+from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
     active_ldap_sidebar_item,

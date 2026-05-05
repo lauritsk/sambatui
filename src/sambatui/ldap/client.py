@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sambatui.ldap.rows import DirectoryRow
 
 
 def _install_pyasn1_ber_legacy_aliases() -> None:
@@ -67,7 +71,6 @@ from sambatui.ldap.types import (  # noqa: E402
     LDAP_ENCRYPTION_MODES as LDAP_ENCRYPTION_MODES,
     LDAP_SEARCH_KINDS as LDAP_SEARCH_KINDS,
     DirectoryAddKind as DirectoryAddKind,
-    DirectoryRow,
     DirectorySearchKind as DirectorySearchKind,
     LdapAuthMode as LdapAuthMode,
     LdapSearchConfig,

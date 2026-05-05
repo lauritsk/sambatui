@@ -9,7 +9,8 @@ from sambatui.app import (
 )
 from textual.widgets import DataTable, Input
 
-from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.ui.screens import (
     FormField,
     FormValidator,
