@@ -98,6 +98,9 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
         def save_preferences(self) -> None:
             return
 
+        async def load_zones(self, *, restore_active_zone: bool = True) -> None:
+            return
+
         async def run_samba_zone(
             self, action: str, zone: str, args: list[str]
         ) -> tuple[int, str]:
