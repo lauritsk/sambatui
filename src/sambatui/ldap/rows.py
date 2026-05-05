@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-from .client import (
-    DirectoryRow,
-    directory_summary,
-    entry_to_directory_row,
-    first_attr,
-    infer_kind,
-    normalize_attribute_values,
-    normalize_entry_attributes,
-)
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
-__all__ = [
-    "DirectoryRow",
-    "directory_summary",
-    "entry_to_directory_row",
-    "first_attr",
-    "infer_kind",
-    "normalize_attribute_values",
-    "normalize_entry_attributes",
-]
+
+@dataclass(frozen=True)
+class DirectoryRow:
+    dn: str
+    kind: str
+    name: str
+    summary: str
+    attributes: Mapping[str, Sequence[str]]

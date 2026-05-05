@@ -18,7 +18,8 @@ from sambatui.controllers.helpers import (
     setup_auth_values,
     sort_direction,
 )
-from sambatui.ldap.client import DirectoryRow, LdapDirectoryClient
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.ldap.sidebar import SidebarItem
 from sambatui.samba.discovery import DiscoveredService
 from sambatui.smart_view_catalog import (

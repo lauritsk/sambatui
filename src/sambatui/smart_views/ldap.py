@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from ..ldap.client import DirectoryRow, first_attr
+from ..ldap.client import first_attr
+from ..ldap.rows import DirectoryRow
 from .models import SmartViewRow
 
 

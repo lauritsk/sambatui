@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from sambatui.ldap.filters import KIND_LABELS
-from sambatui.ldap.types import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 
 
 def entry_to_directory_row(entry: object, kind: str = "all") -> DirectoryRow:

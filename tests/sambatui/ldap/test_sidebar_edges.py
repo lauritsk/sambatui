@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sambatui.ldap.client import DirectoryRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.ldap.sidebar import ldap_structure_nodes
 from sambatui.core.settings import ConnectionSettings
 

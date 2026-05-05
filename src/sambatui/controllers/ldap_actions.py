@@ -9,11 +9,11 @@ from textual import work
 from ..ldap.client import (
     LDAP_ADD_KINDS,
     LDAP_EDITABLE_ATTRIBUTES,
-    DirectoryRow,
     LdapDirectoryClient,
     domain_to_base_dn,
     ldap_dn_in_scope,
 )
+from ..ldap.rows import DirectoryRow
 from ..core.remediation import bounded_int
 from ..ui.screens import (
     FormField,
