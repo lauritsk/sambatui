@@ -18,6 +18,7 @@ from ..core.remediation import bounded_int
 from ..ui.screens import (
     FormField,
 )
+from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
 from ..app_constants import (
     DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
@@ -62,7 +63,7 @@ class AppLdapActionsMixin(AppControllerBase):
         return (
             "Max rows",
             "max_rows",
-            "500",
+            str(SMART_ROW_LIMIT_DEFAULT),
             self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
         )
 

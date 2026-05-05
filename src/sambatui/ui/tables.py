@@ -5,6 +5,7 @@ from typing import TypeAlias
 
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
+from sambatui.smart_view_catalog import all_smart_view_shortcut_range
 from sambatui.smart_views import SmartViewRow
 
 DNS_COLUMNS = ("✓", "Name", "Type", "Value", "TTL", "Records", "Children")
@@ -31,7 +32,7 @@ LDAP_EMPTY_STATE = (
 )
 SMART_EMPTY_STATE = (
     "No findings shown",
-    "Press S to pick a DNS/LDAP finding or 1-7 for shortcuts; / filters findings.",
+    f"Press S to pick a DNS/LDAP finding or {all_smart_view_shortcut_range()} for shortcuts; / filters findings.",
 )
 
 

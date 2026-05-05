@@ -19,6 +19,10 @@ from .config import (
     DEFAULT_PASSWORD,
     DEFAULT_PASSWORD_FILE,
     DEFAULT_SERVER,
+    DEFAULT_SMART_DAYS,
+    DEFAULT_SMART_DISABLED_DAYS,
+    DEFAULT_SMART_MAX_ROWS,
+    DEFAULT_SMART_NEVER_LOGGED_DAYS,
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
@@ -93,6 +97,10 @@ class ConnectionSettings:
     ldap_encryption: str = DEFAULT_LDAP_ENCRYPTION
     ldap_compatibility: str = DEFAULT_LDAP_COMPATIBILITY
     auto_ptr: str = DEFAULT_AUTO_PTR
+    smart_days: str = DEFAULT_SMART_DAYS
+    smart_disabled_days: str = DEFAULT_SMART_DISABLED_DAYS
+    smart_never_logged_days: str = DEFAULT_SMART_NEVER_LOGGED_DAYS
+    smart_max_rows: str = DEFAULT_SMART_MAX_ROWS
     password_file: str = str(DEFAULT_PASSWORD_FILE)
 
     @classmethod
@@ -125,6 +133,14 @@ class ConnectionSettings:
                 "ldap_compatibility", DEFAULT_LDAP_COMPATIBILITY
             ),
             auto_ptr=value_or_default("auto_ptr", DEFAULT_AUTO_PTR),
+            smart_days=value_or_default("smart_days", DEFAULT_SMART_DAYS),
+            smart_disabled_days=value_or_default(
+                "smart_disabled_days", DEFAULT_SMART_DISABLED_DAYS
+            ),
+            smart_never_logged_days=value_or_default(
+                "smart_never_logged_days", DEFAULT_SMART_NEVER_LOGGED_DAYS
+            ),
+            smart_max_rows=value_or_default("smart_max_rows", DEFAULT_SMART_MAX_ROWS),
             password_file=value_or_default("password_file", str(DEFAULT_PASSWORD_FILE)),
         )
 
@@ -218,9 +234,38 @@ class ConnectionSettings:
             ),
         ]
 
+    def smart_form_fields(self) -> list[FormField]:
+        return [
+            (
+                "Finding inactive/stale days — used by passive and LDAP findings.",
+                "smart_days",
+                DEFAULT_SMART_DAYS,
+                self.smart_days or DEFAULT_SMART_DAYS,
+            ),
+            (
+                "Finding disabled cleanup days — delete-candidate threshold.",
+                "smart_disabled_days",
+                DEFAULT_SMART_DISABLED_DAYS,
+                self.smart_disabled_days or DEFAULT_SMART_DISABLED_DAYS,
+            ),
+            (
+                "Finding never-logged-in days — delete-candidate threshold.",
+                "smart_never_logged_days",
+                DEFAULT_SMART_NEVER_LOGGED_DAYS,
+                self.smart_never_logged_days or DEFAULT_SMART_NEVER_LOGGED_DAYS,
+            ),
+            (
+                "Finding max rows — default smart-view directory/result limit.",
+                "smart_max_rows",
+                DEFAULT_SMART_MAX_ROWS,
+                self.smart_max_rows or DEFAULT_SMART_MAX_ROWS,
+            ),
+        ]
+
     def form_fields(self) -> list[FormField]:
         return [
             *self.samba_form_fields(),
             *self.ldap_form_fields(),
+            *self.smart_form_fields(),
             *self.convenience_form_fields(),
         ]

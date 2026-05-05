@@ -30,13 +30,20 @@ from .dns.record_types import (
 from .ldap.rows import DirectoryRow
 from .core.models import DnsRow
 from .ui.screens import CommandPaletteChoice
-from .smart_view_catalog import SMART_VIEWS, smart_view_shortcut_range
+from .smart_view_catalog import (
+    SMART_VIEWS,
+    SmartViewSource,
+    all_smart_view_shortcut_range,
+    smart_view_shortcut_range,
+)
 
-DNS_FINDING_SHORTCUTS = smart_view_shortcut_range("DNS")
-LDAP_FINDING_SHORTCUTS = smart_view_shortcut_range("LDAP")
+DNS_FINDING_SHORTCUTS = smart_view_shortcut_range(SmartViewSource.DNS)
+LDAP_FINDING_SHORTCUTS = smart_view_shortcut_range(SmartViewSource.LDAP)
+ALL_FINDING_SHORTCUTS = all_smart_view_shortcut_range()
+DASHBOARD_FINDING_SHORTCUT = smart_view_shortcut_range(SmartViewSource.FULL)
 KEY_HINTS = {
-    "dns_tab": f"DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  {DNS_FINDING_SHORTCUTS} findings  q query  a add  u update  d delete  / search",
-    "ldap_tab": f"LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  {LDAP_FINDING_SHORTCUTS} findings  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
+    "dns_tab": f"DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  {DNS_FINDING_SHORTCUTS} DNS findings  {DASHBOARD_FINDING_SHORTCUT} dashboard  q query  a add  u update  d delete  / search",
+    "ldap_tab": f"LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  {LDAP_FINDING_SHORTCUTS} LDAP findings  {DASHBOARD_FINDING_SHORTCUT} dashboard  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
 CONNECTION_STATE_INPUTS = (

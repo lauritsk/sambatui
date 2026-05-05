@@ -27,7 +27,6 @@ from ..ldap.sidebar import (
     ldap_sidebar_items,
 )
 from ..core.models import DnsRow
-from ..core.remediation import bounded_int
 from ..smart_views import (
     SmartViewRow,
     directory_object_name,
@@ -40,7 +39,9 @@ from ..smart_view_catalog import (
     FULL_HEALTH_VIEW_ID,
     SMART_DEFAULT_SORTS,
     SMART_VIEW_BY_ID,
-    SMART_VIEWS,
+    SmartViewOptions,
+    SmartViewSource,
+    smart_views_for_source,
 )
 from ..ui.details import (
     details_empty_text,
@@ -165,7 +166,7 @@ class AppViewsMixin(AppControllerBase):
         self.select_smart_view_cursor()
 
     def populate_finding_sidebar(self, table_id: str, source: str) -> None:
-        views = [view for view in SMART_VIEWS if view.source == source]
+        views = list(smart_views_for_source(source))
         items = [
             SidebarItem(
                 view.label.removeprefix(f"{source} "), view.view_id, "smart_view"
@@ -227,8 +228,9 @@ class AppViewsMixin(AppControllerBase):
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
         if view is None or view.view_id == FULL_HEALTH_VIEW_ID:
             return ""
-        label = view.label.removeprefix(f"{view.source} ")
-        return f"— {view.source} / Findings / {label} (Esc clears)"
+        source = view.source_label
+        label = view.label.removeprefix(f"{source} ")
+        return f"— {source} / Findings / {label} (Esc clears)"
 
     def update_records_title(self) -> None:
         self.query_one("#records_title", Label).update(self.records_title())
@@ -339,12 +341,9 @@ class AppViewsMixin(AppControllerBase):
     def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
         self.view_mode = "smart"
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
-        context = (
-            view.source
-            if view is not None and view.source in {"DNS", "LDAP"}
-            else "Findings"
-        )
-        tab_id = "ldap_tab" if context == "LDAP" else "dns_tab"
+        source = view.source.sidebar_source if view is not None else None
+        context = source.value if source is not None else "Findings"
+        tab_id = "ldap_tab" if source is SmartViewSource.LDAP else "dns_tab"
         with suppress(Exception):
             self.query_one("#side_tabs", TabbedContent).active = tab_id
             self.refresh_key_hints()
@@ -429,10 +428,14 @@ class AppViewsMixin(AppControllerBase):
             self.select_record_range(start, end)
 
     def smart_options_for_passive_findings(self) -> tuple[int, int, int]:
-        days = bounded_int(self.val("smart_days"), 90)
-        disabled_days = bounded_int(self.val("smart_disabled_days"), 180)
-        never_logged_days = bounded_int(self.val("smart_never_logged_days"), 30)
-        return days, disabled_days, never_logged_days
+        options = SmartViewOptions.from_values(
+            {
+                "smart_days": self.val("smart_days"),
+                "smart_disabled_days": self.val("smart_disabled_days"),
+                "smart_never_logged_days": self.val("smart_never_logged_days"),
+            }
+        )
+        return options.days, options.disabled_days, options.never_logged_days
 
     def passive_dns_findings(self, rows: Sequence[DnsRow]) -> list[SmartViewRow]:
         zone = self.val("zone")
@@ -671,7 +674,7 @@ class AppViewsMixin(AppControllerBase):
         self.smart_view_rows = []
         self.current_smart_sort_field = ""
         self.current_smart_sort_reverse = False
-        if view is not None and view.source == "LDAP":
+        if view is not None and view.source is SmartViewSource.LDAP:
             self.view_mode = "directory"
             self.set_records_columns(DIRECTORY_COLUMNS)
             self.query_one("#records_title", Label).update(self.directory_title())
