@@ -40,7 +40,7 @@ NEXT_TABLE_BY_ID = {
     "ldap_structure": "ldap_findings",
     "ldap_findings": "records",
 }
-SELECTABLE_VIEW_MODES = {"dns", "directory"}
+SELECTABLE_VIEW_MODES = {"dns", "directory", "smart"}
 
 
 class AppNavigationMixin(App):
@@ -50,8 +50,10 @@ class AppNavigationMixin(App):
         search_text: str
         selected_record_rows: set[int]
         selected_directory_rows: set[int]
+        selected_smart_rows: set[int]
         selection_anchor: int | None
         directory_selection_anchor: int | None
+        smart_selection_anchor: int | None
         view_mode: str
         visual_selecting: bool
         zones: list[str]
@@ -93,6 +95,8 @@ class AppNavigationMixin(App):
         def update_details_pane(self) -> None: ...
 
         def visible_directory(self) -> list[object]: ...
+
+        def visible_smart_view(self) -> list[object]: ...
 
     def sync_inline_search_input(self) -> None:
         with suppress(Exception):
@@ -272,7 +276,9 @@ class AppNavigationMixin(App):
     def ensure_selectable_records_view(self) -> bool:
         if self.view_mode in SELECTABLE_VIEW_MODES:
             return True
-        self.set_status("Selection applies to DNS records and LDAP entries.")
+        self.set_status(
+            "Selection applies to DNS records, LDAP entries, and smart findings."
+        )
         return False
 
     def record_selection_table(
@@ -287,6 +293,9 @@ class AppNavigationMixin(App):
             return None
         if self.view_mode == "directory" and not self.visible_directory():
             self.set_status("Select an LDAP entry first.")
+            return None
+        if self.view_mode == "smart" and not self.visible_smart_view():
+            self.set_status("Select a smart finding first.")
             return None
         return table
 
@@ -314,7 +323,10 @@ class AppNavigationMixin(App):
         self.visual_selecting = True
         self.set_current_selection_anchor(table.cursor_row)
         self.select_current_range(table.cursor_row, table.cursor_row)
-        self.set_status("Visual selection on: use j/k, then d to delete selected")
+        action_hint = (
+            "f to fix selected" if self.view_mode == "smart" else "d to delete selected"
+        )
+        self.set_status(f"Visual selection on: use j/k, then {action_hint}")
 
     def action_select_range(self) -> None:
         self.pending_g = False

@@ -242,6 +242,18 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
     asyncio.run(run_app())
 
 
+def smart_row(name: str, *, source: str = "dns") -> SmartViewRow:
+    return SmartViewRow(
+        severity="medium",
+        object=name,
+        finding="Finding",
+        evidence="Evidence",
+        suggested_action="Fix it",
+        source=source,
+        fix_action="dns_add_ptr",
+    )
+
+
 def test_ldap_directory_selection_clears_on_sort() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
@@ -310,6 +322,40 @@ def test_dns_multi_select_still_works() -> None:
     asyncio.run(run_app())
 
 
+def test_smart_view_multi_select_works_for_dns_and_ldap_findings() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.populate_smart_view(
+                "Findings",
+                [smart_row("dns-a", source="dns"), smart_row("ldap-a", source="ldap")],
+            )
+            records = app.query_one("#records", DataTable)
+            records.focus()
+
+            await pilot.press("space")
+            await pilot.press("j")
+            await pilot.press("V")
+
+            assert app.selected_smart_rows == {0, 1}
+            assert app.selected_record_rows == set()
+            assert app.selected_directory_rows == set()
+            assert app.selection_count_label() == "2 smart findings"
+            assert [row.object for row in app.selected_smart_rows_for_fix()] == [
+                "dns-a",
+                "ldap-a",
+            ]
+            assert [str(records.get_row_at(index)[0]) for index in range(2)] == [
+                "✓",
+                "✓",
+            ]
+
+            await pilot.press("escape")
+            assert app.selected_smart_rows == set()
+
+    asyncio.run(run_app())
+
+
 def test_selection_helpers_cover_smart_and_invalid_directory_edges() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
@@ -337,16 +383,40 @@ def test_selection_helpers_cover_smart_and_invalid_directory_edges() -> None:
             app.visual_selecting = True
             app.selection_anchor = 1
             app.directory_selection_anchor = 2
+            app.smart_selection_anchor = 3
+            app.selected_smart_rows.add(0)
+            app.clear_current_selection()
+            assert app.visual_selecting is False
+            assert app.selection_anchor == 1
+            assert app.directory_selection_anchor == 2
+            assert app.smart_selection_anchor is None
+            assert app.selected_smart_rows == set()
+
+            app.view_mode = "other"
+            app.visual_selecting = True
+            app.selection_anchor = 1
+            app.directory_selection_anchor = 2
+            app.smart_selection_anchor = 3
             app.clear_current_selection()
             assert app.visual_selecting is False
             assert app.selection_anchor is None
             assert app.directory_selection_anchor is None
+            assert app.smart_selection_anchor is None
 
             records = app.query_one("#records", DataTable)
             records.clear()
             app.view_mode = "directory"
             app.select_directory_range(0, 1)
             assert app.selected_directory_rows == set()
+            app.view_mode = "smart"
+            app.set_smart_selected(99, True)
+            app.select_smart_range(0, 1)
+            assert app.selected_smart_rows == set()
+            app.view_mode = "dns"
+            app.selected_smart_rows.add(0)
+            app.clear_smart_selection()
+            assert app.selected_smart_rows == set()
+            assert app.selected_smart_rows_for_fix() == []
 
     asyncio.run(run_app())
 
