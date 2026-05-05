@@ -30,7 +30,7 @@ from .smart_view_catalog import SMART_VIEWS
 
 KEY_HINTS = {
     "dns_tab": "DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  1-3 findings  q query  a add  u update  d delete  / search",
-    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  4-7 findings  a add  u edit  d delete  m load more  S picker  / search  r refresh",
+    "ldap_tab": "LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  4-7 findings  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
 CONNECTION_STATE_INPUTS = (
@@ -195,15 +195,15 @@ PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
     ),
     (
         "update_record",
-        "Update selected DNS record or LDAP attributes",
+        "Update selected DNS record or LDAP entry attributes",
         "u",
-        "Edit one selected DNS record or allowlisted LDAP attributes.",
+        "Edit one selected DNS record or one allowlisted LDAP entry's attributes.",
     ),
     (
         "delete_records",
-        "Delete selected DNS records or LDAP entry",
+        "Delete selected DNS records or LDAP entries",
         "d",
-        "Delete selected DNS records or the selected LDAP entry after confirmation.",
+        "Delete selected DNS records or LDAP entries after confirmation.",
     ),
     (
         "filter_results",

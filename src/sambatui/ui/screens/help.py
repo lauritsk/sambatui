@@ -50,14 +50,14 @@ Navigation
   Ctrl+d/u  Half-page down/up
 
 Records / directory
-  Enter     Select zone or toggle DNS record select
+  Enter     Select zone or toggle DNS record select; LDAP shows row-action hint
   q         Query records
   a/d       Add or delete DNS records / LDAP entries
-  u         Update DNS record or selected LDAP attributes
+  u         Update DNS record or one selected LDAP entry's attributes
   /         Inline search source records; filters loaded findings
   n/t/e     Sort by name/type/value
-  Space     Toggle record selection
-  v/V       Visual/range select
+  Space     Toggle DNS record or LDAP entry selection
+  v/V       Visual/range select DNS records or LDAP entries
   Esc       Clear visual/select/search/finding filter state
 
 App

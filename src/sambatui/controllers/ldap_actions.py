@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TypeVar
 
 from textual import work
@@ -231,11 +231,35 @@ class AppLdapActionsMixin(AppControllerBase):
     async def action_load_more_directory(self) -> None:
         await self.load_more_current_view()
 
-    def selected_directory_row(self) -> DirectoryRow | None:
-        row = self.visible_row_at(self.visible_directory(), self.records_cursor_row())
+    def selected_directory_entries(self) -> list[DirectoryRow]:
+        rows = self.visible_directory()
+        if self.selected_directory_rows:
+            row_indices = sorted(self.selected_directory_rows)
+            if any(
+                row_index < 0 or row_index >= len(rows) for row_index in row_indices
+            ):
+                self.notify(
+                    "LDAP selection is stale; clear selection and select entries again.",
+                    severity="error",
+                )
+                return []
+            return [rows[row_index] for row_index in row_indices]
+
+        row = self.visible_row_at(rows, self.records_cursor_row())
         if row is None:
             self.notify("Select an LDAP entry first.", severity="error")
-        return row
+            return []
+        return [row]
+
+    def selected_directory_row(self) -> DirectoryRow | None:
+        rows = self.selected_directory_entries()
+        if len(rows) > 1:
+            self.notify(
+                "LDAP update works on one entry only. Select one row.",
+                severity="error",
+            )
+            return None
+        return rows[0] if rows else None
 
     def ldap_editable_attributes(self, row: DirectoryRow) -> tuple[str, ...]:
         return LDAP_EDITABLE_ATTRIBUTES.get(row.kind, ())
@@ -396,24 +420,53 @@ class AppLdapActionsMixin(AppControllerBase):
         self.notify(f"LDAP entry added: {dn}")
         await self.refresh_current_directory_search()
 
-    def ldap_delete_preview(self, row: DirectoryRow) -> str:
-        return (
-            "DELETE selected LDAP entry?\n\n"
-            f"Name: {row.name}\nKind: {row.kind}\nDN: {row.dn}\n\n"
-            "This cannot be undone from this app. Non-empty containers may fail."
+    def ldap_entry_count_label(self, count: int) -> str:
+        label = "LDAP entry" if count == 1 else "LDAP entries"
+        return f"{count} {label}"
+
+    def ldap_delete_preview(
+        self, rows: Sequence[DirectoryRow], *, preview_limit: int = 12
+    ) -> str:
+        preview_rows = rows[:preview_limit]
+        lines = [
+            f"- Name: {row.name}\n  Kind: {row.kind}\n  DN: {row.dn}"
+            for row in preview_rows
+        ]
+        if len(rows) > preview_limit:
+            lines.append(f"... and {len(rows) - preview_limit} more")
+        return "\n".join(
+            [
+                f"DELETE {self.ldap_entry_count_label(len(rows))}?",
+                "",
+                *lines,
+                "",
+                "This is irreversible from this app.",
+                "Non-empty containers may fail; recursive delete is not performed.",
+            ]
         )
 
     async def delete_ldap_entry(self) -> None:
-        row = self.selected_directory_row()
-        if row is None:
+        rows = self.selected_directory_entries()
+        if not rows:
             return
-        if not await self.confirm(self.ldap_delete_preview(row)):
+        if not await self.confirm(self.ldap_delete_preview(rows)):
             self.notify("LDAP delete cancelled")
             return
-        _result, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().delete_entry(row.dn)
-        )
-        if error:
-            return
-        self.notify("LDAP entry deleted")
+
+        failed = 0
+        for row in rows:
+            _result, error = await self.ldap_thread_result(
+                lambda dn=row.dn: self.ldap_client().delete_entry(dn)
+            )
+            if error:
+                failed += 1
+        self.clear_directory_selection()
+        deleted = len(rows) - failed
+        if failed:
+            self.notify(
+                f"Deleted {self.ldap_entry_count_label(deleted)}; {failed} failure(s)",
+                severity="error",
+            )
+        else:
+            self.notify(f"Deleted {self.ldap_entry_count_label(deleted)}")
         await self.refresh_current_directory_search()

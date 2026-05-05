@@ -91,7 +91,9 @@ class AppCoreMixin(AppControllerBase):
 
     def initialize_state(self) -> None:
         self.selected_record_rows: set[int] = set()
+        self.selected_directory_rows: set[int] = set()
         self.selection_anchor: int | None = None
+        self.directory_selection_anchor: int | None = None
         self.visual_selecting = False
         self.record_rows: list[DnsRow] = []
         self.directory_rows: list[DirectoryRow] = []

@@ -40,7 +40,7 @@ NEXT_TABLE_BY_ID = {
     "ldap_structure": "ldap_findings",
     "ldap_findings": "records",
 }
-VISUAL_SELECTION_OFF_STATUS = "Visual selection off; selected {count} record(s)"
+SELECTABLE_VIEW_MODES = {"dns", "directory"}
 
 
 class AppNavigationMixin(App):
@@ -49,7 +49,9 @@ class AppNavigationMixin(App):
         pending_g: bool
         search_text: str
         selected_record_rows: set[int]
+        selected_directory_rows: set[int]
         selection_anchor: int | None
+        directory_selection_anchor: int | None
         view_mode: str
         visual_selecting: bool
         zones: list[str]
@@ -60,7 +62,7 @@ class AppNavigationMixin(App):
 
         async def activate_sidebar_selection(self, table: DataTable) -> bool: ...
 
-        def clear_record_selection(self) -> None: ...
+        def clear_current_selection(self) -> None: ...
 
         def clear_current_smart_view(self) -> None: ...
 
@@ -72,15 +74,25 @@ class AppNavigationMixin(App):
             self, search_text: str, view_mode: str
         ) -> object: ...
 
-        def select_record_range(self, start: int, end: int) -> None: ...
+        def current_selection_anchor(self) -> int | None: ...
 
-        def set_record_selected(self, row_index: int, selected: bool) -> None: ...
+        def select_current_range(self, start: int, end: int) -> None: ...
+
+        def selected_rows_for_current_view(self) -> set[int]: ...
+
+        def selection_count_label(self) -> str: ...
+
+        def set_current_row_selected(self, row_index: int, selected: bool) -> None: ...
+
+        def set_current_selection_anchor(self, row_index: int | None) -> None: ...
 
         def set_status(self, message: str) -> None: ...
 
         def sort_records(self, field: str) -> None: ...
 
         def update_details_pane(self) -> None: ...
+
+        def visible_directory(self) -> list[object]: ...
 
     def sync_inline_search_input(self) -> None:
         with suppress(Exception):
@@ -169,6 +181,7 @@ class AppNavigationMixin(App):
         current = tabs.active if tabs.active in SIDE_TAB_IDS else "dns_tab"
         current_index = SIDE_TAB_IDS.index(current)
         tabs.active = SIDE_TAB_IDS[(current_index + delta) % len(SIDE_TAB_IDS)]
+        self.clear_current_selection()
         self.refresh_key_hints()
         self.action_focus_zones()
 
@@ -188,11 +201,12 @@ class AppNavigationMixin(App):
         self.sort_records("value")
 
     def update_visual_selection(self) -> None:
-        if not self.visual_selecting or self.selection_anchor is None:
+        anchor = self.current_selection_anchor()
+        if not self.visual_selecting or anchor is None:
             return
         table = self.records_table()
         if self.focused_table() is table:
-            self.select_record_range(self.selection_anchor, table.cursor_row)
+            self.select_current_range(anchor, table.cursor_row)
 
     def active_table(self) -> DataTable:
         return self.focused_table() or self.records_table()
@@ -255,10 +269,10 @@ class AppNavigationMixin(App):
             table.move_cursor(row=table.row_count - 1)
             self.finish_cursor_move()
 
-    def ensure_dns_records_view(self) -> bool:
-        if self.view_mode == "dns":
+    def ensure_selectable_records_view(self) -> bool:
+        if self.view_mode in SELECTABLE_VIEW_MODES:
             return True
-        self.set_status("Selection only applies to DNS records.")
+        self.set_status("Selection applies to DNS records and LDAP entries.")
         return False
 
     def record_selection_table(
@@ -269,7 +283,10 @@ class AppNavigationMixin(App):
             return None
         if not table.row_count:
             return None
-        if not self.ensure_dns_records_view():
+        if not self.ensure_selectable_records_view():
+            return None
+        if self.view_mode == "directory" and not self.visible_directory():
+            self.set_status("Select an LDAP entry first.")
             return None
         return table
 
@@ -279,11 +296,11 @@ class AppNavigationMixin(App):
         if table is None:
             return
         row_index = table.cursor_row
-        if self.selection_anchor is None:
-            self.selection_anchor = row_index
-        is_selected = row_index in self.selected_record_rows
-        self.set_record_selected(row_index, not is_selected)
-        self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
+        if self.current_selection_anchor() is None:
+            self.set_current_selection_anchor(row_index)
+        is_selected = row_index in self.selected_rows_for_current_view()
+        self.set_current_row_selected(row_index, not is_selected)
+        self.set_status(f"Selected {self.selection_count_label()}")
 
     def action_visual_select(self) -> None:
         self.pending_g = False
@@ -295,8 +312,8 @@ class AppNavigationMixin(App):
             self.set_visual_selection_off_status()
             return
         self.visual_selecting = True
-        self.selection_anchor = table.cursor_row
-        self.select_record_range(table.cursor_row, table.cursor_row)
+        self.set_current_selection_anchor(table.cursor_row)
+        self.select_current_range(table.cursor_row, table.cursor_row)
         self.set_status("Visual selection on: use j/k, then d to delete selected")
 
     def action_select_range(self) -> None:
@@ -304,19 +321,23 @@ class AppNavigationMixin(App):
         table = self.record_selection_table(focus=True)
         if table is None:
             return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
-        self.select_record_range(self.selection_anchor, table.cursor_row)
+        anchor = self.current_selection_anchor()
+        if anchor is None:
+            anchor = table.cursor_row
+            self.set_current_selection_anchor(anchor)
+        self.select_current_range(anchor, table.cursor_row)
 
     def extend_selection_by(self, delta: int) -> None:
         self.pending_g = False
         table = self.record_selection_table(focus=True)
         if table is None:
             return
-        if self.selection_anchor is None:
-            self.selection_anchor = table.cursor_row
+        anchor = self.current_selection_anchor()
+        if anchor is None:
+            anchor = table.cursor_row
+            self.set_current_selection_anchor(anchor)
         self.move_cursor_by(delta)
-        self.select_record_range(self.selection_anchor, table.cursor_row)
+        self.select_current_range(anchor, table.cursor_row)
 
     def action_extend_up(self) -> None:
         self.extend_selection_by(-1)
@@ -339,8 +360,8 @@ class AppNavigationMixin(App):
             self.visual_selecting = False
             self.set_visual_selection_off_status()
             return
-        if self.selected_record_rows:
-            self.clear_record_selection()
+        if self.selected_rows_for_current_view():
+            self.clear_current_selection()
             self.set_status("Selection cleared")
             return
         if self.view_mode == "smart":
@@ -354,7 +375,7 @@ class AppNavigationMixin(App):
 
     def set_visual_selection_off_status(self) -> None:
         self.set_status(
-            VISUAL_SELECTION_OFF_STATUS.format(count=len(self.selected_record_rows))
+            f"Visual selection off; selected {self.selection_count_label()}"
         )
 
     def is_sidebar_table(self, table: DataTable | None) -> bool:
@@ -371,7 +392,7 @@ class AppNavigationMixin(App):
                     self.action_fix_smart()
                 case "directory":
                     self.set_status(
-                        "Press u to edit or d to delete the selected LDAP entry."
+                        "Space selects LDAP entries; u edits one, d deletes selected."
                     )
                 case _:
                     self.set_status("No active records view.")
