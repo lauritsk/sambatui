@@ -5,6 +5,11 @@ from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
+from sambatui.smart_view_catalog import (
+    all_smart_view_shortcut_range,
+    smart_view_shortcut_range,
+)
+
 from .base import FocusedModalScreen
 
 
@@ -26,7 +31,9 @@ class HelpScreen(FocusedModalScreen[None]):
     #help_buttons Button { width: 14; margin-left: 1; }
     """
 
-    HELP_TEXT = """Connection
+    FINDING_SHORTCUTS = all_smart_view_shortcut_range()
+    DASHBOARD_SHORTCUT = smart_view_shortcut_range("Full")
+    HELP_TEXT = f"""Connection
   Ctrl+P    Open searchable command palette
   w         Run first-run setup wizard
   Ctrl+O    Open/edit connection settings (also via command palette)
@@ -39,7 +46,7 @@ Main tabs
   L         Search LDAP from anywhere
   m         Load 200 more rows for the last LDAP search
   S         Pick a DNS/LDAP finding filter from a list
-  1-8       Open finding filters directly; 8 runs full health dashboard
+  {FINDING_SHORTCUTS}       Open finding filters directly; {DASHBOARD_SHORTCUT} runs full health dashboard
   z         Load DNS zones
 
 Navigation

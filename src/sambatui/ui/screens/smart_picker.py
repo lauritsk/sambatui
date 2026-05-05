@@ -7,6 +7,8 @@ from textual.events import Key
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
+from sambatui.smart_view_catalog import all_smart_view_shortcut_range
+
 from .base import FocusedModalScreen
 
 
@@ -39,7 +41,7 @@ class SmartViewPickerScreen(FocusedModalScreen[str | None]):
         with Vertical(id="smart_view_dialog"):
             yield Static("Smart views", id="smart_view_title")
             yield Static(
-                "Pick a read-only hygiene view. Keys 1-8 run views directly; Enter selects.",
+                f"Pick a read-only hygiene view. Keys {all_smart_view_shortcut_range()} run views directly; Enter selects.",
                 id="smart_view_hint",
             )
             table = DataTable(id="smart_view_table", cursor_type="row")

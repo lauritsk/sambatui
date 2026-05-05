@@ -488,6 +488,8 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
     assert settings.ldap_config("DC=override").base_dn == "DC=override"
     fields = settings.form_fields()
     assert fields[0][1] == "server"
+    assert "smart_days" in [field[1] for field in fields]
+    assert "smart_max_rows" in [field[1] for field in fields]
     assert fields[-1][1] == "password_file"
 
 
