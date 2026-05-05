@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.6.1](https://github.com/lauritsk/sambatui/compare/308cdb291de15d6ec7aff7e6b1899d4cee221efe..v0.6.1) - 2026-05-05
+#### Bug Fixes
+- (**test**) isolate LDAP selection notifications - ([308cdb2](https://github.com/lauritsk/sambatui/commit/308cdb291de15d6ec7aff7e6b1899d4cee221efe)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.6.0](https://github.com/lauritsk/sambatui/compare/89656baeea16ec5c3bcd8f28b38165fe2788360e..v0.6.0) - 2026-05-05
 #### Features
 - (**ldap**) support safe multi-select deletes - ([bf4a395](https://github.com/lauritsk/sambatui/commit/bf4a395c6c4696025343b1aa1c63ec8536d72d44)) - Karl Hans Laurits
