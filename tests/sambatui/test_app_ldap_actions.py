@@ -2,6 +2,7 @@ import asyncio
 from contextlib import suppress
 from typing import Any, cast
 
+from pytest import MonkeyPatch
 
 from sambatui.app import (
     SambatuiApp,
@@ -340,7 +341,9 @@ def test_delete_ldap_entry_bulk_deletes_selected_entries_after_preview() -> None
     asyncio.run(run_app())
 
 
-def test_update_ldap_entry_rejects_multiple_selected_entries() -> None:
+def test_update_ldap_entry_rejects_multiple_selected_entries(
+    monkeypatch: MonkeyPatch,
+) -> None:
     class LdapMultiEditApp(SambatuiApp):
         def __init__(self) -> None:
             super().__init__()
@@ -368,6 +371,10 @@ def test_update_ldap_entry_rejects_multiple_selected_entries() -> None:
             raise AssertionError("form must not open for multiple LDAP entries")
 
     async def run_app() -> None:
+        monkeypatch.setattr(
+            "sambatui.controllers.core.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
         app = LdapMultiEditApp()
         async with app.run_test():
             app.populate_directory(
@@ -400,7 +407,9 @@ def test_update_ldap_entry_rejects_multiple_selected_entries() -> None:
     asyncio.run(run_app())
 
 
-def test_selected_directory_entries_rejects_stale_selection() -> None:
+def test_selected_directory_entries_rejects_stale_selection(
+    monkeypatch: MonkeyPatch,
+) -> None:
     class LdapSelectionApp(SambatuiApp):
         def __init__(self) -> None:
             super().__init__()
@@ -418,6 +427,10 @@ def test_selected_directory_entries_rejects_stale_selection() -> None:
             self.notifications.append((message, severity))
 
     async def run_app() -> None:
+        monkeypatch.setattr(
+            "sambatui.controllers.core.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
         app = LdapSelectionApp()
         async with app.run_test():
             app.populate_directory(
