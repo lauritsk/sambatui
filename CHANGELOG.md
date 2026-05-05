@@ -2,6 +2,25 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.7.0](https://github.com/lauritsk/sambatui/compare/242ce989a30e59298f021acfd8714dd8e43575c9..v0.7.0) - 2026-05-05
+#### Features
+- support selecting multiple smart findings - ([25be0be](https://github.com/lauritsk/sambatui/commit/25be0be789e0f681396dcc6c18b055d6721c83bb)) - Karl Hans Laurits
+#### Bug Fixes
+- (**config**) persist connection preference fields - ([a3cb4e1](https://github.com/lauritsk/sambatui/commit/a3cb4e1f46618f60ac331475a5670d2e64b52cb2)) - Karl Hans Laurits
+- refresh DNS zones for smart PTR checks - ([985f61e](https://github.com/lauritsk/sambatui/commit/985f61e396ddf9a8e0974fd014940daea04fdf4d)) - Karl Hans Laurits
+#### Tests
+- (**dns**) isolate dashboard zone fixture - ([3d50d06](https://github.com/lauritsk/sambatui/commit/3d50d06cacd1108f098a2662bfc1471174f9759b)) - Karl Hans Laurits
+#### Refactoring
+- (**dns**) centralize record metadata and reverse zones - ([65bc5a8](https://github.com/lauritsk/sambatui/commit/65bc5a8ae1686933546484e8dd9625048961383d)) - Karl Hans Laurits
+- (**ldap**) canonicalize DirectoryRow imports - ([d58d83d](https://github.com/lauritsk/sambatui/commit/d58d83d1f52bf395f90ac41f936ca9ed423b6e38)) - Karl Hans Laurits
+- (**smart-views**) centralize finding metadata defaults - ([52c617d](https://github.com/lauritsk/sambatui/commit/52c617d051652f7860924647b8fc3c4e2c71cb46)) - Karl Hans Laurits
+- (**smart-views**) inject reverse DNS resolver - ([eceba35](https://github.com/lauritsk/sambatui/commit/eceba3555f457c154d77734a17a54d78c45c7a93)) - Karl Hans Laurits
+- (**smart-views**) centralize metadata defaults - ([1ff6f2b](https://github.com/lauritsk/sambatui/commit/1ff6f2b15dd61eb2b23841efb89fecaa5caa2bd1)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- update local sambatui install - ([242ce98](https://github.com/lauritsk/sambatui/commit/242ce989a30e59298f021acfd8714dd8e43575c9)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.6.1](https://github.com/lauritsk/sambatui/compare/308cdb291de15d6ec7aff7e6b1899d4cee221efe..v0.6.1) - 2026-05-05
 #### Bug Fixes
 - (**test**) isolate LDAP selection notifications - ([308cdb2](https://github.com/lauritsk/sambatui/commit/308cdb291de15d6ec7aff7e6b1899d4cee221efe)) - Karl Hans Laurits
