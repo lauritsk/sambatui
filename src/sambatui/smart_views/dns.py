@@ -134,9 +134,7 @@ def a_record_ptr_finding(
         return None
 
     expected = reverse_record_for_ipv4(record.value, zones)
-    if expected is None:
-        return None
-
+    assert expected is not None
     ptr_zone, ptr_name = expected
     object_name = f"{record.fqdn} A {record.value}"
     if normalize_dns_name(ptr_zone) not in zone_names:

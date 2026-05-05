@@ -36,7 +36,12 @@ from ..smart_views import (
     ldap_stale_computers,
     ldap_users_without_groups,
 )
-from ..smart_view_catalog import FULL_HEALTH_VIEW_ID, SMART_VIEW_BY_ID, SMART_VIEWS
+from ..smart_view_catalog import (
+    FULL_HEALTH_VIEW_ID,
+    SMART_DEFAULT_SORTS,
+    SMART_VIEW_BY_ID,
+    SMART_VIEWS,
+)
 from ..ui.details import (
     details_empty_text,
     directory_details_text,
@@ -69,7 +74,6 @@ from ..app_constants import (
 from .base import AppControllerBase
 from .helpers import (
     DNS_SMART_ROW_BUILDERS,
-    SMART_DEFAULT_SORTS,
     SMART_SORT_KEYS,
     TableRow,
     directory_sort_label,

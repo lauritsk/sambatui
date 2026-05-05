@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-
-from ..dns.ptr import reverse_record_for_ipv4 as reverse_record_for_ipv4
-from ..core.models import DnsRow
-from . import dns as _dns
 from .dashboard import (
     dashboard_detail_row,
     dashboard_failure_row,
@@ -20,6 +15,7 @@ from .dns import (
     bucket_dns_records,
     cname_conflict_findings,
     dns_duplicate_records,
+    dns_a_without_ptr,
     dns_fqdn,
     dns_ptr_without_a,
     dns_record_identity,
@@ -58,17 +54,6 @@ from .ldap import (
     stale_computer_finding,
 )
 from .models import SmartViewCheckResult, SmartViewRow
-
-
-def dns_a_without_ptr(
-    records_by_zone: Mapping[str, Sequence[DnsRow]],
-) -> list[SmartViewRow]:
-    original = _dns.reverse_record_for_ipv4
-    _dns.reverse_record_for_ipv4 = reverse_record_for_ipv4
-    try:
-        return _dns.dns_a_without_ptr(records_by_zone)
-    finally:
-        _dns.reverse_record_for_ipv4 = original
 
 
 __all__ = [

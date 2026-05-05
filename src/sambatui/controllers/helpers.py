@@ -17,15 +17,6 @@ DIRECTORY_SORT_LABELS = {"type": "kind", "value": "summary"}
 SMART_SORT_LABELS = {"name": "object", "type": "finding", "value": "evidence"}
 SEVERITY_RANK = {"error": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 AGE_RE = re.compile(r"(\d+)\s+day")
-SMART_DEFAULT_SORTS = {
-    "dns_duplicates": ("severity", False),
-    "dns_a_without_ptr": ("severity", False),
-    "dns_ptr_without_a": ("severity", False),
-    "ldap_inactive_users": ("age", True),
-    "ldap_delete_candidates": ("age", True),
-    "ldap_stale_computers": ("age", True),
-    "ldap_users_without_groups": ("object", False),
-}
 
 
 def smart_age_sort_key(row: SmartViewRow) -> str:
