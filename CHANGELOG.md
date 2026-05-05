@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.6.0](https://github.com/lauritsk/sambatui/compare/89656baeea16ec5c3bcd8f28b38165fe2788360e..v0.6.0) - 2026-05-05
+#### Features
+- (**ldap**) support safe multi-select deletes - ([bf4a395](https://github.com/lauritsk/sambatui/commit/bf4a395c6c4696025343b1aa1c63ec8536d72d44)) - Karl Hans Laurits
+#### Tests
+- isolate config state - ([1c1f493](https://github.com/lauritsk/sambatui/commit/1c1f49380773914b03e8da036bca85dd833fc63e)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- update local sambatui install - ([89656ba](https://github.com/lauritsk/sambatui/commit/89656baeea16ec5c3bcd8f28b38165fe2788360e)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.5.0](https://github.com/lauritsk/sambatui/compare/1a70d619e0aec799f7696e26f15b8595d44ea3e5..v0.5.0) - 2026-05-04
 #### Features
 - (**ui**) integrate findings into DNS and LDAP navigation - ([66c1e54](https://github.com/lauritsk/sambatui/commit/66c1e5405eb348fb66f5b649bdb24d9c8f719fda)) - Karl Hans Laurits
