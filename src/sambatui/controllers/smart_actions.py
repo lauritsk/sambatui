@@ -148,11 +148,21 @@ class AppSmartActionsMixin(AppControllerBase):
             return None
         return defaults | values
 
+    def dns_smart_view_needs_zone_refresh(self) -> bool:
+        if not self.zones:
+            return True
+        return len(self.zones) == 1 or not any(
+            zone.rstrip(".").casefold().endswith(".in-addr.arpa") for zone in self.zones
+        )
+
+    async def ensure_dns_zones_for_smart_view(self) -> None:
+        if self.dns_smart_view_needs_zone_refresh():
+            await self.load_zones(restore_active_zone=False)
+
     async def dns_records_with_failures_for_smart_view(
         self,
     ) -> tuple[dict[str, list[DnsRow]], list[str]] | None:
-        if not self.zones:
-            await self.load_zones(restore_active_zone=False)
+        await self.ensure_dns_zones_for_smart_view()
         if not self.zones:
             self.report_error("Load zones before DNS smart views.")
             return None

@@ -1534,6 +1534,44 @@ def test_smart_action_edges() -> None:
     asyncio.run(run_app())
 
 
+def test_dns_smart_view_refreshes_partial_zone_list_for_reverse_data() -> None:
+    class PartialZoneApp(NotificationApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.zones = ["example.com"]
+            self.loaded = 0
+
+        async def load_zones(self, *, restore_active_zone: bool = True) -> None:
+            assert restore_active_zone is False
+            self.loaded += 1
+            self.zones = ["example.com", "2.0.192.in-addr.arpa"]
+
+        async def run_samba_zone(
+            self, action: str, zone: str, args: list[str]
+        ) -> tuple[int, str]:
+            if zone == "example.com":
+                return (
+                    0,
+                    "Name=host, Records=1, Children=0\n"
+                    "  A: 192.0.2.10 (flags=f0, serial=1, ttl=1)",
+                )
+            return 0, ""
+
+    async def run_app() -> None:
+        app = PartialZoneApp()
+        async with app.run_test():
+            rows = await app.build_smart_view_rows(
+                SMART_VIEW_BY_ID["dns_a_without_ptr"],
+                {},
+                SmartViewOptions.from_values({}),
+            )
+            assert app.loaded == 1
+            assert rows is not None
+            assert [row.finding for row in rows] == ["A record missing PTR"]
+
+    asyncio.run(run_app())
+
+
 def test_smart_dns_ldap_dashboard_and_directory_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
