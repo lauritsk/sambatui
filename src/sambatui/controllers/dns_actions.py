@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textual import work
 
+from ..dns.record_types import SUPPORTED_DNS_RECORD_TYPES_TEXT
 from ..dns.validation import validate_record
 from ..ui.screens import (
     FormField,
@@ -143,7 +144,7 @@ class AppDnsActionsMixin(AppControllerBase):
                 (
                     "Record type",
                     "rtype",
-                    "A / AAAA / CNAME / PTR / TXT / MX / SRV / NS",
+                    SUPPORTED_DNS_RECORD_TYPES_TEXT,
                     "A",
                 ),
             ],
@@ -233,7 +234,7 @@ class AppDnsActionsMixin(AppControllerBase):
             (
                 "New type",
                 "rtype",
-                "A / AAAA / CNAME / PTR / TXT / MX / SRV",
+                SUPPORTED_DNS_RECORD_TYPES_TEXT,
                 selected["rtype"],
             ),
             (

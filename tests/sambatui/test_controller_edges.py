@@ -1534,6 +1534,13 @@ def test_smart_action_edges() -> None:
     asyncio.run(run_app())
 
 
+def test_dns_smart_view_refresh_detection_accepts_normalized_reverse_zone() -> None:
+    app = NotificationApp()
+    app.zones = ["example.com", "2.0.192.IN-ADDR.ARPA."]
+
+    assert not app.dns_smart_view_needs_zone_refresh()
+
+
 def test_dns_smart_view_refreshes_partial_zone_list_for_reverse_data() -> None:
     class PartialZoneApp(NotificationApp):
         def __init__(self) -> None:

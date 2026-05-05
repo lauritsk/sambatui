@@ -14,6 +14,12 @@ from sambatui.app import (
 from textual.widgets import Button, Input, Static
 
 from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
+from sambatui.dns.record_types import (
+    DNS_RECORD_TYPE_SPECS,
+    SUPPORTED_DNS_RECORD_TYPES,
+    SUPPORTED_DNS_RECORD_TYPES_TEXT,
+    dns_record_type_spec,
+)
 from sambatui.dns.validation import valid_dns_name
 from sambatui.ui.screens import (
     FormScreen,
@@ -76,13 +82,11 @@ def test_validate_record_accepts_documentation_examples(
 @given(
     st.sampled_from(
         [
-            ("A", {"name", "address", "ttl"}),
-            ("AAAA", {"name", "address", "ttl"}),
-            ("CNAME", {"name", "target", "ttl"}),
-            ("PTR", {"name", "target", "ttl"}),
-            ("MX", {"name", "priority", "target", "ttl"}),
-            ("SRV", {"name", "priority", "weight", "port", "target", "ttl"}),
-            ("TXT", {"name", "text", "ttl"}),
+            (
+                rtype,
+                {"name", "ttl"} | {field_id for _, field_id, _, _ in spec.fields},
+            )
+            for rtype, spec in DNS_RECORD_TYPE_SPECS.items()
         ]
     )
 )
@@ -95,6 +99,29 @@ def test_guided_add_record_fields_are_type_specific(
     assert {
         field_id for _, field_id, _, _ in app.add_record_type_fields(rtype)
     } == expected
+
+
+def test_record_type_registry_covers_guided_fields_and_validation_hints() -> None:
+    app = SambatuiApp()
+
+    for rtype, spec in DNS_RECORD_TYPE_SPECS.items():
+        assert rtype in SUPPORTED_DNS_RECORD_TYPES
+        assert spec.fields
+        assert dns_record_type_spec(rtype.lower()) == spec
+        assert set(spec.value_fields) <= {field_id for _, field_id, _, _ in spec.fields}
+        assert app.record_type_selection_error({"rtype": rtype.lower()}) is None
+
+    assert validate_record("bad space", "BAD!", "value") == (
+        "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
+    )
+    assert validate_record("www", "BAD!", "value") == (
+        "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV, NS."
+    )
+    assert SUPPORTED_DNS_RECORD_TYPES_TEXT in str(
+        app.update_record_fields(
+            {"name": "www", "rtype": "NS", "value": "ns1.example.com."}
+        )
+    )
 
 
 def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
@@ -272,6 +299,20 @@ def test_reverse_record_for_ipv4_falls_back_to_24_zone(
         f"{octets[2]}.{octets[1]}.{octets[0]}.in-addr.arpa",
         octets[3],
     )
+
+
+def test_reverse_record_for_ipv4_accepts_case_and_trailing_dot_zones() -> None:
+    assert reverse_record_for_ipv4(
+        "192.0.2.10",
+        ["example.com", "2.0.192.IN-ADDR.ARPA."],
+    ) == ("2.0.192.in-addr.arpa", "10")
+
+
+def test_reverse_record_for_ipv4_keeps_longest_normalized_match() -> None:
+    assert reverse_record_for_ipv4(
+        "192.0.2.10",
+        ["0.192.IN-ADDR.ARPA.", "2.0.192.in-addr.arpa"],
+    ) == ("2.0.192.in-addr.arpa", "10")
 
 
 def test_reverse_record_for_ipv4_rejects_non_ipv4_values() -> None:
