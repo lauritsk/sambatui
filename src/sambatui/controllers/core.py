@@ -167,7 +167,12 @@ class AppCoreMixin(AppControllerBase):
             "domain": domain,
             "zone": domain,
             "last_zone": zone,
+            "user": self.val("user"),
             "auth": self.val("auth") or DEFAULT_AUTH,
+            "kerberos": self.val("kerberos"),
+            "krb5_ccache": self.val("krb5_ccache"),
+            "configfile": self.val("configfile"),
+            "options": self.val("options"),
             "ldap_base": self.val("ldap_base"),
             "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             "ldap_compatibility": self.val("ldap_compatibility")
@@ -179,6 +184,7 @@ class AppCoreMixin(AppControllerBase):
             "smart_never_logged_days": self.val("smart_never_logged_days")
             or DEFAULT_SMART_NEVER_LOGGED_DAYS,
             "smart_max_rows": self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
+            "password_file": self.val("password_file"),
         }
 
     def save_preferences(self) -> None:

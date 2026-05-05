@@ -22,6 +22,9 @@ CONFIG_KEYS = st.sampled_from(
         "zone",
         "auth",
         "kerberos",
+        "krb5_ccache",
+        "configfile",
+        "options",
         "auto_ptr",
         "ldap_base",
         "ldap_encryption",
@@ -30,6 +33,9 @@ CONFIG_KEYS = st.sampled_from(
         "smart_disabled_days",
         "smart_never_logged_days",
         "smart_max_rows",
+        "last_zone",
+        "user",
+        "password_file",
         "unknown",
     ]
 )
