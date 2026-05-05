@@ -24,8 +24,10 @@ from ..smart_view_catalog import (
     SMART_VIEWS,
     SMART_ROW_LIMIT_MAX,
     SMART_ROW_LIMIT_STEP,
+    SMART_VIEW_DEFAULTS,
     SmartViewDefinition,
     SmartViewOptions,
+    SmartViewSource,
 )
 from ..smart_views import (
     SmartViewCheckResult,
@@ -59,7 +61,13 @@ LDAP_USERS_WITHOUT_GROUPS_VIEW_ID = "ldap_users_without_groups"
 class AppSmartActionsMixin(AppControllerBase):
     def smart_view_choices(self) -> list[SmartViewChoice]:
         return [
-            (view.shortcut, view.view_id, view.source, view.label, view.description)
+            (
+                view.shortcut,
+                view.view_id,
+                view.source_label,
+                view.label,
+                view.description,
+            )
             for view in SMART_VIEWS
         ]
 
@@ -70,7 +78,7 @@ class AppSmartActionsMixin(AppControllerBase):
                 (
                     "Stale/inactive days",
                     "days",
-                    "90",
+                    str(SMART_VIEW_DEFAULTS.days),
                     self.val("smart_days") or DEFAULT_SMART_DAYS,
                 ),
             ),
@@ -79,7 +87,7 @@ class AppSmartActionsMixin(AppControllerBase):
                 (
                     "Disabled cleanup days",
                     "disabled_days",
-                    "180",
+                    str(SMART_VIEW_DEFAULTS.disabled_days),
                     self.val("smart_disabled_days") or DEFAULT_SMART_DISABLED_DAYS,
                 ),
             ),
@@ -88,7 +96,7 @@ class AppSmartActionsMixin(AppControllerBase):
                 (
                     "Never-logged-in days",
                     "never_logged_days",
-                    "30",
+                    str(SMART_VIEW_DEFAULTS.never_logged_days),
                     self.val("smart_never_logged_days")
                     or DEFAULT_SMART_NEVER_LOGGED_DAYS,
                 ),
@@ -210,7 +218,7 @@ class AppSmartActionsMixin(AppControllerBase):
                 values, SmartViewOptions.from_values(values), refreshed=True
             )
             return
-        if view.source != "DNS" and not values:
+        if view.source is not SmartViewSource.DNS and not values:
             self.refresh_smart_view()
             return
 
@@ -330,7 +338,7 @@ class AppSmartActionsMixin(AppControllerBase):
         values: dict[str, str],
         options: SmartViewOptions,
     ) -> list[SmartViewRow] | None:
-        if view.source == "DNS":
+        if view.source is SmartViewSource.DNS:
             records_by_zone = await self.dns_records_for_smart_view()
             if records_by_zone is None:
                 return None
