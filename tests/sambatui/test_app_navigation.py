@@ -4,6 +4,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from sambatui.app import (
+    DnsRow,
     SambatuiApp,
     actionable_error,
     ldap_structure_labels,
@@ -187,6 +188,165 @@ def test_command_palette_routes_to_existing_actions() -> None:
         assert await app.run_command_palette_action("smart_view_1")
         assert not await app.run_command_palette_action("missing")
         assert app.actions == ["setup", "connection", "add", "ldap:users", "smart:1"]
+
+    asyncio.run(run_app())
+
+
+def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Bob,DC=example,DC=com",
+                        kind="user",
+                        name="Bob",
+                        summary="bob@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Ops,DC=example,DC=com",
+                        kind="group",
+                        name="Ops",
+                        summary="ops@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            records = app.query_one("#records", DataTable)
+            records.focus()
+
+            await pilot.press("space")
+            assert app.selected_directory_rows == {0}
+            assert str(records.get_row_at(0)[0]) == "✓"
+
+            await pilot.press("j")
+            await pilot.press("V")
+            assert app.selected_directory_rows == {0, 1}
+            assert str(records.get_row_at(1)[0]) == "✓"
+
+            app.selected_record_rows.add(42)
+            await pilot.press("escape")
+            assert app.selected_directory_rows == set()
+            assert app.directory_selection_anchor is None
+            assert app.selected_record_rows == {42}
+
+    asyncio.run(run_app())
+
+
+def test_ldap_directory_selection_clears_on_sort() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Bob,DC=example,DC=com",
+                        kind="user",
+                        name="Bob",
+                        summary="bob@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            app.set_directory_selected(0, True)
+            app.set_directory_selected(1, True)
+
+            app.sort_directory("name")
+
+            assert app.selected_directory_rows == set()
+            records = app.query_one("#records", DataTable)
+            assert [str(records.get_row_at(index)[1]) for index in range(2)] == [
+                "Alice",
+                "Bob",
+            ]
+            assert str(records.get_row_at(0)[0]) != "✓"
+
+    asyncio.run(run_app())
+
+
+def test_dns_multi_select_still_works() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test() as pilot:
+            app.populate_records(
+                [
+                    DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw"),
+                    DnsRow("db", "1", "0", "A", "192.0.2.20", "3600", "raw"),
+                ]
+            )
+            records = app.query_one("#records", DataTable)
+            records.focus()
+
+            await pilot.press("space")
+            await pilot.press("j")
+            await pilot.press("V")
+
+            assert app.selected_record_rows == {0, 1}
+            assert app.selected_directory_rows == set()
+            assert [str(records.get_row_at(index)[0]) for index in range(2)] == [
+                "✓",
+                "✓",
+            ]
+
+            await pilot.press("escape")
+            assert app.selected_record_rows == set()
+
+    asyncio.run(run_app())
+
+
+def test_selection_helpers_cover_smart_and_invalid_directory_edges() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    )
+                ]
+            )
+            app.set_directory_selected(99, True)
+            assert app.selected_directory_rows == set()
+
+            app.view_mode = "dns"
+            app.selected_directory_rows.add(0)
+            app.clear_directory_selection()
+            assert app.selected_directory_rows == set()
+
+            app.view_mode = "smart"
+            app.visual_selecting = True
+            app.selection_anchor = 1
+            app.directory_selection_anchor = 2
+            app.clear_current_selection()
+            assert app.visual_selecting is False
+            assert app.selection_anchor is None
+            assert app.directory_selection_anchor is None
+
+            records = app.query_one("#records", DataTable)
+            records.clear()
+            app.view_mode = "directory"
+            app.select_directory_range(0, 1)
+            assert app.selected_directory_rows == set()
 
     asyncio.run(run_app())
 

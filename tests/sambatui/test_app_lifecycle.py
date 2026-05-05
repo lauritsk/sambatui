@@ -14,6 +14,9 @@ def test_empty_states_explain_next_actions() -> None:
         def connection_domain_default(self) -> str:
             return ""
 
+        def ldap_base_default(self) -> str:
+            return ""
+
     async def run_app() -> None:
         app = EmptyStateApp()
         async with app.run_test():
@@ -107,6 +110,26 @@ def test_setup_wizard_discovers_checks_and_loads_zones() -> None:
             assert app.ldap_checked
             assert app.saved_preferences == 1
             assert str(records.get_row_at(0)[1]) == "www"
+
+    asyncio.run(run_app())
+
+
+def test_discovered_controller_sets_empty_zone_and_ldap_base() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.query_one("#zone", Input).value = ""
+            app.query_one("#ldap_base", Input).value = ""
+
+            app.apply_discovered_ad_controller(
+                DiscoveredService(
+                    "ldap", "example.com", "dc01.example.com", 389, 0, 100
+                )
+            )
+
+            assert app.query_one("#server", Input).value == "dc01.example.com"
+            assert app.query_one("#zone", Input).value == "example.com"
+            assert app.query_one("#ldap_base", Input).value == "DC=example,DC=com"
 
     asyncio.run(run_app())
 

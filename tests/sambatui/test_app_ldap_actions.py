@@ -260,10 +260,209 @@ def test_delete_ldap_entry_deletes_selected_dn() -> None:
             await app.delete_ldap_entry()
 
             assert app.deleted == "CN=Alice,DC=example,DC=com"
-            assert "DELETE selected LDAP entry?" in app.confirm_message
+            assert "DELETE 1 LDAP entry?" in app.confirm_message
+            assert "DN: CN=Alice,DC=example,DC=com" in app.confirm_message
             assert app.refreshed
 
     asyncio.run(run_app())
+
+
+def test_delete_ldap_entry_bulk_deletes_selected_entries_after_preview() -> None:
+    class FakeLdapClient:
+        def __init__(self, app: Any) -> None:
+            self.app = app
+
+        def delete_entry(self, dn: str) -> None:
+            self.app.deleted.append(dn)
+
+    class LdapBulkDeleteApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.deleted: list[str] = []
+            self.confirm_message = ""
+            self.refreshed = False
+
+        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+            self.confirm_message = message
+            return True
+
+        def ldap_client(self, base_dn: str = "") -> Any:
+            return FakeLdapClient(self)
+
+        async def refresh_current_directory_search(self) -> bool:
+            self.refreshed = True
+            return True
+
+    async def run_app() -> None:
+        app = LdapBulkDeleteApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Bob,DC=example,DC=com",
+                        kind="user",
+                        name="Bob",
+                        summary="bob@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Ops,DC=example,DC=com",
+                        kind="group",
+                        name="Ops",
+                        summary="ops@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            app.set_directory_selected(0, True)
+            app.set_directory_selected(2, True)
+
+            await app.delete_ldap_entry()
+
+            assert app.deleted == [
+                "CN=Alice,DC=example,DC=com",
+                "CN=Ops,DC=example,DC=com",
+            ]
+            assert "DELETE 2 LDAP entries?" in app.confirm_message
+            assert "DN: CN=Alice,DC=example,DC=com" in app.confirm_message
+            assert "DN: CN=Ops,DC=example,DC=com" in app.confirm_message
+            assert "recursive delete is not performed" in app.confirm_message
+            assert not app.selected_directory_rows
+            assert app.refreshed
+
+    asyncio.run(run_app())
+
+
+def test_update_ldap_entry_rejects_multiple_selected_entries() -> None:
+    class LdapMultiEditApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.notifications: list[tuple[str, str]] = []
+
+        def notify(
+            self,
+            message: str,
+            *,
+            title: str = "",
+            severity: str = "information",
+            timeout: float | None = None,
+            markup: bool = True,
+        ) -> None:
+            self.notifications.append((message, severity))
+
+        async def form(
+            self,
+            title: str,
+            hint: str,
+            fields: list[FormField],
+            submit_label: str = "Continue",
+            validator: FormValidator | None = None,
+        ) -> dict[str, str] | None:
+            raise AssertionError("form must not open for multiple LDAP entries")
+
+    async def run_app() -> None:
+        app = LdapMultiEditApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    ),
+                    DirectoryRow(
+                        dn="CN=Bob,DC=example,DC=com",
+                        kind="user",
+                        name="Bob",
+                        summary="bob@example.com",
+                        attributes={},
+                    ),
+                ]
+            )
+            app.set_directory_selected(0, True)
+            app.set_directory_selected(1, True)
+
+            await app.update_ldap_entry()
+
+            assert app.notifications == [
+                ("LDAP update works on one entry only. Select one row.", "error")
+            ]
+
+    asyncio.run(run_app())
+
+
+def test_selected_directory_entries_rejects_stale_selection() -> None:
+    class LdapSelectionApp(SambatuiApp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.notifications: list[tuple[str, str]] = []
+
+        def notify(
+            self,
+            message: str,
+            *,
+            title: str = "",
+            severity: str = "information",
+            timeout: float | None = None,
+            markup: bool = True,
+        ) -> None:
+            self.notifications.append((message, severity))
+
+    async def run_app() -> None:
+        app = LdapSelectionApp()
+        async with app.run_test():
+            app.populate_directory(
+                [
+                    DirectoryRow(
+                        dn="CN=Alice,DC=example,DC=com",
+                        kind="user",
+                        name="Alice",
+                        summary="alice@example.com",
+                        attributes={},
+                    )
+                ]
+            )
+            app.selected_directory_rows.add(5)
+
+            assert app.selected_directory_entries() == []
+            assert app.notifications == [
+                (
+                    "LDAP selection is stale; clear selection and select entries again.",
+                    "error",
+                )
+            ]
+
+    asyncio.run(run_app())
+
+
+def test_ldap_delete_preview_truncates_long_selection() -> None:
+    app = SambatuiApp()
+    rows = [
+        DirectoryRow(
+            dn=f"CN=User {index},DC=example,DC=com",
+            kind="user",
+            name=f"User {index}",
+            summary="",
+            attributes={},
+        )
+        for index in range(13)
+    ]
+
+    preview = app.ldap_delete_preview(rows)
+
+    assert "DELETE 13 LDAP entries?" in preview
+    assert "CN=User 11,DC=example,DC=com" in preview
+    assert "CN=User 12,DC=example,DC=com" not in preview
+    assert "... and 1 more" in preview
 
 
 def test_ldap_container_expansion_failure_does_not_report_error() -> None:

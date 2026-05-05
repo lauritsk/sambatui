@@ -357,8 +357,59 @@ class AppViewsMixin(AppControllerBase):
 
     def reset_render_state(self) -> None:
         self.selected_record_rows.clear()
+        self.selected_directory_rows.clear()
         self.selection_anchor = None
+        self.directory_selection_anchor = None
         self.visual_selecting = False
+
+    def selection_count_label(self) -> str:
+        count = (
+            len(self.selected_directory_rows)
+            if self.view_mode == "directory"
+            else len(self.selected_record_rows)
+        )
+        if self.view_mode == "directory":
+            label = "LDAP entry" if count == 1 else "LDAP entries"
+            return f"{count} {label}"
+        return f"{count} record(s)"
+
+    def selected_rows_for_current_view(self) -> set[int]:
+        if self.view_mode == "directory":
+            return self.selected_directory_rows
+        return self.selected_record_rows
+
+    def current_selection_anchor(self) -> int | None:
+        if self.view_mode == "directory":
+            return self.directory_selection_anchor
+        return self.selection_anchor
+
+    def set_current_selection_anchor(self, row_index: int | None) -> None:
+        if self.view_mode == "directory":
+            self.directory_selection_anchor = row_index
+        else:
+            self.selection_anchor = row_index
+
+    def set_current_row_selected(self, row_index: int, selected: bool) -> None:
+        if self.view_mode == "directory":
+            self.set_directory_selected(row_index, selected)
+        else:
+            self.set_record_selected(row_index, selected)
+
+    def clear_current_selection(self) -> None:
+        if self.view_mode == "directory":
+            self.clear_directory_selection()
+        elif self.view_mode == "dns":
+            self.clear_record_selection()
+        else:
+            self.visual_selecting = False
+            self.selection_anchor = None
+            self.directory_selection_anchor = None
+
+    def select_current_range(self, start: int, end: int) -> None:
+        if self.view_mode == "directory":
+            self.select_directory_range(start, end)
+        else:
+            self.select_record_range(start, end)
 
     def smart_options_for_passive_findings(self) -> tuple[int, int, int]:
         days = bounded_int(self.val("smart_days"), 90)
@@ -734,7 +785,9 @@ class AppViewsMixin(AppControllerBase):
         self.directory_rows = self.sorted_directory(self.directory_rows)
         self.refresh_directory_view()
         direction = sort_direction(self.directory_sort_reverse)
-        self.set_status(f"Sorted LDAP by {directory_sort_label(field)} ({direction})")
+        self.set_status(
+            f"Sorted LDAP by {directory_sort_label(field)} ({direction}); selection cleared"
+        )
 
     def sort_records(self, field: str) -> None:
         match self.view_mode:
@@ -765,10 +818,33 @@ class AppViewsMixin(AppControllerBase):
         table.refresh_row(row_index)
 
     def clear_record_selection(self) -> None:
-        for row_index in list(self.selected_record_rows):
-            self.set_record_selected(row_index, False)
+        if self.view_mode == "dns":
+            for row_index in list(self.selected_record_rows):
+                self.set_record_selected(row_index, False)
+        else:
+            self.selected_record_rows.clear()
         self.visual_selecting = False
         self.selection_anchor = None
+
+    def set_directory_selected(self, row_index: int, selected: bool) -> None:
+        table = self.query_one("#records", DataTable)
+        if not 0 <= row_index < table.row_count:
+            return
+        if selected:
+            self.selected_directory_rows.add(row_index)
+        else:
+            self.selected_directory_rows.discard(row_index)
+        table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
+        table.refresh_row(row_index)
+
+    def clear_directory_selection(self) -> None:
+        if self.view_mode == "directory":
+            for row_index in list(self.selected_directory_rows):
+                self.set_directory_selected(row_index, False)
+        else:
+            self.selected_directory_rows.clear()
+        self.visual_selecting = False
+        self.directory_selection_anchor = None
 
     def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
         table = self.query_one("#records", DataTable)
@@ -782,6 +858,21 @@ class AppViewsMixin(AppControllerBase):
         for row_index in range(low, high + 1):
             self.set_record_selected(row_index, True)
         self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
+
+    def select_directory_range(
+        self, start: int, end: int, *, clear: bool = True
+    ) -> None:
+        table = self.query_one("#records", DataTable)
+        if not table.row_count:
+            return
+        start = max(0, min(start, table.row_count - 1))
+        end = max(0, min(end, table.row_count - 1))
+        if clear:
+            self.clear_directory_selection()
+        low, high = sorted((start, end))
+        for row_index in range(low, high + 1):
+            self.set_directory_selected(row_index, True)
+        self.set_status(f"Selected {self.selection_count_label()}")
 
     def row_to_record(self, row_index: int) -> dict[str, str] | None:
         if self.view_mode != "dns":

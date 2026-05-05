@@ -77,6 +77,22 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
     asyncio.run(run_app())
 
 
+def test_passive_dns_findings_empty_without_zone() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.query_one("#zone", Input).value = ""
+
+            assert (
+                app.passive_dns_findings(
+                    [DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw")]
+                )
+                == []
+            )
+
+    asyncio.run(run_app())
+
+
 def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
     class DashboardApp(SambatuiApp):
         def save_preferences(self) -> None:
