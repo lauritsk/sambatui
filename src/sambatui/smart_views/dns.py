@@ -9,6 +9,7 @@ import dns.exception
 import dns.name
 import dns.reversename
 
+from ..dns.names import is_ipv4_reverse_zone, normalize_dns_name, normalize_dns_value
 from ..dns.ptr import reverse_record_for_ipv4
 from ..core.models import DnsRow
 from .models import SmartViewRow
@@ -296,16 +297,8 @@ def dns_fqdn(name: str, zone: str) -> str:
     return f"{name}.{zone}"
 
 
-def normalize_dns_name(value: str) -> str:
-    return value.strip().rstrip(".").casefold()
-
-
-def normalize_dns_value(value: str) -> str:
-    return " ".join(value.strip().rstrip(".").casefold().split())
-
-
 def is_reverse_zone(zone: str) -> bool:
-    return normalize_dns_name(zone).endswith(".in-addr.arpa")
+    return is_ipv4_reverse_zone(zone)
 
 
 def ipv4_from_ptr_name(name: str, zone: str) -> str | None:

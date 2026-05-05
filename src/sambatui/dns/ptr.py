@@ -5,6 +5,8 @@ import ipaddress
 
 import dns.reversename
 
+from .names import is_ipv4_reverse_zone, normalize_dns_name
+
 
 def ptr_target_for_name(name: str, zone: str) -> str:
     if name == "@":
@@ -22,9 +24,9 @@ def reverse_record_for_ipv4(
     except ValueError:
         return None
 
-    reverse_name = dns.reversename.from_address(str(ip)).to_text().rstrip(".")
+    reverse_name = normalize_dns_name(dns.reversename.from_address(str(ip)).to_text())
     zones: list[str] = [
-        zone.rstrip(".") for zone in reverse_zones if zone.endswith(".in-addr.arpa")
+        normalize_dns_name(zone) for zone in reverse_zones if is_ipv4_reverse_zone(zone)
     ]
     best_zone = best_matching_reverse_zone(reverse_name, zones)
     if best_zone:
@@ -39,8 +41,12 @@ def reverse_record_for_ipv4(
 
 def best_matching_reverse_zone(reverse_name: str, zones: Iterable[str]) -> str:
     matching_zones = [
-        zone
+        normalized_zone
         for zone in zones
-        if reverse_name == zone or reverse_name.endswith(f".{zone}")
+        if (normalized_zone := normalize_dns_name(zone))
+        and (
+            reverse_name == normalized_zone
+            or reverse_name.endswith(f".{normalized_zone}")
+        )
     ]
     return max(matching_zones, key=lambda zone: len(zone), default="")

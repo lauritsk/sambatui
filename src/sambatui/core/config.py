@@ -8,6 +8,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
+from ..dns.names import is_reverse_dns_zone
+
 USER_CONFIG_PATH = Path(
     os.getenv("SAMBATUI_USER_CONFIG", "~/.config/sambatui/config.toml")
 ).expanduser()
@@ -211,11 +213,6 @@ USER_CONFIG = load_user_config()
 
 def _default(envvar: str, key: str, fallback: str) -> str:
     return os.getenv(envvar, USER_CONFIG.get(key, fallback))
-
-
-def is_reverse_dns_zone(value: str) -> bool:
-    normalized = value.strip().rstrip(".").casefold()
-    return normalized.endswith((".in-addr.arpa", ".ip6.arpa"))
 
 
 def _default_domain() -> str:

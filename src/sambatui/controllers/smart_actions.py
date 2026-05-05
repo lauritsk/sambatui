@@ -4,6 +4,7 @@ import asyncio
 
 from textual import work
 
+from ..dns.names import is_ipv4_reverse_zone
 from ..dns.parsing import parse_records
 from ..dns.validation import validate_record
 from ..ldap.client import (
@@ -152,7 +153,7 @@ class AppSmartActionsMixin(AppControllerBase):
         if not self.zones:
             return True
         return len(self.zones) == 1 or not any(
-            zone.rstrip(".").casefold().endswith(".in-addr.arpa") for zone in self.zones
+            is_ipv4_reverse_zone(zone) for zone in self.zones
         )
 
     async def ensure_dns_zones_for_smart_view(self) -> None:

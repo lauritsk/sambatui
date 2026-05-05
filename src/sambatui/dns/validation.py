@@ -8,6 +8,8 @@ import dns.rdata
 import dns.rdataclass
 import dns.rdatatype
 
+from .record_types import SUPPORTED_DNS_RECORD_TYPES_CSV
+
 _LABEL_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
 )
@@ -62,7 +64,7 @@ def _record_shape_error(
     if not valid_dns_name(name, allow_at=True):
         return "Bad name. Use @ or DNS labels with letters, numbers, dash, underscore, dot."
     if not (rtype.isascii() and rtype.isalnum()):
-        return "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV."
+        return f"Bad type. Example: {SUPPORTED_DNS_RECORD_TYPES_CSV}."
     if require_value and not value:
         return "Value is required."
     return None

@@ -23,9 +23,13 @@ from .core.config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
+from .dns.record_types import (
+    DNS_RECORD_TYPE_SPECS,
+    SUPPORTED_DNS_RECORD_TYPES,
+)
 from .ldap.client import DirectoryRow
 from .core.models import DnsRow
-from .ui.screens import CommandPaletteChoice, FormField
+from .ui.screens import CommandPaletteChoice
 from .smart_view_catalog import SMART_VIEWS
 
 KEY_HINTS = {
@@ -67,34 +71,12 @@ DIRECTORY_SORT_KEYS: dict[str, Callable[[DirectoryRow], str]] = {
 LDAP_DEFAULT_MAX_ROWS = 200
 LDAP_LOAD_MORE_ROWS = 200
 LDAP_MAX_ROWS = 5000
-GUIDED_RECORD_TYPES = ("A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
-GUIDED_RECORD_TYPE_FIELDS: dict[str, tuple[FormField, ...]] = {
-    "A": (("IPv4 address", "address", "192.0.2.10", ""),),
-    "AAAA": (("IPv6 address", "address", "2001:db8::10", ""),),
-    "CNAME": (("Canonical target", "target", "host.example.com.", ""),),
-    "PTR": (("PTR target", "target", "host.example.com.", ""),),
-    "TXT": (("TXT text", "text", "v=spf1 include:example.com ~all", ""),),
-    "MX": (
-        ("Priority", "priority", "10", "10"),
-        ("Mail exchanger", "target", "mail.example.com.", ""),
-    ),
-    "SRV": (
-        ("Priority", "priority", "0", "0"),
-        ("Weight", "weight", "100", "100"),
-        ("Port", "port", "389", ""),
-        ("Target", "target", "dc01.example.com.", ""),
-    ),
-    "NS": (("Name server", "target", "ns1.example.com.", ""),),
+GUIDED_RECORD_TYPES = SUPPORTED_DNS_RECORD_TYPES
+GUIDED_RECORD_TYPE_FIELDS = {
+    rtype: spec.fields for rtype, spec in DNS_RECORD_TYPE_SPECS.items()
 }
 GUIDED_RECORD_VALUE_FIELDS = {
-    "A": ("address",),
-    "AAAA": ("address",),
-    "CNAME": ("target",),
-    "PTR": ("target",),
-    "NS": ("target",),
-    "TXT": ("text",),
-    "MX": ("priority", "target"),
-    "SRV": ("priority", "weight", "port", "target"),
+    rtype: spec.value_fields for rtype, spec in DNS_RECORD_TYPE_SPECS.items()
 }
 KEY_ACTION_NAMES: dict[str, str] = {
     "ctrl+o": "action_connection",
