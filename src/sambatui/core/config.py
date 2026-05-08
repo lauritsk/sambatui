@@ -161,10 +161,9 @@ def _safe_user_config_value(key: str, value: object) -> str:
     if key == "ldap_compatibility":
         return _normalized_on_off(normalized)
     if key in CHOICE_VALUES:
-        choice = normalized.casefold()
-        return choice if choice in CHOICE_VALUES[key] else ""
+        return _normalized_choice(key, normalized)
     if key in INTEGER_RANGES:
-        return normalized if _integer_value_error(key, normalized) is None else ""
+        return _normalized_integer(key, normalized)
     return normalized
 
 
@@ -177,21 +176,34 @@ def _normalized_on_off(value: str) -> str:
     return ""
 
 
+def _normalized_choice(key: str, value: str) -> str:
+    normalized = value.casefold()
+    return normalized if normalized in CHOICE_VALUES[key] else ""
+
+
+def _normalized_integer(key: str, value: str) -> str:
+    return value if _integer_value_error(key, value) is None else ""
+
+
 def user_config_value_error(key: str, value: object) -> str | None:
     normalized = _preference_value(value)
     if not normalized or key not in USER_CONFIG_KEYS:
         return None
     if key == "ldap_compatibility":
-        if _normalized_on_off(normalized):
-            return None
-        return "LDAP compatibility must be on or off."
+        return None if _normalized_on_off(normalized) else _on_off_error()
     if key in CHOICE_VALUES:
-        if normalized.casefold() in CHOICE_VALUES[key]:
-            return None
-        return f"{FIELD_LABELS[key]} must be {CHOICE_LABELS[key]}."
+        return None if _normalized_choice(key, normalized) else _choice_error(key)
     if key in INTEGER_RANGES:
         return _integer_value_error(key, normalized)
     return None
+
+
+def _on_off_error() -> str:
+    return "LDAP compatibility must be on or off."
+
+
+def _choice_error(key: str) -> str:
+    return f"{FIELD_LABELS[key]} must be {CHOICE_LABELS[key]}."
 
 
 def user_config_validation_error(values: Mapping[str, object]) -> str | None:
