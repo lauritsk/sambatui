@@ -826,81 +826,42 @@ class AppViewsMixin(AppControllerBase):
             case _:
                 self.set_status(self.empty_state_status(self.view_mode))
 
-    def set_record_selected(self, row_index: int, selected: bool) -> None:
+    def set_selection_state(
+        self, row_index: int, selected: bool, selected_rows: set[int]
+    ) -> None:
         table = self.query_one("#records", DataTable)
         if not 0 <= row_index < table.row_count:
             return
         if selected:
-            self.selected_record_rows.add(row_index)
+            selected_rows.add(row_index)
         else:
-            self.selected_record_rows.discard(row_index)
+            selected_rows.discard(row_index)
         table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
         table.refresh_row(row_index)
 
-    def clear_record_selection(self) -> None:
-        if self.view_mode == "dns":
-            for row_index in list(self.selected_record_rows):
-                self.set_record_selected(row_index, False)
+    def clear_selection_state(
+        self,
+        selected_rows: set[int],
+        clear_visible_row: Callable[[int], None],
+        *,
+        current_view: bool,
+    ) -> None:
+        if current_view:
+            for row_index in list(selected_rows):
+                clear_visible_row(row_index)
         else:
-            self.selected_record_rows.clear()
+            selected_rows.clear()
         self.visual_selecting = False
-        self.selection_anchor = None
 
-    def set_directory_selected(self, row_index: int, selected: bool) -> None:
-        table = self.query_one("#records", DataTable)
-        if not 0 <= row_index < table.row_count:
-            return
-        if selected:
-            self.selected_directory_rows.add(row_index)
-        else:
-            self.selected_directory_rows.discard(row_index)
-        table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
-        table.refresh_row(row_index)
-
-    def clear_directory_selection(self) -> None:
-        if self.view_mode == "directory":
-            for row_index in list(self.selected_directory_rows):
-                self.set_directory_selected(row_index, False)
-        else:
-            self.selected_directory_rows.clear()
-        self.visual_selecting = False
-        self.directory_selection_anchor = None
-
-    def set_smart_selected(self, row_index: int, selected: bool) -> None:
-        table = self.query_one("#records", DataTable)
-        if not 0 <= row_index < table.row_count:
-            return
-        if selected:
-            self.selected_smart_rows.add(row_index)
-        else:
-            self.selected_smart_rows.discard(row_index)
-        table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
-        table.refresh_row(row_index)
-
-    def clear_smart_selection(self) -> None:
-        if self.view_mode == "smart":
-            for row_index in list(self.selected_smart_rows):
-                self.set_smart_selected(row_index, False)
-        else:
-            self.selected_smart_rows.clear()
-        self.visual_selecting = False
-        self.smart_selection_anchor = None
-
-    def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
-        table = self.query_one("#records", DataTable)
-        if not table.row_count:
-            return
-        start = max(0, min(start, table.row_count - 1))
-        end = max(0, min(end, table.row_count - 1))
-        if clear:
-            self.clear_record_selection()
-        low, high = sorted((start, end))
-        for row_index in range(low, high + 1):
-            self.set_record_selected(row_index, True)
-        self.set_status(f"Selected {len(self.selected_record_rows)} record(s)")
-
-    def select_directory_range(
-        self, start: int, end: int, *, clear: bool = True
+    def select_range(
+        self,
+        start: int,
+        end: int,
+        set_selected: Callable[[int], None],
+        selected_label: Callable[[], str],
+        clear_selection: Callable[[], None],
+        *,
+        clear: bool = True,
     ) -> None:
         table = self.query_one("#records", DataTable)
         if not table.row_count:
@@ -908,24 +869,76 @@ class AppViewsMixin(AppControllerBase):
         start = max(0, min(start, table.row_count - 1))
         end = max(0, min(end, table.row_count - 1))
         if clear:
-            self.clear_directory_selection()
+            clear_selection()
         low, high = sorted((start, end))
         for row_index in range(low, high + 1):
-            self.set_directory_selected(row_index, True)
-        self.set_status(f"Selected {self.selection_count_label()}")
+            set_selected(row_index)
+        self.set_status(f"Selected {selected_label()}")
+
+    def set_record_selected(self, row_index: int, selected: bool) -> None:
+        self.set_selection_state(row_index, selected, self.selected_record_rows)
+
+    def clear_record_selection(self) -> None:
+        self.clear_selection_state(
+            self.selected_record_rows,
+            lambda row_index: self.set_record_selected(row_index, False),
+            current_view=self.view_mode == "dns",
+        )
+        self.selection_anchor = None
+
+    def set_directory_selected(self, row_index: int, selected: bool) -> None:
+        self.set_selection_state(row_index, selected, self.selected_directory_rows)
+
+    def clear_directory_selection(self) -> None:
+        self.clear_selection_state(
+            self.selected_directory_rows,
+            lambda row_index: self.set_directory_selected(row_index, False),
+            current_view=self.view_mode == "directory",
+        )
+        self.directory_selection_anchor = None
+
+    def set_smart_selected(self, row_index: int, selected: bool) -> None:
+        self.set_selection_state(row_index, selected, self.selected_smart_rows)
+
+    def clear_smart_selection(self) -> None:
+        self.clear_selection_state(
+            self.selected_smart_rows,
+            lambda row_index: self.set_smart_selected(row_index, False),
+            current_view=self.view_mode == "smart",
+        )
+        self.smart_selection_anchor = None
+
+    def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
+        self.select_range(
+            start,
+            end,
+            lambda row_index: self.set_record_selected(row_index, True),
+            lambda: f"{len(self.selected_record_rows)} record(s)",
+            self.clear_record_selection,
+            clear=clear,
+        )
+
+    def select_directory_range(
+        self, start: int, end: int, *, clear: bool = True
+    ) -> None:
+        self.select_range(
+            start,
+            end,
+            lambda row_index: self.set_directory_selected(row_index, True),
+            self.selection_count_label,
+            self.clear_directory_selection,
+            clear=clear,
+        )
 
     def select_smart_range(self, start: int, end: int, *, clear: bool = True) -> None:
-        table = self.query_one("#records", DataTable)
-        if not table.row_count:
-            return
-        start = max(0, min(start, table.row_count - 1))
-        end = max(0, min(end, table.row_count - 1))
-        if clear:
-            self.clear_smart_selection()
-        low, high = sorted((start, end))
-        for row_index in range(low, high + 1):
-            self.set_smart_selected(row_index, True)
-        self.set_status(f"Selected {self.selection_count_label()}")
+        self.select_range(
+            start,
+            end,
+            lambda row_index: self.set_smart_selected(row_index, True),
+            self.selection_count_label,
+            self.clear_smart_selection,
+            clear=clear,
+        )
 
     def row_to_record(self, row_index: int) -> dict[str, str] | None:
         if self.view_mode != "dns":
