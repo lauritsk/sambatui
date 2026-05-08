@@ -41,6 +41,8 @@ NEXT_TABLE_BY_ID = {
     "ldap_findings": "records",
 }
 SELECTABLE_VIEW_MODES = {"dns", "directory", "smart"}
+DEFAULT_PAGE_ROWS = 10
+TABLE_CHROME_ROWS = 3
 
 
 class AppNavigationMixin(App):
@@ -218,20 +220,22 @@ class AppNavigationMixin(App):
     def page_rows(self, table: DataTable) -> int:
         height = getattr(table.size, "height", 0)
         if not height:
-            return 10
-        return max(1, height - 3)
+            return DEFAULT_PAGE_ROWS
+        return max(1, height - TABLE_CHROME_ROWS)
 
     def finish_cursor_move(self) -> None:
         self.update_visual_selection()
         self.update_details_pane()
 
+    def move_cursor_to(self, table: DataTable, row: int) -> None:
+        table.move_cursor(row=max(0, min(row, table.row_count - 1)))
+        self.finish_cursor_move()
+
     def move_cursor_by(self, delta: int) -> None:
         table = self.active_table()
         if not table.row_count:
             return
-        row = max(0, min(table.cursor_row + delta, table.row_count - 1))
-        table.move_cursor(row=row)
-        self.finish_cursor_move()
+        self.move_cursor_to(table, table.cursor_row + delta)
 
     def action_cursor_down(self) -> None:
         self.pending_g = False
@@ -241,12 +245,15 @@ class AppNavigationMixin(App):
         self.pending_g = False
         self.move_cursor_by(-1)
 
+    def page_delta(self, table: DataTable, *, half_page: bool = False) -> int:
+        rows = self.page_rows(table)
+        return max(1, rows // 2) if half_page else rows
+
     def move_cursor_by_page(self, direction: int, *, half_page: bool = False) -> None:
         self.pending_g = False
-        rows = self.page_rows(self.active_table())
-        if half_page:
-            rows = max(1, rows // 2)
-        self.move_cursor_by(direction * rows)
+        self.move_cursor_by(
+            direction * self.page_delta(self.active_table(), half_page=half_page)
+        )
 
     def action_cursor_page_down(self) -> None:
         self.move_cursor_by_page(1)
@@ -262,16 +269,13 @@ class AppNavigationMixin(App):
 
     def action_cursor_top(self) -> None:
         self.pending_g = False
-        table = self.active_table()
-        table.move_cursor(row=0)
-        self.finish_cursor_move()
+        self.move_cursor_to(self.active_table(), 0)
 
     def action_cursor_bottom(self) -> None:
         self.pending_g = False
         table = self.active_table()
         if table.row_count:
-            table.move_cursor(row=table.row_count - 1)
-            self.finish_cursor_move()
+            self.move_cursor_to(table, table.row_count - 1)
 
     def ensure_selectable_records_view(self) -> bool:
         if self.view_mode in SELECTABLE_VIEW_MODES:
