@@ -37,8 +37,6 @@ This project uses `mise` for tools/tasks and `uv` for Python dependencies.
 | `README.md` | User-facing install, configuration, usage, and operational notes. |
 | `CONTRIBUTING.md` | Developer setup, workflow, quality gates, and release process. |
 | `SECURITY.md` | Vulnerability reporting process. |
-| `AGENTS.md` | Instructions for AI coding agents working in this repository. |
-| `AUDIT.md` | Security audit notes and follow-up context. |
 | `CHANGELOG.md` | Release history generated/maintained during releases. |
 
 ## Development workflow
@@ -92,9 +90,8 @@ Keep each document focused on its audience:
 - Put contributor goals here: setup from checkout, development tasks, tests,
   standards, pull requests, and releases.
 - Put security reporting in `SECURITY.md`; do not duplicate private reporting
-  details in public issue templates beyond linking to it.
-- Put agent-only workflow rules in `AGENTS.md`; avoid adding agent instructions
-  to user docs.
+  details in public issue or PR text beyond linking to it.
+- Keep maintainer- or automation-only workflow rules out of user docs.
 
 When changing behavior, update user docs only when the user-facing workflow,
 configuration, command output, or security guidance changes.
@@ -104,8 +101,8 @@ configuration, command output, or security guidance changes.
 GitHub Issues are the source of truth for planned work.
 
 - Check existing issues before starting work.
-- Use `.github/ISSUE_TEMPLATE/agent_task.md` for agent-led maintenance or
-  implementation work.
+- Open issues with a concise Conventional Commit-style title when possible
+  (`fix(scope): summary`, `feat(scope): summary`, `docs: summary`).
 - Record status, scope changes, decisions, validation, and handoff notes in the
   relevant issue.
 - Report vulnerabilities by following [SECURITY.md](SECURITY.md), not by opening

@@ -136,7 +136,8 @@ docker run --rm -it \
 
 ## Configuration
 
-Enter connection values in the setup wizard or provide environment variables:
+Enter connection values in the setup wizard or provide environment variables
+(see `.env.example` for a complete starter set):
 
 ```sh
 SAMBATUI_SERVER=dc01.example.com \
@@ -170,10 +171,10 @@ sambatui
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 | `SAMBATUI_USER_CONFIG` | Preference file path | `~/.config/sambatui/config.toml` |
 
-`sambatui` stores non-secret preferences in `~/.config/sambatui/config.toml`.
-Passwords, password-file contents, and usernames are not written there.
-Precedence is environment variables, then saved preferences, then built-in
-defaults.
+`sambatui` stores non-secret preferences, including connection settings and the
+username, in `~/.config/sambatui/config.toml`. Passwords and password-file
+contents are not written there. Precedence is environment variables, then saved
+preferences, then built-in defaults.
 
 ## Using the TUI
 
