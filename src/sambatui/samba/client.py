@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -12,6 +13,7 @@ AUTH_MODES = frozenset({"password", "kerberos"})
 @dataclass(frozen=True)
 class SambaToolConfig:
     server: str
+    executable: str = "samba-tool"
     user: str = ""
     password: str = ""
     auth_mode: str = "password"
@@ -51,7 +53,7 @@ class SambaToolClient:
 
     def dns_command(self, action: str, zone: str, args: Sequence[str]) -> list[str]:
         return [
-            "samba-tool",
+            self.config.executable,
             "dns",
             action,
             self.config.server,
@@ -66,7 +68,7 @@ class SambaToolClient:
 
     def zonelist_command(self) -> list[str]:
         return [
-            "samba-tool",
+            self.config.executable,
             "dns",
             "zonelist",
             self.config.server,
@@ -85,7 +87,7 @@ class SambaToolClient:
         args: list[str] = []
         auth_mode = self.config.normalized_auth_mode
         if auth_mode == "password":
-            args.extend(["-U", f"{self.config.user}%{self.config.password}"])
+            args.extend(["-U", self.config.user])
         elif self.config.user:
             args.extend(["-U", self.config.user])
 
@@ -93,6 +95,11 @@ class SambaToolClient:
         if self.config.krb5_ccache:
             args.append(f"--use-krb5-ccache={self.config.krb5_ccache}")
         return args
+
+    def execution_env(self) -> Mapping[str, str] | None:
+        if self.config.normalized_auth_mode != "password":
+            return None
+        return {**os.environ, "PASSWD": self.config.password}
 
     @staticmethod
     def redact_command(command: Iterable[str]) -> list[str]:
