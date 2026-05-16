@@ -164,7 +164,8 @@ def test_guided_add_preview_includes_command_and_ptr_suggestion() -> None:
             assert "Record: www A 192.0.2.10" in preview
             assert "2.0.192.in-addr.arpa: 10 PTR www.example.com" in preview
             assert "Command preview: samba-tool dns add dc01.example.com" in preview
-            assert "admin%******" in preview
+            assert "-U admin" in preview
+            assert "secret" not in preview
 
     asyncio.run(run_app())
 

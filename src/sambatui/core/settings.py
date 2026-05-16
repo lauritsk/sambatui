@@ -211,7 +211,7 @@ class ConnectionSettings:
                 self.ldap_encryption or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — on relaxes TLS/schema; with password auth prefer UPN user.",
+                "LDAP compatibility — WARNING: on disables TLS certificate verification and allows legacy TLS; use only for trusted DCs.",
                 "ldap_compatibility",
                 "on | off",
                 self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,

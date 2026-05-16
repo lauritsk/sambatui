@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
+import tempfile
 import tomllib
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -128,13 +130,17 @@ def write_private_text(path: Path, content: str) -> None:
     if not parent_exists:
         path.parent.chmod(0o700)
 
-    tmp_path = path.with_name(f".{path.name}.tmp")
-    file_descriptor = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    file_descriptor, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", text=True
+    )
+    tmp_path = Path(tmp_name)
     try:
+        os.chmod(tmp_path, 0o600)
         with os.fdopen(file_descriptor, "w", encoding="utf-8") as file:
             file_descriptor = -1
             file.write(content)
-        tmp_path.chmod(0o600)
+            file.flush()
+            os.fsync(file.fileno())
         tmp_path.replace(path)
     except BaseException:
         with suppress(FileNotFoundError):
@@ -279,12 +285,18 @@ def detected_default_auth(
 
 def password_file_permissions_too_open(path: Path) -> bool:
     try:
-        return bool(path.stat().st_mode & 0o077)
+        info = _password_file_lstat(path)
     except FileNotFoundError, OSError:
         return False
+    return stat.S_ISREG(info.st_mode) and bool(info.st_mode & 0o077)
 
 
 def fix_password_file_permissions(path: Path) -> None:
+    info = _password_file_lstat(path)
+    if stat.S_ISLNK(info.st_mode):
+        raise OSError(f"Refusing to chmod symlink password file {path}")
+    if not stat.S_ISREG(info.st_mode):
+        raise OSError(f"Password file is not a regular file: {path}")
     path.chmod(0o600)
 
 
@@ -320,11 +332,18 @@ DEFAULT_PASSWORD_FILE = Path(
 
 def password_file_warning(path: Path) -> str | None:
     try:
-        mode = path.stat().st_mode
+        info = _password_file_lstat(path)
     except FileNotFoundError:
         return None
     except OSError as exc:
         return f"Cannot inspect password file {path}: {exc}"
+    mode = info.st_mode
+    if stat.S_ISLNK(mode):
+        return f"Password file must not be a symlink: {path}."
+    if not stat.S_ISREG(mode):
+        return f"Password file must be a regular file: {path}."
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        return f"Password file must be owned by the current user: {path}."
     if mode & 0o077:
         return (
             f"Password file permissions too open: {path}. "
@@ -333,11 +352,36 @@ def password_file_warning(path: Path) -> str | None:
     return None
 
 
+def _password_file_lstat(path: Path) -> os.stat_result:
+    return path.lstat()
+
+
+def _open_private_password_file(path: Path) -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    file_descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(file_descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"Password file must be a regular file: {path}")
+        if hasattr(os, "getuid") and info.st_uid != os.getuid():
+            raise OSError(f"Password file must be owned by the current user: {path}")
+        if info.st_mode & 0o077:
+            raise OSError(f"Password file permissions too open: {path}")
+        return file_descriptor
+    except BaseException:
+        os.close(file_descriptor)
+        raise
+
+
 def read_password_file(path: Path = DEFAULT_PASSWORD_FILE) -> str:
     if password_file_warning(path):
         return ""
     try:
-        return path.read_text(encoding="utf-8").splitlines()[0].strip()
+        file_descriptor = _open_private_password_file(path)
+        with os.fdopen(file_descriptor, "r", encoding="utf-8") as file:
+            return file.read().splitlines()[0].strip()
     except FileNotFoundError, IndexError, OSError:
         return ""
 

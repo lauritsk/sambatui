@@ -5,6 +5,7 @@ import os
 import shutil
 import socket
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -78,9 +79,11 @@ class AppCoreMixin(AppControllerBase):
         self.initialize_state()
         self.initialize_view()
 
-        if not shutil.which("samba-tool"):
+        samba_tool = shutil.which("samba-tool")
+        if not samba_tool:
             self.report_error("samba-tool not found in PATH")
             return
+        self.samba_tool_executable = samba_tool
 
         self.set_initial_connection_status()
         if self.connection_needs_setup():
@@ -244,7 +247,9 @@ class AppCoreMixin(AppControllerBase):
         return self.connection_settings().path_password_file
 
     def samba_config(self) -> SambaToolConfig:
-        return self.connection_settings().samba_config()
+        config = self.connection_settings().samba_config()
+        executable = getattr(self, "samba_tool_executable", "samba-tool")
+        return replace(config, executable=executable)
 
     def samba_client(self) -> SambaToolClient:
         return SambaToolClient(self.samba_config())
@@ -351,10 +356,12 @@ class AppCoreMixin(AppControllerBase):
             return 2, error
 
         self.set_status(f"Running: {client.status_command(cmd)}")
+        env = client.execution_env() if hasattr(client, "execution_env") else None
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
         out_bytes, _ = await proc.communicate()
         output = out_bytes.decode(errors="replace")
