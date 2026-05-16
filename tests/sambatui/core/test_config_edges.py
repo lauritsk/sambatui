@@ -58,7 +58,7 @@ def test_config_last_branches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     error_path = Path("/secret/password")
     monkeypatch.setattr(
-        Path, "stat", lambda _path: (_ for _ in ()).throw(OSError("denied"))
+        Path, "lstat", lambda _path: (_ for _ in ()).throw(OSError("denied"))
     )
     assert password_file_warning(error_path) == (
         "Cannot inspect password file /secret/password: denied"

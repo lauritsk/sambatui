@@ -33,9 +33,12 @@ def test_password_auth_builds_existing_samba_tool_command() -> None:
         "@",
         "ALL",
         "-U",
-        "EXAMPLE\\administrator%secret",
+        "EXAMPLE\\administrator",
         "--use-kerberos=off",
     ]
+    env = client.execution_env()
+    assert env is not None
+    assert env["PASSWD"] == "secret"
 
 
 def test_kerberos_auth_does_not_require_or_embed_password() -> None:
@@ -50,6 +53,7 @@ def test_kerberos_auth_does_not_require_or_embed_password() -> None:
     )
 
     assert client.authentication_error() is None
+    assert client.execution_env() is None
     assert client.zonelist_command() == [
         "samba-tool",
         "dns",
@@ -77,9 +81,9 @@ def test_configfile_options_and_redaction() -> None:
     assert "--configfile=/etc/samba/smb.conf" in command
     assert "--option=client min protocol=SMB3" in command
     assert "--option=log level=1" in command
-    assert "admin%secret" in command
+    assert "admin%secret" not in command
+    assert client.execution_env() is not None
     assert "admin%secret" not in " ".join(client.redact_command(command))
-    assert "admin%******" in " ".join(client.redact_command(command))
 
 
 def test_authentication_error_prefers_kerberos_for_passwordless_use() -> None:
@@ -136,4 +140,4 @@ def test_dns_command_preserves_generated_command_parts(
 
     assert command[:5] == ["samba-tool", "dns", action, server, zone]
     assert command[5 : 5 + len(args)] == args
-    assert command[-3:] == ["-U", "admin%secret", "--use-kerberos=off"]
+    assert command[-3:] == ["-U", "admin", "--use-kerberos=off"]

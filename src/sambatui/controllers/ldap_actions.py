@@ -52,7 +52,7 @@ class AppLdapActionsMixin(AppControllerBase):
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
             ),
             (
-                "LDAP compatibility — only if DC needs relaxed TLS/schema; with password auth prefer UPN user",
+                "LDAP compatibility — WARNING: disables TLS certificate verification; use only for trusted legacy DCs",
                 "ldap_compatibility",
                 "on | off",
                 self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
