@@ -2,6 +2,20 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.7.1](https://github.com/lauritsk/sambatui/compare/0b1aaffd574435107c2ca720a936ce09a0f44bf1..v0.7.1) - 2026-05-16
+#### Bug Fixes
+- harden secret handling - ([1378dea](https://github.com/lauritsk/sambatui/commit/1378dea41e8f5eac6b6de06d5e98aed338d93c4d)) - Karl Hans Laurits
+#### Documentation
+- add project status - ([79117e0](https://github.com/lauritsk/sambatui/commit/79117e093612a86dcea0bb404bc68a7ee8dce54f)) - Karl Hans Laurits
+#### Refactoring
+- deduplicate selection handling - ([37e2511](https://github.com/lauritsk/sambatui/commit/37e25116a772883ab0a0fee6d815a6800de70dd2)) - Karl Hans Laurits
+- simplify navigation and config helpers - ([4ac45dd](https://github.com/lauritsk/sambatui/commit/4ac45dd764fae7c0c5158f9014d70568bd8d7a34)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- (**deps**) update pinned dependencies - ([7454805](https://github.com/lauritsk/sambatui/commit/7454805ee1eafda53e91488dbeeb1483a13b7e47)) - Karl Hans Laurits
+- update local sambatui install - ([0b1aaff](https://github.com/lauritsk/sambatui/commit/0b1aaffd574435107c2ca720a936ce09a0f44bf1)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.7.0](https://github.com/lauritsk/sambatui/compare/242ce989a30e59298f021acfd8714dd8e43575c9..v0.7.0) - 2026-05-05
 #### Features
 - support selecting multiple smart findings - ([25be0be](https://github.com/lauritsk/sambatui/commit/25be0be789e0f681396dcc6c18b055d6721c83bb)) - Karl Hans Laurits
