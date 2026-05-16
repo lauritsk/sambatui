@@ -10,6 +10,12 @@ directory browsing, and guarded LDAP entry management.
 uses Python `ldap3` for directory operations, adds safe confirmations for write
 operations, and provides DNS/LDAP findings for common hygiene checks.
 
+## Status
+
+- Maturity: usable admin TUI
+- Primary command: `mise run check`
+- Release target: GitHub release / Python package artifact
+
 ## Features
 
 - Discover domain controllers from AD DNS SRV records.
