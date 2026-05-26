@@ -9,7 +9,7 @@ authors = [{ name = "Karl Hans Laurits", email = "karl@laurits.dev" }]
 dependencies = [
   "dnspython==2.8.0",
   "ldap3==2.9.1",
-  "textual==8.2.6",
+  "textual==8.2.7",
 ]
 
 [project.urls]
