@@ -27,7 +27,7 @@ kerberos = [
 
 [dependency-groups]
 dev = [
-  "hypothesis==6.152.7",
+  "hypothesis==6.155.1",
   "pytest==9.0.3",
   "pytest-cov==7.1.0",
   "pytest-xdist==3.8.0",
