@@ -10,19 +10,17 @@ builds:
     buildmode: sdist
 
 dockers_v2:
-  - id: ghcr
-    ids:
+  - ids:
       - wheel
     images:
       - ghcr.io/lauritsk/sambatui
     tags:
       - "{{ .Version }}"
       - "{{ if not .Prerelease }}latest{{ end }}"
-    platforms:
-      - linux/amd64
-      - linux/arm64
     labels:
       org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.base.digest: "{{ .BaseImageDigest }}"
+      org.opencontainers.image.base.name: "{{ .BaseImage }}"
       org.opencontainers.image.description: Textual TUI for Samba AD DNS and LDAP administration
       org.opencontainers.image.licenses: MIT
       org.opencontainers.image.name: "{{ .ProjectName }}"
