@@ -5,7 +5,6 @@ HK_MISE = 1
 actionlint = "1.7.12"
 cocogitto = "7.0.0"
 cosign = "3.0.6"
-"github:lauritsk/sambatui" = "0.7.1"
 goreleaser = "2.16.0"
 hk = "1.47.0"
 ruff = "0.15.16"
