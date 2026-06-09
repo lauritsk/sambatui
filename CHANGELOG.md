@@ -2,6 +2,22 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.7.2](https://github.com/lauritsk/sambatui/compare/c92f21f1d5af628c4f819d418b860ed31b62a0ce..v0.7.2) - 2026-06-09
+#### Bug Fixes
+- remove pkl check after pkl dependency removed - ([0006e20](https://github.com/lauritsk/sambatui/commit/0006e206f130227503344ba988aa2242455824bb)) - Karl Hans Laurits
+- remove sambatui from project mise install - ([8251c98](https://github.com/lauritsk/sambatui/commit/8251c98db64c7357d8c5d1ececbd2744449b5892)) - Karl Hans Laurits
+#### Documentation
+- align contributor docs with repo cleanup - ([effd223](https://github.com/lauritsk/sambatui/commit/effd223eb1820f6210b8105127a78648bbc41632)) - Karl Hans Laurits
+- remove stale local docs - ([4581bb6](https://github.com/lauritsk/sambatui/commit/4581bb6081507609e22e53f24fcc83195ade9a48)) - Karl Hans Laurits
+#### Miscellaneous Chores
+- (**deps**) update dependencies - ([ce3c7a0](https://github.com/lauritsk/sambatui/commit/ce3c7a034e2c453afd8fd11c1f0b11bd5a51eae7)) - Karl Hans Laurits
+- (**deps**) update dependencies - ([ccbc1ae](https://github.com/lauritsk/sambatui/commit/ccbc1ae81186b4c2e53498a54ba15694aa73a95f)) - Karl Hans Laurits
+- (**deps**) update dependency tombi to v0.11.5 (#76) - ([f7c8714](https://github.com/lauritsk/sambatui/commit/f7c8714ff3295e4924403bcc1b04d66afc7b72e7)) - renovate[bot], renovate[bot]
+- (**deps**) update dependencies - ([c92f21f](https://github.com/lauritsk/sambatui/commit/c92f21f1d5af628c4f819d418b860ed31b62a0ce)) - Karl Hans Laurits
+- simplify dockers_v2 release config - ([d2feffb](https://github.com/lauritsk/sambatui/commit/d2feffb96dc3e7f30f79512c5232a19c2fa423cf)) - Karl Hans Laurits
+
+- - -
+
 ## [v0.7.1](https://github.com/lauritsk/sambatui/compare/0b1aaffd574435107c2ca720a936ce09a0f44bf1..v0.7.1) - 2026-05-16
 #### Bug Fixes
 - harden secret handling - ([1378dea](https://github.com/lauritsk/sambatui/commit/1378dea41e8f5eac6b6de06d5e98aed338d93c4d)) - Karl Hans Laurits
