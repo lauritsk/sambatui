@@ -13,6 +13,7 @@ from .config import (
     DEFAULT_DOMAIN,
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
+    DEFAULT_LDAP_BASE,
     DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_OPTIONS,
@@ -74,9 +75,9 @@ SAMBA_FIELD_TEMPLATES: tuple[FieldTemplate, ...] = (
         "/etc/samba/smb.conf",
     ),
     (
-        "Extra samba-tool options — separate multiple options with semicolons.",
+        "Extra smb.conf option values — separate multiple values with semicolons.",
         "options",
-        "--option=name=value; --debuglevel=1",
+        "client min protocol=SMB3; log level=1",
     ),
 )
 
@@ -93,7 +94,7 @@ class ConnectionSettings:
     krb5_ccache: str = DEFAULT_KRB5_CCACHE
     configfile: str = DEFAULT_CONFIGFILE
     options: str = DEFAULT_OPTIONS
-    ldap_base: str = ""
+    ldap_base: str = DEFAULT_LDAP_BASE
     ldap_encryption: str = DEFAULT_LDAP_ENCRYPTION
     ldap_compatibility: str = DEFAULT_LDAP_COMPATIBILITY
     auto_ptr: str = DEFAULT_AUTO_PTR
