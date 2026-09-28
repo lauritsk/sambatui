@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 
-from textual import work
 from textual.coordinate import Coordinate
 from rich.text import Text
 from textual.widgets import (
@@ -15,11 +13,6 @@ from textual.widgets import (
     TabbedContent,
 )
 
-from ..dns.parsing import parse_records, parse_zones
-from ..dns.ptr import (
-    ptr_target_for_name as dns_ptr_target_for_name,
-    reverse_record_for_ipv4 as dns_reverse_record_for_ipv4,
-)
 from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
@@ -72,63 +65,19 @@ from ..app_constants import (
     LDAP_DEFAULT_MAX_ROWS,
     RECORD_SORT_KEYS,
 )
-from .base import AppControllerBase
+from .view_data import AppViewDataMixin
 from .helpers import (
     DNS_SMART_ROW_BUILDERS,
     SMART_SORT_KEYS,
     TableRow,
     directory_sort_label,
-    ldap_limit_suffix,
     next_sort_state,
     smart_sort_label,
     sort_direction,
 )
 
 
-class AppViewsMixin(AppControllerBase):
-    def ptr_target_for_name(self, name: str) -> str:
-        return dns_ptr_target_for_name(name, self.val("zone"))
-
-    def reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
-        return dns_reverse_record_for_ipv4(ip_value, self.zones)
-
-    async def add_ptr(self, name: str, ip_value: str) -> int:
-        reverse = self.reverse_record_for_ipv4(ip_value)
-        if reverse is None:
-            return 0
-        ptr_zone, ptr_name = reverse
-        ptr_target = self.ptr_target_for_name(name)
-        code, _ = await self.run_samba_zone(
-            "add", ptr_zone, [ptr_name, "PTR", ptr_target]
-        )
-        if code == 0:
-            self.notify(f"Added PTR {ptr_name} -> {ptr_target}")
-        return code
-
-    async def load_zones(self, *, restore_active_zone: bool = True) -> None:
-        async with self.busy():
-            code, output = await self.run_zonelist()
-            if code != 0:
-                return
-            zones = parse_zones(output)
-            self.zones = zones
-            self.populate_zones(zones)
-            self.notify(f"Loaded {len(zones)} zones")
-            if restore_active_zone and await self.restore_active_zone_records():
-                return
-            if not zones:
-                self.set_status(DNS_EMPTY_STATE[1])
-                return
-            active_zone = self.val("zone")
-            if active_zone:
-                self.set_status(
-                    f"Loaded {len(zones)} zones; saved zone {active_zone} not found"
-                )
-            else:
-                self.set_status(
-                    f"Loaded {len(zones)} zones; select a zone and press Enter"
-                )
-
+class AppViewsMixin(AppViewDataMixin):
     def populate_sidebar_table(
         self, table_id: str, items: Sequence[SidebarItem]
     ) -> None:
@@ -697,65 +646,6 @@ class AppViewsMixin(AppControllerBase):
             case _:
                 self.set_status(self.empty_state_status(self.view_mode))
 
-    @work(group="inline_search", exclusive=True)
-    async def refresh_inline_search_scope(
-        self, search_text: str, view_mode: str
-    ) -> None:
-        await asyncio.sleep(0.35)
-        if search_text != self.search_text or view_mode != self.view_mode:
-            return
-        if view_mode == "directory":
-            await self.refresh_directory_search_scope(search_text)
-        elif view_mode == "dns" and search_text:
-            await self.refresh_dns_search_scope(search_text)
-
-    async def refresh_directory_search_scope(self, search_text: str) -> bool:
-        if not self.current_directory_values:
-            return False
-        values = {
-            **self.current_directory_values,
-            "text": search_text,
-            "max_rows": str(self.current_directory_max_rows),
-        }
-        limit = self.ldap_search_max_rows(values)
-        kind = values.get("kind") or "users"
-        client = self.ldap_client(values.get("search_base_dn") or values["base_dn"])
-        error = client.validation_error()
-        if error:
-            self.report_error(error)
-            return False
-
-        rows = await self.directory_search_rows(client, kind, search_text, limit)
-        if rows is None:
-            return False
-        if search_text != self.search_text or self.view_mode != "directory":
-            return False
-
-        self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
-        self.current_directory_max_rows = limit
-        self.populate_directory(rows)
-        self.set_status(
-            f"Search matched {len(rows)} LDAP entries across directory "
-            f"(limit {limit}){ldap_limit_suffix(len(rows), limit)}"
-        )
-        return True
-
-    async def refresh_dns_search_scope(self, search_text: str) -> bool:
-        zone = self.val("zone")
-        if not zone:
-            return False
-        if self._last_dns_search_zone == zone:
-            return False
-        async with self.busy():
-            code, output = await self.run_samba("query", ["@", "ALL"])
-        if code != 0:
-            return False
-        if search_text != self.search_text or self.view_mode != "dns":
-            return False
-        self._last_dns_search_zone = zone
-        self.populate_records(parse_records(output))
-        return True
-
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
         return sorted(
             rows,
@@ -970,9 +860,3 @@ class AppViewsMixin(AppControllerBase):
     def selected_record(self) -> dict[str, str] | None:
         records = self.selected_records()
         return records[0] if len(records) == 1 else None
-
-    async def refresh_current_zone(self) -> None:
-        await self.do_command("query", ["@", "ALL"], update_table=True)
-
-    async def action_load_zones(self) -> None:
-        await self.load_zones()

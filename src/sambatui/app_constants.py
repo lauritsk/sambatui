@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from .app_actions import (
+    CASE_SENSITIVE_ACTION_NAMES,
+    CHAR_ACTION_NAMES,
+    KEY_ACTION_NAMES,
+    PALETTE_ACTION_MAP,
+    PALETTE_ACTIONS,
+    shortcut_for,
+)
 from .core.config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
@@ -23,15 +31,10 @@ from .core.config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
-from .dns.record_types import (
-    DNS_RECORD_TYPE_SPECS,
-    SUPPORTED_DNS_RECORD_TYPES,
-)
-from .ldap.rows import DirectoryRow
 from .core.models import DnsRow
-from .ui.screens import CommandPaletteChoice
+from .dns.record_types import DNS_RECORD_TYPE_SPECS, SUPPORTED_DNS_RECORD_TYPES
+from .ldap.rows import DirectoryRow
 from .smart_view_catalog import (
-    SMART_VIEWS,
     SmartViewSource,
     all_smart_view_shortcut_range,
     smart_view_shortcut_range,
@@ -42,8 +45,40 @@ LDAP_FINDING_SHORTCUTS = smart_view_shortcut_range(SmartViewSource.LDAP)
 ALL_FINDING_SHORTCUTS = all_smart_view_shortcut_range()
 DASHBOARD_FINDING_SHORTCUT = smart_view_shortcut_range(SmartViewSource.FULL)
 KEY_HINTS = {
-    "dns_tab": f"DNS: ? help  Ctrl+P palette  w setup  Ctrl+O connection  z zones  c discover  S picker  {DNS_FINDING_SHORTCUTS} DNS findings  {DASHBOARD_FINDING_SHORTCUT} dashboard  q query  a add  u update  d delete  / search",
-    "ldap_tab": f"LDAP: ? help  Ctrl+P palette  w setup  Ctrl+O connection  c discover  L search  {LDAP_FINDING_SHORTCUTS} LDAP findings  {DASHBOARD_FINDING_SHORTCUT} dashboard  a add  u edit one  d delete selected  Space select  m load more  S picker  / search  r refresh",
+    "dns_tab": (
+        f"DNS: {shortcut_for('help')} help  "
+        f"{shortcut_for('open_command_palette')} palette  "
+        f"{shortcut_for('setup_wizard')} setup  "
+        f"{shortcut_for('connection')} connection  "
+        f"{shortcut_for('load_zones')} zones  "
+        f"{shortcut_for('discover_ad')} discover  "
+        f"{shortcut_for('smart_view_picker')} picker  "
+        f"{DNS_FINDING_SHORTCUTS} DNS findings  "
+        f"{DASHBOARD_FINDING_SHORTCUT} dashboard  "
+        f"{shortcut_for('query_record')} query  "
+        f"{shortcut_for('add_record')} add  "
+        f"{shortcut_for('update_record')} update  "
+        f"{shortcut_for('delete_records')} delete  "
+        f"{shortcut_for('filter_results')} search"
+    ),
+    "ldap_tab": (
+        f"LDAP: {shortcut_for('help')} help  "
+        f"{shortcut_for('open_command_palette')} palette  "
+        f"{shortcut_for('setup_wizard')} setup  "
+        f"{shortcut_for('connection')} connection  "
+        f"{shortcut_for('discover_ad')} discover  "
+        f"{shortcut_for('ldap_search')} search  "
+        f"{LDAP_FINDING_SHORTCUTS} LDAP findings  "
+        f"{DASHBOARD_FINDING_SHORTCUT} dashboard  "
+        f"{shortcut_for('add_record')} add  "
+        f"{shortcut_for('update_record')} edit one  "
+        f"{shortcut_for('delete_records')} delete selected  "
+        f"{shortcut_for('toggle_select')} select  "
+        f"{shortcut_for('ldap_load_more')} load more  "
+        f"{shortcut_for('smart_view_picker')} picker  "
+        f"{shortcut_for('filter_results')} search  "
+        f"{shortcut_for('refresh')} refresh"
+    ),
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
 CONNECTION_STATE_INPUTS = (
@@ -86,197 +121,4 @@ GUIDED_RECORD_TYPE_FIELDS = {
 }
 GUIDED_RECORD_VALUE_FIELDS = {
     rtype: spec.value_fields for rtype, spec in DNS_RECORD_TYPE_SPECS.items()
-}
-KEY_ACTION_NAMES: dict[str, str] = {
-    "ctrl+o": "action_connection",
-    "ctrl+p": "action_open_command_palette",
-    "escape": "action_clear_navigation_state",
-    "tab": "action_next_table",
-    "shift+tab": "action_previous_table",
-    "space": "action_toggle_select",
-    "ctrl+space": "action_toggle_select",
-    "shift+up": "action_extend_up",
-    "shift+down": "action_extend_down",
-    "ctrl+d": "action_cursor_half_page_down",
-    "ctrl+u": "action_cursor_half_page_up",
-    "pagedown": "action_cursor_page_down",
-    "pageup": "action_cursor_page_up",
-    "home": "action_cursor_top",
-    "end": "action_cursor_bottom",
-    "slash": "action_search",
-    "enter": "action_activate_row",
-}
-CHAR_ACTION_NAMES: dict[str, str] = {
-    "?": "action_help",
-    "p": "load_password",
-    "]": "action_next_side_tab",
-    "[": "action_previous_side_tab",
-    " ": "action_toggle_select",
-    "w": "action_setup_wizard",
-    "z": "action_load_zones",
-    "c": "action_discover_ad",
-    "r": "action_refresh",
-    "q": "action_query",
-    "a": "action_add",
-    "u": "action_update",
-    "d": "action_delete",
-    "f": "action_fix_smart",
-    "m": "action_load_more_directory",
-    "v": "action_visual_select",
-    "j": "action_cursor_down",
-    "k": "action_cursor_up",
-    "h": "action_focus_zones",
-    "l": "action_focus_records",
-    "/": "action_search",
-    "n": "action_sort_name",
-    "t": "action_sort_type",
-    "e": "action_sort_value",
-}
-CASE_SENSITIVE_ACTION_NAMES: dict[str, str] = {
-    "P": "save_password",
-    "L": "action_ldap_search",
-    "S": "action_smart_view",
-    "V": "action_select_range",
-}
-PALETTE_ACTIONS: tuple[CommandPaletteChoice, ...] = (
-    ("help", "Show help", "?", "Open the keyboard shortcut and workflow help."),
-    (
-        "setup_wizard",
-        "Run first-run setup wizard",
-        "w",
-        "Enter AD domain and credentials, discover a DC, check DNS/LDAP, and load zones.",
-    ),
-    (
-        "connection",
-        "Open connection settings",
-        "Ctrl+O",
-        "Edit server, zone, auth, LDAP, and finding defaults.",
-    ),
-    (
-        "load_password",
-        "Load password file",
-        "p",
-        "Load the configured password file after checking permissions.",
-    ),
-    (
-        "save_password",
-        "Save password file",
-        "P",
-        "Write the current password field to disk with chmod 600.",
-    ),
-    (
-        "discover_ad",
-        "Discover AD domain controller",
-        "c",
-        "Find domain controllers from DNS SRV records and fill connection fields.",
-    ),
-    ("load_zones", "Load DNS zones", "z", "List DNS zones from samba-tool."),
-    (
-        "refresh",
-        "Refresh current view",
-        "r",
-        "Reload the current DNS zone or rerun the active finding view.",
-    ),
-    ("query_record", "Query DNS records", "q", "Query one DNS name and type."),
-    (
-        "add_record",
-        "Add DNS record or LDAP entry",
-        "a",
-        "Create a DNS record or LDAP entry in the active view.",
-    ),
-    (
-        "update_record",
-        "Update selected DNS record or LDAP entry attributes",
-        "u",
-        "Edit one selected DNS record or one allowlisted LDAP entry's attributes.",
-    ),
-    (
-        "delete_records",
-        "Delete selected DNS records or LDAP entries",
-        "d",
-        "Delete selected DNS records or LDAP entries after confirmation.",
-    ),
-    (
-        "filter_results",
-        "Search/filter results",
-        "/",
-        "Focus inline search for DNS, LDAP, or finding rows.",
-    ),
-    (
-        "ldap_search",
-        "Search LDAP directory",
-        "L",
-        "Search AD users, groups, computers, OUs, or all entries.",
-    ),
-    (
-        "ldap_search_users",
-        "Search LDAP users",
-        "",
-        "Open LDAP search prefilled for users.",
-    ),
-    (
-        "ldap_search_groups",
-        "Search LDAP groups",
-        "",
-        "Open LDAP search prefilled for groups.",
-    ),
-    (
-        "ldap_search_computers",
-        "Search LDAP computers",
-        "",
-        "Open LDAP search prefilled for computers.",
-    ),
-    (
-        "ldap_load_more",
-        "Load more LDAP entries",
-        "m",
-        "Rerun the last LDAP search with 200 more rows.",
-    ),
-    (
-        "smart_view_picker",
-        "Pick finding filter",
-        "S",
-        "Choose a DNS or LDAP finding filter from a list.",
-    ),
-    *(
-        (
-            f"smart_view_{view.shortcut}",
-            f"Open finding filter: {view.label}",
-            view.shortcut,
-            view.description,
-        )
-        for view in SMART_VIEWS
-    ),
-    (
-        "fix_smart",
-        "Fix selected finding",
-        "f",
-        "Apply the available guided fix for the selected finding.",
-    ),
-)
-PALETTE_ACTION_MAP: dict[str, tuple[str, tuple[str, ...]]] = {
-    "help": ("action_help", ()),
-    "setup_wizard": ("action_setup_wizard", ()),
-    "connection": ("action_connection", ()),
-    "load_password": ("load_password", ()),
-    "save_password": ("save_password", ()),
-    "discover_ad": ("action_discover_ad", ()),
-    "load_zones": ("action_load_zones", ()),
-    "refresh": ("action_refresh", ()),
-    "query_record": ("action_query", ()),
-    "add_record": ("action_add", ()),
-    "update_record": ("action_update", ()),
-    "delete_records": ("action_delete", ()),
-    "filter_results": ("action_search", ()),
-    "ldap_search": ("action_ldap_search", ()),
-    "ldap_search_users": ("action_ldap_search_kind", ("users",)),
-    "ldap_search_groups": ("action_ldap_search_kind", ("groups",)),
-    "ldap_search_computers": ("action_ldap_search_kind", ("computers",)),
-    "ldap_load_more": ("action_load_more_directory", ()),
-    "smart_view_picker": ("action_smart_view", ()),
-    **{
-        f"smart_view_{view.shortcut}": ("action_smart_view_shortcut", (view.shortcut,))
-        for view in SMART_VIEWS
-    },
-    "fix_smart": ("action_fix_smart", ()),
 }

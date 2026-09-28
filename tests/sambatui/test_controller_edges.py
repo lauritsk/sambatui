@@ -18,6 +18,7 @@ from sambatui.controllers.helpers import (
     setup_auth_values,
     sort_direction,
 )
+from sambatui.core.operations import DnsAddOperation
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.ldap.sidebar import SidebarItem
@@ -163,11 +164,8 @@ def test_dns_action_query_and_add_form_edges() -> None:
                 {"rtype": "txt"},
                 {"name": "txt", "text": "hello world", "ttl": ""},
             ]
-            assert await app.add_record_form_values() == (
-                "txt",
-                "TXT",
-                "hello world",
-                "",
+            assert await app.add_record_form_values() == DnsAddOperation(
+                "", "txt", "TXT", "hello world", ""
             )
 
     asyncio.run(run_app())
@@ -206,7 +204,7 @@ def test_dns_action_add_update_delete_edges() -> None:
     class DnsApp(NotificationApp):
         def __init__(self) -> None:
             super().__init__()
-            self.record_values: tuple[str, str, str, str] | None = None
+            self.record_values: DnsAddOperation | None = None
             self.confirms: list[bool] = []
             self.commands: list[tuple[str, list[str]]] = []
             self.refreshed = 0
@@ -215,7 +213,7 @@ def test_dns_action_add_update_delete_edges() -> None:
             self.selected: list[dict[str, str]] = []
             self.errors: list[str] = []
 
-        async def add_record_form_values(self) -> tuple[str, str, str, str] | None:
+        async def add_record_form_values(self) -> DnsAddOperation | None:
             return self.record_values
 
         async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
@@ -226,6 +224,12 @@ def test_dns_action_add_update_delete_edges() -> None:
         ) -> int:
             self.commands.append((action, args))
             return 1 if "fail" in args else 0
+
+        async def run_samba_zone(
+            self, action: str, zone: str, args: list[str]
+        ) -> tuple[int, str]:
+            self.commands.append((action, args))
+            return (1, "failed") if "fail" in args else (0, "")
 
         async def refresh_current_zone(self) -> None:
             self.refreshed += 1
@@ -281,7 +285,7 @@ def test_dns_action_add_update_delete_edges() -> None:
             app.query_one("#auto_ptr", Input).value = "off"
             app.record_values = None
             await app.action_add.__wrapped__(app)
-            app.record_values = ("www", "A", "192.0.2.10", "")
+            app.record_values = DnsAddOperation("", "www", "A", "192.0.2.10")
             app.confirms = [False]
             await app.action_add.__wrapped__(app)
             assert app.notifications[-1] == ("Add cancelled", "information")
@@ -300,12 +304,6 @@ def test_dns_action_add_update_delete_edges() -> None:
             assert app.update_record_fields(app.selected[0])[-1][1] == "value"
 
             app.confirms = [False]
-            await app.change_record_type("a", "A", "1.1.1.1", "CNAME", "b.example.com.")
-            app.confirms = [True]
-            await app.change_record_type("a", "A", "1.1.1.1", "CNAME", "b.example.com.")
-            assert ("delete", ["a", "A", "1.1.1.1"]) in app.commands
-
-            app.confirms = [False]
             await app.update_record_value("a", "A", "1.1.1.1", "1.1.1.2")
             app.confirms = [True]
             await app.update_record_value("a", "A", "1.1.1.1", "1.1.1.2")
@@ -313,34 +311,11 @@ def test_dns_action_add_update_delete_edges() -> None:
 
             app.forms = [None]
             await app.action_update.__wrapped__(app)
-            app.forms = [
-                {
-                    "name": "bad space",
-                    "old_rtype": "A",
-                    "rtype": "A",
-                    "old_value": "1.1.1.1",
-                    "value": "1.1.1.2",
-                }
-            ]
+            app.forms = [{"rtype": "A", "value": "bad-address"}]
             await app.action_update.__wrapped__(app)
             assert app.errors[-1]
             app.forms = [
                 {
-                    "name": "a",
-                    "old_rtype": "A",
-                    "rtype": "CNAME",
-                    "old_value": "1.1.1.1",
-                    "value": "b.example.com.",
-                }
-            ]
-            app.confirms = [True]
-            await app.action_update.__wrapped__(app)
-            app.forms = [
-                {
-                    "name": "a",
-                    "old_rtype": "A",
-                    "rtype": "A",
-                    "old_value": "1.1.1.1",
                     "value": "1.1.1.2",
                 }
             ]
@@ -797,6 +772,47 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
             )
             code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
             assert (code, output) == (4, "first\nsecond")
+
+            async def missing_exec(*cmd: str, **kwargs: Any) -> FakeProc:
+                raise OSError("missing executable")
+
+            monkeypatch.setattr(
+                "sambatui.controllers.core.asyncio.create_subprocess_exec",
+                missing_exec,
+            )
+            code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
+            assert code == 127
+            assert "missing executable" in output
+
+            class SlowProc(FakeProc):
+                def __init__(self) -> None:
+                    super().__init__(0, b"partial")
+                    self.calls = 0
+                    self.killed = False
+
+                async def communicate(self) -> tuple[bytes, bytes]:
+                    self.calls += 1
+                    if self.calls == 1:
+                        await asyncio.sleep(1)
+                    return self.output, b""
+
+                def kill(self) -> None:
+                    self.killed = True
+
+            slow_proc = SlowProc()
+
+            async def slow_exec(*cmd: str, **kwargs: Any) -> FakeProc:
+                return slow_proc
+
+            monkeypatch.setattr(
+                "sambatui.controllers.core.asyncio.create_subprocess_exec", slow_exec
+            )
+            monkeypatch.setattr(
+                "sambatui.controllers.core.DEFAULT_COMMAND_TIMEOUT", 0.001
+            )
+            code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
+            assert (code, output) == (124, "partial")
+            assert slow_proc.killed
 
     asyncio.run(run_app())
 
@@ -1338,11 +1354,6 @@ def test_smart_action_edges() -> None:
                 raise ValueError("disable failed")
             self.app.ldap_disables.append((dn, user_account_control))
 
-        def delete_entry(self, dn: str) -> None:
-            if "fail" in dn:
-                raise ValueError("delete failed")
-            self.app.ldap_deletes.append(dn)
-
     class SmartApp(NotificationApp):
         def __init__(self) -> None:
             super().__init__()
@@ -1356,7 +1367,6 @@ def test_smart_action_edges() -> None:
             self.fix_codes: list[int] = []
             self.confirms: list[bool] = []
             self.ldap_disables: list[tuple[str, int]] = []
-            self.ldap_deletes: list[str] = []
 
         async def form(self, *args: Any, **kwargs: Any) -> dict[str, str] | None:
             return self.forms.pop(0)
@@ -1507,28 +1517,6 @@ def test_smart_action_edges() -> None:
                 )
             )
             assert app.ldap_disables == [("CN=old,DC=example,DC=com", 514)]
-            await app.apply_smart_fix(
-                smart_row(fix_action="ldap_delete_entry", fix_dn="")
-            )
-            app.confirms = [False]
-            await app.apply_smart_fix(
-                smart_row(
-                    fix_action="ldap_delete_entry", fix_dn="CN=old,DC=example,DC=com"
-                )
-            )
-            app.confirms = [True]
-            await app.apply_smart_fix(
-                smart_row(
-                    fix_action="ldap_delete_entry", fix_dn="CN=fail,DC=example,DC=com"
-                )
-            )
-            app.confirms = [True]
-            await app.apply_smart_fix(
-                smart_row(
-                    fix_action="ldap_delete_entry", fix_dn="CN=old,DC=example,DC=com"
-                )
-            )
-            assert app.ldap_deletes == ["CN=old,DC=example,DC=com"]
             app.populate_records([row()])
             await app.action_fix_smart.__wrapped__(app)
 

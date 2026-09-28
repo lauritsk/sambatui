@@ -11,12 +11,27 @@ from sambatui.app import (
 )
 from textual.widgets import Button, DataTable, Input
 
+from sambatui.app_actions import (
+    ACTIONS,
+    APP_BINDINGS,
+    PALETTE_ACTIONS,
+    PALETTE_ACTION_MAP,
+)
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_views import SmartViewRow
 from sambatui.ui.screens import (
     CommandPaletteScreen,
     command_palette_choice_matches,
 )
+
+
+def test_action_registry_derives_bindings_and_palette_routes() -> None:
+    assert SambatuiApp.BINDINGS == APP_BINDINGS
+    assert len({action.action_id for action in ACTIONS}) == len(ACTIONS)
+    assert len({action.binding for action in ACTIONS if action.binding}) == len(
+        APP_BINDINGS
+    )
+    assert {choice[0] for choice in PALETTE_ACTIONS} == set(PALETTE_ACTION_MAP)
 
 
 @given(st.sampled_from([("dns_tab", "DNS:"), ("ldap_tab", "LDAP:")]))

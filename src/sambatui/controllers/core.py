@@ -18,6 +18,7 @@ from textual.widgets import (
 
 from ..samba.client import SambaToolClient, SambaToolConfig
 from ..core.config import (
+    DEFAULT_COMMAND_TIMEOUT,
     fix_password_file_permissions,
     is_reverse_dns_zone,
     password_file_permissions_too_open,
@@ -357,13 +358,38 @@ class AppCoreMixin(AppControllerBase):
 
         self.set_status(f"Running: {client.status_command(cmd)}")
         env = client.execution_env() if hasattr(client, "execution_env") else None
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=env,
-        )
-        out_bytes, _ = await proc.communicate()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+            )
+        except OSError as exc:
+            message = f"Cannot start samba-tool: {exc}"
+            self.report_error(message)
+            return 127, message
+
+        try:
+            out_bytes, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=DEFAULT_COMMAND_TIMEOUT
+            )
+        except TimeoutError:
+            with suppress(ProcessLookupError):
+                proc.kill()
+            out_bytes, _ = await proc.communicate()
+            output = out_bytes.decode(errors="replace")
+            message = (
+                f"samba-tool timed out after {DEFAULT_COMMAND_TIMEOUT} seconds"
+            )
+            self.report_error(message)
+            return 124, output or message
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError):
+                proc.kill()
+            await proc.communicate()
+            raise
+
         output = out_bytes.decode(errors="replace")
         code = proc.returncode or 0
         if code == 0:

@@ -525,8 +525,6 @@ class AppSmartActionsMixin(AppControllerBase):
                 await self.apply_dns_smart_fix(row)
             case "ldap_disable_account":
                 await self.apply_ldap_disable_smart_fix(row)
-            case "ldap_delete_entry":
-                await self.apply_ldap_delete_smart_fix(row)
             case _:
                 self.notify(
                     "No guided fix is available for this finding.", severity="error"
@@ -579,27 +577,6 @@ class AppSmartActionsMixin(AppControllerBase):
             return
         _result, error = await self.ldap_thread_result(
             lambda: self.ldap_client().disable_account(row.fix_dn, user_account_control)
-        )
-        if error:
-            return
-        self.notify(f"Applied fix: {row.fix_label}")
-        await self.refresh_current_smart_view()
-
-    async def apply_ldap_delete_smart_fix(self, row: SmartViewRow) -> None:
-        if not row.fix_dn:
-            self.report_error("LDAP delete fix needs a DN.")
-            return
-        if not await self.confirm(
-            "DELETE LDAP entry for smart finding?\n\n"
-            f"DN: {row.fix_dn}\n\n"
-            "This cannot be undone from this app. Non-empty containers may fail.\n\n"
-            f"Finding: {row.finding}\n"
-            f"Evidence: {row.evidence}",
-        ):
-            self.notify("Fix cancelled")
-            return
-        _result, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().delete_entry(row.fix_dn)
         )
         if error:
             return

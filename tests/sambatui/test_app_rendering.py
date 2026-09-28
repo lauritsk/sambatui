@@ -304,54 +304,6 @@ def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
     asyncio.run(run_app())
 
 
-def test_smart_fix_deletes_ldap_entry_and_refreshes_findings() -> None:
-    class FakeLdapClient:
-        def __init__(self, fixes: list[tuple[str, str]]) -> None:
-            self.fixes = fixes
-
-        def delete_entry(self, dn: str) -> None:
-            self.fixes.append(("delete", dn))
-
-    class LdapDeleteFixApp(SambatuiApp):
-        def __init__(self) -> None:
-            super().__init__()
-            self.ldap_fixes: list[tuple[str, str]] = []
-
-        async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
-            assert "DELETE LDAP entry" in message
-            assert "CN=disabled,DC=example,DC=com" in message
-            return True
-
-        def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
-            return cast(LdapDirectoryClient, FakeLdapClient(self.ldap_fixes))
-
-        async def refresh_current_smart_view(self) -> None:
-            self.smart_view_rows = []
-
-    async def run_app() -> None:
-        app = LdapDeleteFixApp()
-        async with app.run_test():
-            row = SmartViewRow(
-                severity="medium",
-                object="disabled",
-                finding="Disabled user cleanup candidate",
-                evidence="disabled; changed 200 days ago",
-                suggested_action="Verify retention/legal hold.",
-                source="ldap",
-                fix_action="ldap_delete_entry",
-                fix_label="delete disabled",
-                fix_dn="CN=disabled,DC=example,DC=com",
-            )
-            app.populate_smart_view("LDAP delete candidates", [row])
-
-            await app.apply_smart_fix(row)
-
-            assert app.ldap_fixes == [("delete", "CN=disabled,DC=example,DC=com")]
-            assert app.smart_view_rows == []
-
-    asyncio.run(run_app())
-
-
 def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
     class DirectorySearchApp(SambatuiApp):
         def __init__(self) -> None:
