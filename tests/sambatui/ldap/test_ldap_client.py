@@ -1,4 +1,5 @@
 import ssl
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 import pytest
@@ -453,6 +454,45 @@ def test_delete_entry_rejects_base_dn(dn: str) -> None:
 
     with pytest.raises(ValueError, match="Refusing to delete LDAP base DN"):
         client.delete_entry(dn)
+
+
+@pytest.mark.parametrize(
+    ("operation", "message"),
+    [
+        (
+            lambda client: client.add_entry("ou", "DC=other,DC=com", "Ops", {}),
+            "LDAP add parent",
+        ),
+        (
+            lambda client: client.delete_entry("CN=Alice,DC=other,DC=com"),
+            "LDAP delete target",
+        ),
+        (
+            lambda client: client.modify_attributes(
+                "CN=Alice,DC=other,DC=com", {"description": "changed"}
+            ),
+            "LDAP modify target",
+        ),
+        (
+            lambda client: client.disable_account("CN=Alice,DC=other,DC=com", 512),
+            "LDAP disable target",
+        ),
+    ],
+)
+def test_ldap_writes_reject_dns_outside_configured_base(
+    operation: Callable[[LdapDirectoryClient], None], message: str
+) -> None:
+    client = LdapDirectoryClient(
+        LdapSearchConfig(
+            server="dc01.example.com",
+            user="EXAMPLE\\admin",
+            password="secret",
+            base_dn="DC=example,DC=com",
+        )
+    )
+
+    with pytest.raises(ValueError, match=message):
+        operation(client)
 
 
 def test_delete_entry_calls_ldap_delete(monkeypatch: pytest.MonkeyPatch) -> None:

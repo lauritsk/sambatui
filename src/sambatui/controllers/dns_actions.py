@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from textual import work
 
+from ..core.operations import DnsAddOperation, DnsDeleteOperation, DnsUpdateOperation
 from ..dns.record_types import SUPPORTED_DNS_RECORD_TYPES_TEXT
-from ..dns.validation import validate_record
 from ..ui.screens import (
     FormField,
 )
@@ -51,10 +51,8 @@ class AppDnsActionsMixin(AppControllerBase):
             await self.add_ptr(name, value)
 
     def add_record_args(self, name: str, rtype: str, value: str, ttl: str) -> list[str]:
-        args = [name, rtype, value]
-        if ttl:
-            args.append(f"--ttl={ttl}")
-        return args
+        operation = DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
+        return list(operation.command_args)
 
     def record_type_selection_error(self, values: dict[str, str]) -> str | None:
         rtype = (values.get("rtype") or "").upper()
@@ -78,13 +76,7 @@ class AppDnsActionsMixin(AppControllerBase):
         return " ".join(values.get(key, "") for key in value_fields).strip()
 
     def ttl_error(self, ttl: str) -> str | None:
-        if not ttl:
-            return None
-        if not ttl.isdecimal():
-            return "TTL must be whole seconds, e.g. 3600."
-        if int(ttl) <= 0:
-            return "TTL must be greater than zero."
-        return None
+        return DnsAddOperation.ttl_validation_error(ttl)
 
     def duplicate_record_error(self, name: str, rtype: str, value: str) -> str | None:
         for row in self.record_rows:
@@ -96,10 +88,9 @@ class AppDnsActionsMixin(AppControllerBase):
         name = values.get("name", "")
         value = self.add_record_value_from_fields(rtype, values)
         ttl = values.get("ttl", "")
-        return (
-            validate_record(name, rtype, value)
-            or self.ttl_error(ttl)
-            or self.duplicate_record_error(name, rtype.upper(), value)
+        operation = DnsAddOperation("", name, rtype, value, ttl)
+        return operation.validation_error() or self.duplicate_record_error(
+            name, rtype.upper(), value
         )
 
     def existing_reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
@@ -121,22 +112,30 @@ class AppDnsActionsMixin(AppControllerBase):
         ptr_target = self.ptr_target_for_name(name)
         return f"PTR suggestion: reverse zone exists; {ptr_zone}: {ptr_name} PTR {ptr_target}"
 
-    def add_record_preview(self, name: str, rtype: str, value: str, ttl: str) -> str:
-        args = self.add_record_args(name, rtype, value, ttl)
+    def add_operation_preview(self, operation: DnsAddOperation) -> str:
         client = self.samba_client()
         command = " ".join(
-            client.redact_command(client.dns_command("add", self.val("zone"), args))
+            client.redact_command(
+                client.dns_command(
+                    "add", operation.zone, list(operation.command_args)
+                )
+            )
         )
         return (
             "Add DNS record?\n\n"
-            f"Zone: {self.val('zone')}\n"
-            f"Record: {name} {rtype} {value}\n"
-            f"TTL: {ttl or 'default'}\n"
-            f"{self.ptr_preview_text(name, rtype, value)}\n\n"
+            f"Zone: {operation.zone}\n"
+            f"Record: {operation.name} {operation.rtype} {operation.value}\n"
+            f"TTL: {operation.ttl or 'default'}\n"
+            f"{self.ptr_preview_text(operation.name, operation.rtype, operation.value)}\n\n"
             f"Command preview: {command}"
         )
 
-    async def add_record_form_values(self) -> tuple[str, str, str, str] | None:
+    def add_record_preview(self, name: str, rtype: str, value: str, ttl: str) -> str:
+        return self.add_operation_preview(
+            DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
+        )
+
+    async def add_record_form_values(self) -> DnsAddOperation | None:
         type_values = await self.form(
             "Add DNS record — choose type",
             f"Zone: {self.val('zone')}. Guided flow shows fields for one record type.",
@@ -172,7 +171,7 @@ class AppDnsActionsMixin(AppControllerBase):
         if error:
             self.report_error(error)
             return None
-        return name, rtype, value, ttl
+        return DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
 
     @work
     async def action_add(self) -> None:
@@ -190,21 +189,23 @@ class AppDnsActionsMixin(AppControllerBase):
             case _:
                 self.set_status("No editable records view active.")
                 return
-        record_values = await self.add_record_form_values()
-        if record_values is None:
+        operation = await self.add_record_form_values()
+        if operation is None:
             return
-        name, rtype, value, ttl = record_values
         if not await self.confirm(
-            self.add_record_preview(name, rtype, value, ttl),
-            default_confirm=True,
+            self.add_operation_preview(operation), default_confirm=True
         ):
             self.notify("Add cancelled")
             return
-        if (
-            await self.do_command("add", self.add_record_args(name, rtype, value, ttl))
-            == 0
-        ):
-            await self.maybe_add_matching_ptr(name, rtype, value)
+        async with self.busy():
+            code, _ = await self.run_samba_zone(
+                "add", operation.zone, list(operation.command_args)
+            )
+        if code == 0:
+            self.notify("OK")
+            await self.maybe_add_matching_ptr(
+                operation.name, operation.rtype, operation.value
+            )
             await self.refresh_current_zone()
 
     def selected_record_for_update(self) -> dict[str, str] | None:
@@ -223,58 +224,46 @@ class AppDnsActionsMixin(AppControllerBase):
         return None
 
     def update_record_fields(self, selected: dict[str, str]) -> list[FormField]:
-        return [
-            ("Record name", "name", "name, @ for zone root", selected["name"]),
-            (
-                "Current type (used to find/delete old record)",
-                "old_rtype",
-                "current type",
-                selected["rtype"],
-            ),
-            (
-                "New type",
-                "rtype",
-                SUPPORTED_DNS_RECORD_TYPES_TEXT,
-                selected["rtype"],
-            ),
-            (
-                "Old/current DNS value (exact match required)",
-                "old_value",
-                "old/current value",
-                selected["value"],
-            ),
-            ("New DNS value", "value", "new value", selected["value"]),
-        ]
+        return [("New DNS value", "value", "new value", selected["value"])]
 
-    async def change_record_type(
-        self, name: str, old_rtype: str, old_value: str, rtype: str, value: str
-    ) -> None:
-        message = (
-            "Change DNS record type?\n\n"
-            f"Zone: {self.val('zone')}\n"
-            f"DELETE: {name} {old_rtype} {old_value}\n"
-            f"ADD:    {name} {rtype} {value}\n\n"
-            "If the add fails, the old record may already be deleted."
+    def update_record_error(
+        self, selected: dict[str, str], values: dict[str, str]
+    ) -> str | None:
+        operation = DnsUpdateOperation(
+            "",
+            selected["name"],
+            selected["rtype"],
+            selected["value"],
+            values.get("value", ""),
         )
-        if not await self.confirm(message):
-            self.notify("Type change cancelled")
-            return
-        if (
-            await self.do_command("delete", [name, old_rtype, old_value]) == 0
-            and await self.do_command("add", [name, rtype, value]) == 0
+        return operation.validation_error()
+
+    async def apply_dns_update(self, operation: DnsUpdateOperation) -> None:
+        if not await self.confirm(
+            "Update DNS record?\n\n"
+            f"Zone: {operation.zone}\n"
+            f"{operation.name} {operation.rtype}\n"
+            f"Old: {operation.old_value}\n"
+            f"New: {operation.new_value}"
         ):
+            self.notify("Update cancelled")
+            return
+        async with self.busy():
+            code, _ = await self.run_samba_zone(
+                "update", operation.zone, list(operation.command_args)
+            )
+        if code == 0:
+            self.notify("OK")
             await self.refresh_current_zone()
 
     async def update_record_value(
         self, name: str, rtype: str, old_value: str, value: str
     ) -> None:
-        if not await self.confirm(
-            f"Update DNS record?\n\nZone: {self.val('zone')}\n{name} {rtype}\nOld: {old_value}\nNew: {value}"
-        ):
-            self.notify("Update cancelled")
-            return
-        if await self.do_command("update", [name, rtype, old_value, value]) == 0:
-            await self.refresh_current_zone()
+        await self.apply_dns_update(
+            DnsUpdateOperation(
+                self.val("zone"), name, rtype, old_value, value
+            )
+        )
 
     @work
     async def action_update(self) -> None:
@@ -297,28 +286,28 @@ class AppDnsActionsMixin(AppControllerBase):
             return
         values = await self.form(
             "Update selected DNS record",
-            "To change record type (example A -> CNAME), set New type. That will DELETE the old record, then ADD the new one.",
+            f"Selected: {selected['name']} {selected['rtype']} {selected['value']}. "
+            "Name and type are fixed; add a new record explicitly to change either.",
             self.update_record_fields(selected),
             "Update",
+            lambda form_values: self.update_record_error(selected, form_values),
         )
         if not values:
             return
-        name = values["name"]
-        old_rtype = (values["old_rtype"] or selected["rtype"]).upper()
-        rtype = (values["rtype"] or old_rtype).upper()
-        old_value = values["old_value"]
-        value = values["value"]
-        error = validate_record(
-            name, old_rtype, "", require_value=False
-        ) or validate_record(name, rtype, value)
+        error = self.update_record_error(selected, values)
         if error:
             self.report_error(error)
             return
 
-        if old_rtype != rtype:
-            await self.change_record_type(name, old_rtype, old_value, rtype, value)
-            return
-        await self.update_record_value(name, rtype, old_value, value)
+        await self.apply_dns_update(
+            DnsUpdateOperation(
+                self.val("zone"),
+                selected["name"],
+                selected["rtype"].upper(),
+                selected["value"],
+                values["value"],
+            )
+        )
 
     @work
     async def action_delete(self) -> None:
@@ -343,9 +332,15 @@ class AppDnsActionsMixin(AppControllerBase):
                 severity="error",
             )
             return
+        operations = [
+            DnsDeleteOperation(
+                self.val("zone"), record["name"], record["rtype"], record["value"]
+            )
+            for record in records
+        ]
         preview = "\n".join(
-            f"{record['name']} {record['rtype']} {record['value']}"
-            for record in records[:12]
+            f"{operation.name} {operation.rtype} {operation.value}"
+            for operation in operations[:12]
         )
         if len(records) > 12:
             preview += f"\n... and {len(records) - 12} more"
@@ -355,10 +350,11 @@ class AppDnsActionsMixin(AppControllerBase):
             self.notify("Delete cancelled")
             return
         failed = 0
-        for record in records:
-            code = await self.do_command(
-                "delete", [record["name"], record["rtype"], record["value"]]
-            )
+        for operation in operations:
+            async with self.busy():
+                code, _ = await self.run_samba_zone(
+                    "delete", operation.zone, list(operation.command_args)
+                )
             if code != 0:
                 failed += 1
         if failed:

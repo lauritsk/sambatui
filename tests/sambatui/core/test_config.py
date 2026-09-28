@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 
 from sambatui.core import config as config_module
 from sambatui.core.config import (
+    AppConfig,
     detected_default_auth,
     fix_password_file_permissions,
     has_valid_kerberos_ticket,
@@ -17,6 +18,33 @@ from sambatui.core.config import (
     read_password_file,
     write_private_text,
 )
+
+
+def test_app_config_loads_environment_over_preferences(tmp_path: Path) -> None:
+    password_file = tmp_path / "password"
+    password_file.write_text("from-file\n", encoding="utf-8")
+    password_file.chmod(0o600)
+
+    config = AppConfig.load(
+        env={
+            "SAMBATUI_SERVER": "env-dc.example.com",
+            "SAMBATUI_PASSWORD_FILE": str(password_file),
+            "SAMBATUI_COMMAND_TIMEOUT": "15",
+        },
+        preferences={
+            "server": "saved-dc.example.com",
+            "domain": "example.com",
+            "zone": "saved.example.com",
+            "auth": "password",
+        },
+        ticket_checker=lambda: False,
+    )
+
+    assert config.server == "env-dc.example.com"
+    assert config.domain == "example.com"
+    assert config.zone == "saved.example.com"
+    assert config.password == "from-file"
+    assert config.command_timeout == 15
 
 
 def test_password_file_warning_rejects_group_or_other_permissions(

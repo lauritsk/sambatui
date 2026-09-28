@@ -9,14 +9,14 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol, TypeAlias
+from typing import Literal, Protocol
 
 from ..dns.names import is_reverse_dns_zone
 
 USER_CONFIG_PATH = Path(
     os.getenv("SAMBATUI_USER_CONFIG", "~/.config/sambatui/config.toml")
 ).expanduser()
-UserConfigValidation: TypeAlias = Literal["choice", "on_off", "integer"]
+type UserConfigValidation = Literal["choice", "on_off", "integer"]
 
 
 @dataclass(frozen=True)
@@ -297,35 +297,26 @@ def fix_password_file_permissions(path: Path) -> None:
         raise OSError(f"Refusing to chmod symlink password file {path}")
     if not stat.S_ISREG(info.st_mode):
         raise OSError(f"Password file is not a regular file: {path}")
-    path.chmod(0o600)
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    file_descriptor = os.open(path, flags)
+    try:
+        opened_info = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened_info.st_mode):
+            raise OSError(f"Password file is not a regular file: {path}")
+        if hasattr(os, "getuid") and opened_info.st_uid != os.getuid():
+            raise OSError(f"Password file must be owned by the current user: {path}")
+        if hasattr(os, "fchmod"):
+            os.fchmod(file_descriptor, 0o600)
+        else:
+            path.chmod(0o600)
+    finally:
+        os.close(file_descriptor)
 
 
-DEFAULT_SERVER = _default("SAMBATUI_SERVER", "server", "")
-DEFAULT_DOMAIN = _default_domain()
-DEFAULT_ZONE = _default_zone()
-DEFAULT_USER = _default("SAMBATUI_USER", "user", "")
-DEFAULT_AUTH = detected_default_auth()
-DEFAULT_KERBEROS = _default("SAMBATUI_KERBEROS", "kerberos", "off")
-DEFAULT_KRB5_CCACHE = _default("SAMBATUI_KRB5_CCACHE", "krb5_ccache", "")
-DEFAULT_CONFIGFILE = _default("SAMBATUI_CONFIGFILE", "configfile", "")
-DEFAULT_OPTIONS = _default("SAMBATUI_OPTIONS", "options", "")
-DEFAULT_LDAP_BASE = _default("SAMBATUI_LDAP_BASE", "ldap_base", "")
-DEFAULT_LDAP_ENCRYPTION = _default(
-    "SAMBATUI_LDAP_ENCRYPTION", "ldap_encryption", "ldaps"
-)
-DEFAULT_LDAP_COMPATIBILITY = _default(
-    "SAMBATUI_LDAP_COMPATIBILITY", "ldap_compatibility", "off"
-)
-DEFAULT_AUTO_PTR = _default("SAMBATUI_AUTO_PTR", "auto_ptr", "ask")
-DEFAULT_SMART_DAYS = _default("SAMBATUI_SMART_DAYS", "smart_days", "90")
-DEFAULT_SMART_DISABLED_DAYS = _default(
-    "SAMBATUI_SMART_DISABLED_DAYS", "smart_disabled_days", "180"
-)
-DEFAULT_SMART_NEVER_LOGGED_DAYS = _default(
-    "SAMBATUI_SMART_NEVER_LOGGED_DAYS", "smart_never_logged_days", "30"
-)
-DEFAULT_SMART_MAX_ROWS = _default("SAMBATUI_SMART_MAX_ROWS", "smart_max_rows", "500")
-DEFAULT_PASSWORD_FILE = Path(
+_BOOTSTRAP_PASSWORD_FILE = Path(
     _default("SAMBATUI_PASSWORD_FILE", "password_file", "~/.config/sambatui/password")
 ).expanduser()
 
@@ -375,7 +366,7 @@ def _open_private_password_file(path: Path) -> int:
         raise
 
 
-def read_password_file(path: Path = DEFAULT_PASSWORD_FILE) -> str:
+def read_password_file(path: Path = _BOOTSTRAP_PASSWORD_FILE) -> str:
     if password_file_warning(path):
         return ""
     try:
@@ -386,4 +377,126 @@ def read_password_file(path: Path = DEFAULT_PASSWORD_FILE) -> str:
         return ""
 
 
-DEFAULT_PASSWORD = os.getenv("SAMBATUI_PASSWORD", read_password_file())
+@dataclass(frozen=True)
+class AppConfig:
+    server: str
+    domain: str
+    zone: str
+    user: str
+    password: str
+    auth: str
+    kerberos: str
+    krb5_ccache: str
+    configfile: str
+    options: str
+    ldap_base: str
+    ldap_encryption: str
+    ldap_compatibility: str
+    auto_ptr: str
+    smart_days: str
+    smart_disabled_days: str
+    smart_never_logged_days: str
+    smart_max_rows: str
+    password_file: Path
+    command_timeout: int
+
+    @classmethod
+    def load(
+        cls,
+        *,
+        env: Mapping[str, str] | None = None,
+        preferences: Mapping[str, str] | None = None,
+        ticket_checker: Callable[[], bool] = has_valid_kerberos_ticket,
+    ) -> AppConfig:
+        environment = os.environ if env is None else env
+        saved = USER_CONFIG if preferences is None else preferences
+
+        def value(envvar: str, key: str, fallback: str) -> str:
+            return environment.get(envvar, saved.get(key, fallback))
+
+        configured_domain = value("SAMBATUI_DOMAIN", "domain", "")
+        legacy_zone = saved.get("zone", "")
+        domain = configured_domain or (
+            "" if is_reverse_dns_zone(legacy_zone) else legacy_zone
+        )
+        zone = environment.get(
+            "SAMBATUI_ZONE", saved.get("last_zone") or legacy_zone
+        )
+        password_file = Path(
+            value(
+                "SAMBATUI_PASSWORD_FILE",
+                "password_file",
+                "~/.config/sambatui/password",
+            )
+        ).expanduser()
+        auth = detected_default_auth(
+            env=environment, user_config=saved, ticket_checker=ticket_checker
+        )
+        password = (
+            environment["SAMBATUI_PASSWORD"]
+            if "SAMBATUI_PASSWORD" in environment
+            else read_password_file(password_file)
+        )
+        try:
+            command_timeout = int(environment.get("SAMBATUI_COMMAND_TIMEOUT", "60"))
+        except ValueError:
+            command_timeout = 60
+        command_timeout = max(1, command_timeout)
+
+        return cls(
+            server=value("SAMBATUI_SERVER", "server", ""),
+            domain=domain,
+            zone=zone,
+            user=value("SAMBATUI_USER", "user", ""),
+            password=password,
+            auth=auth,
+            kerberos=value("SAMBATUI_KERBEROS", "kerberos", "off"),
+            krb5_ccache=value("SAMBATUI_KRB5_CCACHE", "krb5_ccache", ""),
+            configfile=value("SAMBATUI_CONFIGFILE", "configfile", ""),
+            options=value("SAMBATUI_OPTIONS", "options", ""),
+            ldap_base=value("SAMBATUI_LDAP_BASE", "ldap_base", ""),
+            ldap_encryption=value(
+                "SAMBATUI_LDAP_ENCRYPTION", "ldap_encryption", "ldaps"
+            ),
+            ldap_compatibility=value(
+                "SAMBATUI_LDAP_COMPATIBILITY", "ldap_compatibility", "off"
+            ),
+            auto_ptr=value("SAMBATUI_AUTO_PTR", "auto_ptr", "ask"),
+            smart_days=value("SAMBATUI_SMART_DAYS", "smart_days", "90"),
+            smart_disabled_days=value(
+                "SAMBATUI_SMART_DISABLED_DAYS", "smart_disabled_days", "180"
+            ),
+            smart_never_logged_days=value(
+                "SAMBATUI_SMART_NEVER_LOGGED_DAYS",
+                "smart_never_logged_days",
+                "30",
+            ),
+            smart_max_rows=value(
+                "SAMBATUI_SMART_MAX_ROWS", "smart_max_rows", "500"
+            ),
+            password_file=password_file,
+            command_timeout=command_timeout,
+        )
+
+
+APP_CONFIG = AppConfig.load()
+DEFAULT_SERVER = APP_CONFIG.server
+DEFAULT_DOMAIN = APP_CONFIG.domain
+DEFAULT_ZONE = APP_CONFIG.zone
+DEFAULT_USER = APP_CONFIG.user
+DEFAULT_PASSWORD = APP_CONFIG.password
+DEFAULT_AUTH = APP_CONFIG.auth
+DEFAULT_KERBEROS = APP_CONFIG.kerberos
+DEFAULT_KRB5_CCACHE = APP_CONFIG.krb5_ccache
+DEFAULT_CONFIGFILE = APP_CONFIG.configfile
+DEFAULT_OPTIONS = APP_CONFIG.options
+DEFAULT_LDAP_BASE = APP_CONFIG.ldap_base
+DEFAULT_LDAP_ENCRYPTION = APP_CONFIG.ldap_encryption
+DEFAULT_LDAP_COMPATIBILITY = APP_CONFIG.ldap_compatibility
+DEFAULT_AUTO_PTR = APP_CONFIG.auto_ptr
+DEFAULT_SMART_DAYS = APP_CONFIG.smart_days
+DEFAULT_SMART_DISABLED_DAYS = APP_CONFIG.smart_disabled_days
+DEFAULT_SMART_NEVER_LOGGED_DAYS = APP_CONFIG.smart_never_logged_days
+DEFAULT_SMART_MAX_ROWS = APP_CONFIG.smart_max_rows
+DEFAULT_PASSWORD_FILE = APP_CONFIG.password_file
+DEFAULT_COMMAND_TIMEOUT = APP_CONFIG.command_timeout

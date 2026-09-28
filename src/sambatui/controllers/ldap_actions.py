@@ -6,6 +6,7 @@ from typing import TypeVar
 
 from textual import work
 
+from ..core.operations import LdapAddOperation, LdapDeleteOperation, LdapModifyOperation
 from ..ldap.client import (
     LDAP_ADD_KINDS,
     LDAP_EDITABLE_ATTRIBUTES,
@@ -289,13 +290,17 @@ class AppLdapActionsMixin(AppControllerBase):
             if values[attr] != self.ldap_attribute_value(row, attr)
         }
 
-    def ldap_edit_preview(self, row: DirectoryRow, changes: dict[str, str]) -> str:
+    def ldap_edit_preview(
+        self, row: DirectoryRow, operation: LdapModifyOperation
+    ) -> str:
         lines = [
             f"{attr}: {self.ldap_attribute_value(row, attr) or '<empty>'} -> "
             f"{value or '<delete>'}"
-            for attr, value in changes.items()
+            for attr, value in operation.changes
         ]
-        return "\n".join(["Edit LDAP entry?", "", f"DN: {row.dn}", *lines])
+        return "\n".join(
+            ["Edit LDAP entry?", "", f"DN: {operation.dn}", *lines]
+        )
 
     async def update_ldap_entry(self) -> None:
         row = self.selected_directory_row()
@@ -315,13 +320,16 @@ class AppLdapActionsMixin(AppControllerBase):
         if not changes:
             self.notify("No LDAP attribute changes.")
             return
+        operation = LdapModifyOperation.create(row.dn, changes)
         if not await self.confirm(
-            self.ldap_edit_preview(row, changes), default_confirm=True
+            self.ldap_edit_preview(row, operation), default_confirm=True
         ):
             self.notify("LDAP edit cancelled")
             return
         _result, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().modify_attributes(row.dn, changes)
+            lambda: self.ldap_client().modify_attributes(
+                operation.dn, operation.change_values
+            )
         )
         if error:
             return
@@ -381,19 +389,31 @@ class AppLdapActionsMixin(AppControllerBase):
             for attr in ("sAMAccountName", "userPrincipalName", "mail", "description")
         }
 
-    def ldap_add_preview(self, values: dict[str, str]) -> str:
-        attrs = self.ldap_add_attributes(values)
-        lines = [f"{attr}: {value}" for attr, value in attrs.items() if value]
+    def ldap_add_operation(self, values: dict[str, str]) -> LdapAddOperation:
+        return LdapAddOperation.create(
+            values["kind"].casefold(),
+            values["parent_dn"],
+            values["name"],
+            self.ldap_add_attributes(values),
+        )
+
+    def ldap_add_operation_preview(self, operation: LdapAddOperation) -> str:
+        lines = [
+            f"{attr}: {value}" for attr, value in operation.attributes if value
+        ]
         return "\n".join(
             [
                 "Add LDAP entry?",
                 "",
-                f"Type: {values['kind'].casefold()}",
-                f"Parent DN: {values['parent_dn']}",
-                f"Name: {values['name']}",
+                f"Type: {operation.kind}",
+                f"Parent DN: {operation.parent_dn}",
+                f"Name: {operation.name}",
                 *lines,
             ]
         )
+
+    def ldap_add_preview(self, values: dict[str, str]) -> str:
+        return self.ldap_add_operation_preview(self.ldap_add_operation(values))
 
     async def add_ldap_entry(self) -> None:
         values = await self.form(
@@ -405,15 +425,18 @@ class AppLdapActionsMixin(AppControllerBase):
         )
         if not values:
             return
-        if not await self.confirm(self.ldap_add_preview(values), default_confirm=True):
+        operation = self.ldap_add_operation(values)
+        if not await self.confirm(
+            self.ldap_add_operation_preview(operation), default_confirm=True
+        ):
             self.notify("LDAP add cancelled")
             return
         dn, error = await self.ldap_thread_result(
             lambda: self.ldap_client().add_entry(
-                values["kind"],
-                values["parent_dn"],
-                values["name"],
-                self.ldap_add_attributes(values),
+                operation.kind,
+                operation.parent_dn,
+                operation.name,
+                operation.attribute_values,
             )
         )
         if error:
@@ -454,10 +477,13 @@ class AppLdapActionsMixin(AppControllerBase):
             self.notify("LDAP delete cancelled")
             return
 
+        operations = [LdapDeleteOperation(row.dn) for row in rows]
         failed = 0
-        for row in rows:
+        for operation in operations:
             _result, error = await self.ldap_thread_result(
-                lambda dn=row.dn: self.ldap_client().delete_entry(dn)
+                lambda operation=operation: self.ldap_client().delete_entry(
+                    operation.dn
+                )
             )
             if error:
                 failed += 1

@@ -95,6 +95,7 @@ sambatui
 | `SAMBATUI_KRB5_CCACHE` | Kerberos credential cache for Samba/LDAP GSSAPI | empty |
 | `SAMBATUI_CONFIGFILE` | Alternate `smb.conf` passed to `samba-tool --configfile` | empty |
 | `SAMBATUI_OPTIONS` | Samba `--option` values separated by `;` | empty |
+| `SAMBATUI_COMMAND_TIMEOUT` | Maximum seconds for one `samba-tool` command | `60` |
 | `SAMBATUI_LDAP_BASE` | Base DN for LDAP search | derived from zone when possible |
 | `SAMBATUI_LDAP_ENCRYPTION` | LDAP transport: `ldaps`, `starttls`, or `off` for Kerberos-only LDAP | `ldaps` |
 | `SAMBATUI_LDAP_COMPATIBILITY` | Relaxed LDAP TLS/schema probing mode for legacy servers (`on`/`off`) | `off` |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textual.app import App
 
+from .app_actions import APP_BINDINGS
 from .samba.client import SambaToolClient, SambaToolConfig, parse_samba_options
 from .core.config import (
     password_file_warning,
@@ -122,53 +123,7 @@ class SambatuiApp(
 ):
     CSS = APP_CSS
 
-    BINDINGS = [
-        ("question_mark", "help", "Help"),
-        ("ctrl+p", "open_command_palette", "Command palette"),
-        ("ctrl+o", "connection", "Connection"),
-        ("w", "setup_wizard", "Setup wizard"),
-        ("p", "load_password_file", "Load password"),
-        ("P", "save_password_file", "Save password"),
-        ("z", "load_zones", "Zones"),
-        ("c", "discover_ad", "Discover DC"),
-        ("L", "ldap_search", "LDAP"),
-        ("S", "smart_view", "Findings picker"),
-        ("r", "refresh", "Refresh"),
-        ("q", "query", "Query"),
-        ("a", "add", "Add"),
-        ("u", "update", "Update selected"),
-        ("d", "delete", "Delete selected"),
-        ("space", "toggle_select", "Toggle select"),
-        ("ctrl+space", "toggle_select", "Toggle select"),
-        ("v", "visual_select", "Visual select"),
-        ("V", "select_range", "Select range"),
-        ("escape", "clear_navigation_state", "Clear"),
-        ("shift+up", "extend_up", "Extend up"),
-        ("shift+down", "extend_down", "Extend down"),
-        ("tab", "next_table", "Next table"),
-        ("shift+tab", "previous_table", "Previous table"),
-        ("]", "next_side_tab", "Next DNS/LDAP tab"),
-        ("[", "previous_side_tab", "Previous DNS/LDAP tab"),
-        ("h", "focus_zones", "Focus zones"),
-        ("l", "focus_records", "Focus records"),
-        ("j", "cursor_down", "Down"),
-        ("k", "cursor_up", "Up"),
-        ("ctrl+d", "cursor_half_page_down", "Half page down"),
-        ("ctrl+u", "cursor_half_page_up", "Half page up"),
-        ("pagedown", "cursor_page_down", "Page down"),
-        ("pageup", "cursor_page_up", "Page up"),
-        ("home", "cursor_top", "Top"),
-        ("end", "cursor_bottom", "Bottom"),
-        ("G", "cursor_bottom", "Bottom"),
-        ("enter", "activate_row", "Activate"),
-        ("f", "fix_smart", "Fix smart finding"),
-        ("m", "load_more_directory", "Load more LDAP"),
-        ("slash", "search", "Search"),
-        ("n", "sort_name", "Sort name"),
-        ("t", "sort_type", "Sort type"),
-        ("e", "sort_value", "Sort value"),
-        ("ctrl+q", "quit", "Quit"),
-    ]
+    BINDINGS = APP_BINDINGS
 
 
 def main() -> None:

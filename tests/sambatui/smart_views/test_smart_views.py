@@ -323,8 +323,8 @@ def test_ldap_delete_candidate_users_flags_disabled_old_and_never_logged_in() ->
         "Disabled user cleanup candidate",
         "User never logged in",
     ]
-    assert findings[0].fix_action == "ldap_delete_entry"
-    assert findings[0].fix_dn == "CN=Alice,DC=example,DC=com"
+    assert findings[0].fix_action == ""
+    assert "directory view" in findings[0].suggested_action
     assert findings[1].fix_action == "ldap_disable_account"
     assert findings[1].fix_value == str(512 | ACCOUNTDISABLE)
 

@@ -117,11 +117,19 @@ def test_record_type_registry_covers_guided_fields_and_validation_hints() -> Non
     assert validate_record("www", "BAD!", "value") == (
         "Bad type. Example: A, AAAA, CNAME, PTR, TXT, MX, SRV, NS."
     )
-    assert SUPPORTED_DNS_RECORD_TYPES_TEXT in str(
-        app.update_record_fields(
-            {"name": "www", "rtype": "NS", "value": "ns1.example.com."}
-        )
-    )
+    assert app.update_record_fields(
+        {"name": "www", "rtype": "NS", "value": "ns1.example.com."}
+    ) == [("New DNS value", "value", "new value", "ns1.example.com.")]
+
+
+def test_update_record_keeps_selected_record_identity_fixed() -> None:
+    app = SambatuiApp()
+    selected = {"name": "www", "rtype": "A", "value": "192.0.2.10"}
+
+    fields = app.update_record_fields(selected)
+
+    assert [field_id for _, field_id, _, _ in fields] == ["value"]
+    assert app.update_record_error(selected, {"value": "192.0.2.11"}) is None
 
 
 def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
@@ -163,7 +171,7 @@ def test_guided_add_preview_includes_command_and_ptr_suggestion() -> None:
 
             assert "Record: www A 192.0.2.10" in preview
             assert "2.0.192.in-addr.arpa: 10 PTR www.example.com" in preview
-            assert "Command preview: samba-tool dns add dc01.example.com" in preview
+            assert "dns add dc01.example.com" in preview
             assert "-U admin" in preview
             assert "secret" not in preview
 

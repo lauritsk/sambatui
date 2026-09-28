@@ -123,6 +123,7 @@ class LdapDirectoryClient:
         attributes: Mapping[str, str],
     ) -> str:
         self._raise_validation_error()
+        self._raise_out_of_scope(parent_dn, "LDAP add parent")
         dn, object_class, ldap_attributes = build_add_entry(
             kind, parent_dn, name, attributes
         )
@@ -138,10 +139,12 @@ class LdapDirectoryClient:
         if ldap_dn_equal(dn, self.config.base_dn):
             raise ValueError("Refusing to delete LDAP base DN.")
         self._raise_validation_error()
+        self._raise_out_of_scope(dn, "LDAP delete target")
         self._write(lambda connection: connection.delete(dn), "LDAP delete failed")
 
     def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
         self._raise_validation_error()
+        self._raise_out_of_scope(dn, "LDAP modify target")
         invalid = sorted(set(changes) - ALL_LDAP_EDITABLE_ATTRIBUTES)
         if invalid:
             raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
@@ -151,11 +154,16 @@ class LdapDirectoryClient:
         if not dn.strip():
             raise ValueError("LDAP disable needs a DN.")
         self._raise_validation_error()
+        self._raise_out_of_scope(dn, "LDAP disable target")
         self._modify_attributes(
             dn,
             {"userAccountControl": str(user_account_control | 0x0002)},
             "LDAP disable failed",
         )
+
+    def _raise_out_of_scope(self, dn: str, label: str) -> None:
+        if not ldap_dn_in_scope(dn, self.config.base_dn):
+            raise ValueError(f"{label} must be at or below LDAP base DN.")
 
     def _modify_attributes(
         self, dn: str, changes: Mapping[str, str], failure_message: str
