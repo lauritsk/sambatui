@@ -943,14 +943,12 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             assert str(app.severity_marker("low", quiet=True)) == "•"
             assert app.severity_marker("") == ""
             app.render_records(duplicate)
-            assert str(app.query_one("#records", DataTable).get_row_at(0)[0]) == "▌"
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == "▌"
             app.current_smart_view_id = "dns_duplicates"
-            assert "DNS / Findings" in app.active_smart_filter_suffix()
+            assert "duplicates/conflicts" in app.active_smart_filter_suffix()
             app.populate_smart_view("x", [smart_row()])
             assert str(app.smart_row_marker(smart_row())) == "•"
-            assert "DNS / Findings / x" in str(
-                app.query_one("#records_title", Static).render()
-            )
+            assert str(app.query_one("#records_title", Static).render()) == "x"
             app.sort_records("name")
             assert "Sorted smart view" in str(app.query_one("#status", Static).render())
             app.clear_current_smart_view()
@@ -978,7 +976,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             directory_findings = app.passive_directory_findings(app.directory_rows)
             assert app.directory_row_severity(app.directory_rows[0], directory_findings)
             app.render_directory(app.directory_rows)
-            assert str(app.query_one("#records", DataTable).get_row_at(0)[0]) == "▌"
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == "▌"
             app.sort_records("name")
             app.current_smart_view_id = "ldap_inactive_users"
             app.populate_smart_view("ldap", [smart_row(source="ldap")])
@@ -1859,7 +1857,12 @@ def test_remaining_controller_coverage_edges(
                     get_row_at=lambda row_index: []
                 ),
             )
-            assert app.row_to_record(0) is None
+            assert app.row_to_record(0) == {
+                "name": "www",
+                "rtype": "A",
+                "value": "192.0.2.10",
+                "ttl": "3600",
+            }
             setattr(app, "query_one", original_query_one)
 
             app.query_one("#password_file", Input).value = str(tmp_path / "missing")

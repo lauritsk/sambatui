@@ -239,9 +239,14 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
             records = app.query_one("#records", DataTable)
             records.focus()
 
+            severity = str(records.get_row_at(0)[1])
             await pilot.press("space")
             assert app.selected_directory_rows == {0}
             assert str(records.get_row_at(0)[0]) == "✓"
+            assert str(records.get_row_at(0)[1]) == severity
+            indicator = app.query_one("#selection_state")
+            assert indicator.display
+            assert "1 selected" in str(indicator.render())
 
             await pilot.press("j")
             await pilot.press("V")
@@ -253,6 +258,7 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
             assert app.selected_directory_rows == set()
             assert app.directory_selection_anchor is None
             assert app.selected_record_rows == {42}
+            assert not indicator.display
 
     asyncio.run(run_app())
 
@@ -298,7 +304,7 @@ def test_ldap_directory_selection_clears_on_sort() -> None:
 
             assert app.selected_directory_rows == set()
             records = app.query_one("#records", DataTable)
-            assert [str(records.get_row_at(index)[1]) for index in range(2)] == [
+            assert [str(records.get_row_at(index)[2]) for index in range(2)] == [
                 "Alice",
                 "Bob",
             ]

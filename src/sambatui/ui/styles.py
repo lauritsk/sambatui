@@ -35,6 +35,13 @@ Screen {
 }
 #records_header { height: 3; align-vertical: middle; }
 #records_title { width: 1fr; }
+#selection_state {
+    display: none;
+    width: auto;
+    margin-right: 2;
+    color: $accent;
+    text-style: bold;
+}
 #inline_search { width: 32; }
 .hint { color: $text-muted; margin-bottom: 1; }
 #connection_summary { color: $text-muted; padding: 0 1; }

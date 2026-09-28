@@ -76,7 +76,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
     #form_hint { color: $text-muted; margin-bottom: 1; }
     #form_error { color: $error; margin-bottom: 1; }
     #form_fields { height: auto; max-height: 72%; margin-bottom: 1; }
-    .hint { color: $text-muted; margin-bottom: 0; }
+    .form_label { color: $text; margin-bottom: 0; }
     .form_row { height: auto; margin-bottom: 1; }
     .form_row Input { width: 1fr; margin-right: 1; }
     #form_buttons { height: auto; align-horizontal: right; }
@@ -111,7 +111,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
                 yield Static("", id="form_error")
             with VerticalScroll(id="form_fields"):
                 for label, field_id, placeholder, value in self.fields:
-                    yield Static(label, classes="hint")
+                    yield Static(label, classes="form_label")
                     with Horizontal(classes="form_row"):
                         yield Input(
                             value=value,

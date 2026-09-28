@@ -177,9 +177,8 @@ class AppViewsMixin(AppViewDataMixin):
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
         if view is None or view.view_id == FULL_HEALTH_VIEW_ID:
             return ""
-        source = view.source_label
-        label = view.label.removeprefix(f"{source} ")
-        return f"— {source} / Findings / {label} (Esc clears)"
+        label = view.label.removeprefix(f"{view.source_label} ")
+        return f"— {label}"
 
     def update_records_title(self) -> None:
         self.query_one("#records_title", Label).update(self.records_title())
@@ -291,15 +290,12 @@ class AppViewsMixin(AppViewDataMixin):
         self.view_mode = "smart"
         view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
         source = view.source.sidebar_source if view is not None else None
-        context = source.value if source is not None else "Findings"
         tab_id = "ldap_tab" if source is SmartViewSource.LDAP else "dns_tab"
         with suppress(Exception):
             self.query_one("#side_tabs", TabbedContent).active = tab_id
             self.refresh_key_hints()
         self.set_records_columns(SMART_COLUMNS)
-        self.query_one("#records_title", Label).update(
-            f"{context} / Findings / {title} (Esc clears)"
-        )
+        self.query_one("#records_title", Label).update(title)
         self.smart_view_rows = self.sorted_smart_view(rows)
         self.select_smart_view_cursor()
         self.refresh_smart_view()
@@ -313,6 +309,7 @@ class AppViewsMixin(AppViewDataMixin):
         self.directory_selection_anchor = None
         self.smart_selection_anchor = None
         self.visual_selecting = False
+        self.refresh_selection_indicator()
 
     def selection_count_label(self) -> str:
         if self.view_mode == "directory":
@@ -323,7 +320,19 @@ class AppViewsMixin(AppViewDataMixin):
             count = len(self.selected_smart_rows)
             label = "smart finding" if count == 1 else "smart findings"
             return f"{count} {label}"
-        return f"{len(self.selected_record_rows)} record(s)"
+        count = len(self.selected_record_rows)
+        return f"{count} {'record' if count == 1 else 'records'}"
+
+    def selection_status_text(self) -> str:
+        return f"{self.selection_count_label()} selected · Space toggles · Esc clears"
+
+    def refresh_selection_indicator(self) -> None:
+        with suppress(Exception):
+            indicator = self.query_one("#selection_state", Static)
+            count = len(self.selected_rows_for_current_view())
+            indicator.display = bool(count or self.visual_selecting)
+            mode = "VISUAL · " if self.visual_selecting else ""
+            indicator.update(f"{mode}{count} selected")
 
     def selected_rows_for_current_view(self) -> set[int]:
         if self.view_mode == "directory":
@@ -475,12 +484,19 @@ class AppViewsMixin(AppViewDataMixin):
         table.clear()
         if rows:
             for row in rows:
-                table.add_row(
-                    marker(row) if marker is not None else "", *row_values(row)
-                )
+                values = row_values(row)
+                if marker is None:
+                    table.add_row("", *values)
+                else:
+                    table.add_row("", marker(row), *values)
         else:
             title, hint = self.empty_state_text(view_mode)
-            table.add_row("", title, "-", hint, "", "", "")
+            empty_values = {
+                "dns": ("", "", title, "-", hint, ""),
+                "directory": ("", "", title, "-", hint),
+                "smart": ("", "-", title, hint),
+            }
+            table.add_row(*empty_values[view_mode])
         table.move_cursor(row=0)
         self.update_details_pane()
 
@@ -505,9 +521,7 @@ class AppViewsMixin(AppViewDataMixin):
         )
 
     def render_smart_view(self, rows: list[SmartViewRow]) -> None:
-        self.render_result_rows(
-            rows, "smart", smart_result_values, self.smart_row_marker
-        )
+        self.render_result_rows(rows, "smart", smart_result_values)
 
     def details_empty_text(self) -> str:
         return details_empty_text(self.empty_state_text(self.view_mode))
@@ -728,6 +742,7 @@ class AppViewsMixin(AppViewDataMixin):
             selected_rows.discard(row_index)
         table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
         table.refresh_row(row_index)
+        self.refresh_selection_indicator()
 
     def clear_selection_state(
         self,
@@ -742,13 +757,13 @@ class AppViewsMixin(AppViewDataMixin):
         else:
             selected_rows.clear()
         self.visual_selecting = False
+        self.refresh_selection_indicator()
 
     def select_range(
         self,
         start: int,
         end: int,
         set_selected: Callable[[int], None],
-        selected_label: Callable[[], str],
         clear_selection: Callable[[], None],
         *,
         clear: bool = True,
@@ -763,7 +778,8 @@ class AppViewsMixin(AppViewDataMixin):
         low, high = sorted((start, end))
         for row_index in range(low, high + 1):
             set_selected(row_index)
-        self.set_status(f"Selected {selected_label()}")
+        self.refresh_selection_indicator()
+        self.set_status(self.selection_status_text())
 
     def set_record_selected(self, row_index: int, selected: bool) -> None:
         self.set_selection_state(row_index, selected, self.selected_record_rows)
@@ -803,7 +819,6 @@ class AppViewsMixin(AppViewDataMixin):
             start,
             end,
             lambda row_index: self.set_record_selected(row_index, True),
-            lambda: f"{len(self.selected_record_rows)} record(s)",
             self.clear_record_selection,
             clear=clear,
         )
@@ -815,7 +830,6 @@ class AppViewsMixin(AppViewDataMixin):
             start,
             end,
             lambda row_index: self.set_directory_selected(row_index, True),
-            self.selection_count_label,
             self.clear_directory_selection,
             clear=clear,
         )
@@ -825,7 +839,6 @@ class AppViewsMixin(AppViewDataMixin):
             start,
             end,
             lambda row_index: self.set_smart_selected(row_index, True),
-            self.selection_count_label,
             self.clear_smart_selection,
             clear=clear,
         )
@@ -833,21 +846,14 @@ class AppViewsMixin(AppViewDataMixin):
     def row_to_record(self, row_index: int) -> dict[str, str] | None:
         if self.view_mode != "dns":
             return None
-        table = self.query_one("#records", DataTable)
-        try:
-            row = table.get_row_at(row_index)
-        except Exception:
-            return None
-        if not row:
-            return None
-        values = [str(cell) for cell in row]
-        if len(values) < 4 or values[2] == "-":
+        row = self.visible_row_at(self.visible_records(), row_index)
+        if row is None:
             return None
         return {
-            "name": values[1],
-            "rtype": values[2],
-            "value": values[3],
-            "ttl": values[4] if len(values) > 4 else "",
+            "name": row.name,
+            "rtype": row.rtype,
+            "value": row.value,
+            "ttl": row.ttl,
         }
 
     def selected_records(self) -> list[dict[str, str]]:
