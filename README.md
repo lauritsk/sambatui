@@ -107,11 +107,14 @@ sambatui
 | `SAMBATUI_PASSWORD` | Password loaded into the password field | empty |
 | `SAMBATUI_PASSWORD_FILE` | Password file path | `~/.config/sambatui/password` |
 | `SAMBATUI_USER_CONFIG` | Preference file path | `~/.config/sambatui/config.toml` |
+| `SAMBATUI_THEME` | Textual theme name; overrides `TEXTUAL_THEME` | `ansi-dark` (uses the terminal palette) |
 
 `sambatui` stores non-secret preferences, including connection settings and the
 username, in `~/.config/sambatui/config.toml`. Passwords and password-file
 contents are not written there. Environment variables override saved
-preferences.
+preferences. By default, the UI uses ANSI colors and the terminal's own
+foreground and background. Set `SAMBATUI_THEME=textual-dark` (or another
+Textual theme name) if you prefer a fixed palette.
 
 ## Keyboard shortcuts
 
