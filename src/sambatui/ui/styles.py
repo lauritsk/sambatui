@@ -1,54 +1,68 @@
 APP_CSS = """
-Screen { layout: vertical; }
+Screen {
+    layout: vertical;
+    background: $background;
+}
 
 #connection_state { display: none; }
 
 #main {
     height: 1fr;
-    margin: 0 1;
+    padding: 1;
 }
 
 #sidebar {
-    width: 42;
-    min-width: 34;
+    width: 36%;
+    min-width: 30;
+    max-width: 44;
     height: 1fr;
     margin-right: 1;
 }
 
-#side_tabs { height: 1fr; }
-
-#results {
-    width: 1fr;
-    height: 1fr;
-}
+#side_tabs, #results, #dns_panel, #ldap_panel { height: 1fr; }
+#results { width: 1fr; }
 
 .panel {
-    border: tall $surface;
+    border: round $border-blurred;
     padding: 0 1;
 }
+.panel:focus-within { border: round $border; }
 
-#dns_panel, #ldap_panel { height: 1fr; }
-
-.section-title { text-style: bold; color: $accent; margin-bottom: 1; }
-#records_header { height: 3; }
+.section-title {
+    text-style: bold;
+    color: $text;
+    margin-bottom: 1;
+}
+#records_header { height: 3; align-vertical: middle; }
 #records_title { width: 1fr; }
-#inline_search { width: 36; }
+#inline_search { width: 32; }
 .hint { color: $text-muted; margin-bottom: 1; }
-#connection_summary { color: $text-muted; margin-bottom: 1; }
-#keys { height: 1; margin: 0 1; color: $text-muted; }
+#connection_summary { color: $text-muted; padding: 0 1; }
+#keys {
+    height: 2;
+    padding: 0 2;
+    color: $text-muted;
+    content-align: left middle;
+}
 
 Button { width: 1fr; }
+DataTable { background: $background; }
 
 #zones, #ldap_structure { height: 2fr; margin-bottom: 1; }
-#dns_findings, #ldap_findings { height: 1fr; max-height: 12; margin-bottom: 1; }
+#dns_findings, #ldap_findings { height: 1fr; max-height: 10; }
 #records { height: 1fr; }
 #record_details {
-    height: 10;
+    height: 9;
     margin-top: 1;
-    border: tall $surface;
-    padding: 0 1;
+    border-top: solid $border-blurred;
+    padding: 1;
     overflow-y: auto;
     color: $text;
 }
-#status { height: 3; color: $text-muted; }
+#status {
+    height: 2;
+    padding: 0 1;
+    color: $text-muted;
+    content-align: left middle;
+}
 """

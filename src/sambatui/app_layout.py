@@ -12,7 +12,7 @@ from .ui.tables import DNS_COLUMNS
 
 class AppLayoutMixin(App):
     def findings_hint_text(self) -> str:
-        return "Saved hygiene filters. Enter opens; Esc clears active finding."
+        return "Enter to open · Esc to clear"
 
     def keys_hint_for_tab(self, tab_id: str | None) -> str:
         return KEY_HINTS.get(tab_id or "", KEY_HINTS["dns_tab"])
@@ -65,7 +65,7 @@ class AppLayoutMixin(App):
 
     def compose_sidebar(self) -> ComposeResult:
         with Vertical(id="sidebar", classes="panel"):
-            yield Static("Connection: not checked", id="connection_summary")
+            yield Static("Not connected", id="connection_summary")
             with TabbedContent(id="side_tabs"):
                 yield from self.compose_dns_tab()
                 yield from self.compose_ldap_tab()
@@ -77,14 +77,14 @@ class AppLayoutMixin(App):
                 yield Label("Records", id="records_title", classes="section-title")
                 yield Input(
                     "",
-                    placeholder="/ search source records",
+                    placeholder="/ Search records",
                     id="inline_search",
                 )
             table = DataTable(id="records", cursor_type="row")
             table.add_columns(*DNS_COLUMNS)
             yield table
             yield Static(
-                "Details\nNo row selected.",
+                "Select a row to see details.",
                 id="record_details",
                 classes="hint",
                 markup=False,
