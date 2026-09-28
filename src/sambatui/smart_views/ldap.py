@@ -90,18 +90,17 @@ def disabled_user_cleanup_finding(
     now: datetime,
 ) -> SmartViewRow | None:
     reference = changed or created
-    if reference is not None and reference >= cutoff:
+    if reference is None or reference >= cutoff:
         return None
     return SmartViewRow(
         severity="medium",
         object=directory_object_name(row),
         finding="Disabled user cleanup candidate",
         evidence=disabled_user_evidence(changed, created, now),
-        suggested_action="Verify retention/legal hold; delete or archive per policy.",
+        suggested_action=(
+            "Verify retention/legal hold, then delete from the directory view if approved."
+        ),
         source="ldap",
-        fix_action="ldap_delete_entry",
-        fix_label=f"delete {directory_object_name(row)}",
-        fix_dn=row.dn,
     )
 
 

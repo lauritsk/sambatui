@@ -75,7 +75,15 @@ def test_smart_view_remaining_edges() -> None:
             "userAccountControl": (str(ACCOUNTDISABLE),),
         }
     )
-    assert ldap_delete_candidate_users([recent_disabled], now=now) == []
+    disabled_without_age = directory_row(
+        {
+            "sAMAccountName": ("unknown-age",),
+            "userAccountControl": (str(ACCOUNTDISABLE),),
+        }
+    )
+    assert ldap_delete_candidate_users(
+        [recent_disabled, disabled_without_age], now=now
+    ) == []
     assert disabled_user_evidence(None, None, now) == "disabled"
     assert parse_ad_datetime("2026-04-30 12:00:00") == datetime(
         2026, 4, 30, 12, tzinfo=UTC
