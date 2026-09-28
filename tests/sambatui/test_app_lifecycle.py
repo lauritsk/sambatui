@@ -22,8 +22,8 @@ def test_empty_states_explain_next_actions() -> None:
         async with app.run_test():
             records = app.query_one("#records", DataTable)
             details = app.query_one("#record_details", Static)
-            assert str(records.get_row_at(0)[1]) == "No DNS records shown"
-            assert "select zone" in str(records.get_row_at(0)[3])
+            assert str(records.get_row_at(0)[2]) == "No DNS records shown"
+            assert "select zone" in str(records.get_row_at(0)[4])
             assert "No DNS records shown" in str(details.render())
 
             zones = app.query_one("#zones", DataTable)
@@ -31,14 +31,14 @@ def test_empty_states_explain_next_actions() -> None:
             assert "press z" in str(zones.get_row_at(0)[0])
 
             app.populate_directory([])
-            assert str(records.get_row_at(0)[1]) == "No LDAP entries shown"
-            assert "Press L" in str(records.get_row_at(0)[3])
+            assert str(records.get_row_at(0)[2]) == "No LDAP entries shown"
+            assert "Press L" in str(records.get_row_at(0)[4])
             assert "No LDAP entries shown" in str(details.render())
             ldap_structure = app.query_one("#ldap_structure", DataTable)
             assert "LDAP base DN" in str(ldap_structure.get_row_at(0)[0])
 
             app.populate_smart_view("DNS duplicates/conflicts", [])
-            assert str(records.get_row_at(0)[1]) == "No findings shown"
+            assert str(records.get_row_at(0)[2]) == "No findings shown"
             assert "Press S" in str(records.get_row_at(0)[3])
             assert "No findings shown" in str(details.render())
 
@@ -109,7 +109,7 @@ def test_setup_wizard_discovers_checks_and_loads_zones() -> None:
             assert app.zones == ["example.com", "2.0.192.in-addr.arpa"]
             assert app.ldap_checked
             assert app.saved_preferences == 1
-            assert str(records.get_row_at(0)[1]) == "www"
+            assert str(records.get_row_at(0)[2]) == "www"
 
     asyncio.run(run_app())
 

@@ -37,14 +37,16 @@ class AppLayoutMixin(App):
         with TabPane("DNS", id="dns_tab"):
             with Vertical(id="dns_panel"):
                 yield Static("DNS zones", classes="section-title")
-                zones = DataTable(id="zones", cursor_type="row")
+                zones = DataTable(id="zones", cursor_type="row", show_header=False)
                 zones.add_columns("DNS zones")
                 yield zones
                 yield Static("Findings", classes="section-title")
                 yield Static(
                     self.findings_hint_text(), id="dns_findings_hint", classes="hint"
                 )
-                dns_findings = DataTable(id="dns_findings", cursor_type="row")
+                dns_findings = DataTable(
+                    id="dns_findings", cursor_type="row", show_header=False
+                )
                 dns_findings.add_columns("DNS finding")
                 yield dns_findings
 
@@ -52,14 +54,18 @@ class AppLayoutMixin(App):
         with TabPane("LDAP", id="ldap_tab"):
             with Vertical(id="ldap_panel"):
                 yield Static("LDAP structure", classes="section-title")
-                structure = DataTable(id="ldap_structure", cursor_type="row")
+                structure = DataTable(
+                    id="ldap_structure", cursor_type="row", show_header=False
+                )
                 structure.add_columns("LDAP structure")
                 yield structure
                 yield Static("Findings", classes="section-title")
                 yield Static(
                     self.findings_hint_text(), id="ldap_findings_hint", classes="hint"
                 )
-                ldap_findings = DataTable(id="ldap_findings", cursor_type="row")
+                ldap_findings = DataTable(
+                    id="ldap_findings", cursor_type="row", show_header=False
+                )
                 ldap_findings.add_columns("LDAP finding")
                 yield ldap_findings
 
@@ -75,6 +81,7 @@ class AppLayoutMixin(App):
         with Vertical(id="results", classes="panel"):
             with Horizontal(id="records_header"):
                 yield Label("Records", id="records_title", classes="section-title")
+                yield Static("", id="selection_state")
                 yield Input(
                     "",
                     placeholder="/ Search records",

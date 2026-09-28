@@ -598,7 +598,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
 
             records = app.query_one("#records", DataTable)
             assert app.view_mode == "directory"
-            assert str(records.get_row_at(0)[1]) == "Ops"
+            assert str(records.get_row_at(0)[2]) == "Ops"
             assert structure.row_count == 3
             assert str(structure.get_row_at(1)[0]) == "  CN=Users"
             assert str(structure.get_row_at(2)[0]) == "  OU=Departments"
@@ -610,7 +610,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert app.searches[-1] == ("all", "", 200)
             assert app.search_bases[-1] == "CN=Users,DC=example,DC=com"
             assert app.query_one("#records", DataTable).row_count == 1
-            assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == (
+            assert str(app.query_one("#records", DataTable).get_row_at(0)[2]) == (
                 "No LDAP entries shown"
             )
             assert structure.row_count == 3

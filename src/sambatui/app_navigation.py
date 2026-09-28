@@ -16,16 +16,9 @@ from .app_constants import (
 )
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
 
-DNS_HEADER_SORT_FIELDS = {1: "name", 2: "type", 3: "value"}
-DIRECTORY_HEADER_SORT_FIELDS = {1: "name", 2: "type", 3: "value"}
-SMART_HEADER_SORT_FIELDS = {
-    1: "severity",
-    2: "object",
-    3: "finding",
-    4: "evidence",
-    5: "action",
-    6: "source",
-}
+DNS_HEADER_SORT_FIELDS = {2: "name", 3: "type", 4: "value"}
+DIRECTORY_HEADER_SORT_FIELDS = {2: "name", 3: "type", 4: "value"}
+SMART_HEADER_SORT_FIELDS = {1: "severity", 2: "object", 3: "finding"}
 HEADER_SORT_FIELDS_BY_VIEW_MODE = {
     "dns": DNS_HEADER_SORT_FIELDS,
     "directory": DIRECTORY_HEADER_SORT_FIELDS,
@@ -74,6 +67,8 @@ class AppNavigationMixin(App):
 
         def refresh_key_hints(self) -> None: ...
 
+        def refresh_selection_indicator(self) -> None: ...
+
         def refresh_inline_search_scope(
             self, search_text: str, view_mode: str
         ) -> object: ...
@@ -85,6 +80,8 @@ class AppNavigationMixin(App):
         def selected_rows_for_current_view(self) -> set[int]: ...
 
         def selection_count_label(self) -> str: ...
+
+        def selection_status_text(self) -> str: ...
 
         def set_current_row_selected(self, row_index: int, selected: bool) -> None: ...
 
@@ -313,7 +310,7 @@ class AppNavigationMixin(App):
             self.set_current_selection_anchor(row_index)
         is_selected = row_index in self.selected_rows_for_current_view()
         self.set_current_row_selected(row_index, not is_selected)
-        self.set_status(f"Selected {self.selection_count_label()}")
+        self.set_status(self.selection_status_text())
 
     def action_visual_select(self) -> None:
         self.pending_g = False
@@ -322,15 +319,17 @@ class AppNavigationMixin(App):
             return
         if self.visual_selecting:
             self.visual_selecting = False
+            self.refresh_selection_indicator()
             self.set_visual_selection_off_status()
             return
         self.visual_selecting = True
         self.set_current_selection_anchor(table.cursor_row)
         self.select_current_range(table.cursor_row, table.cursor_row)
+        self.refresh_selection_indicator()
         action_hint = (
             "f to fix selected" if self.view_mode == "smart" else "d to delete selected"
         )
-        self.set_status(f"Visual selection on: use j/k, then {action_hint}")
+        self.set_status(f"VISUAL · use j/k · {action_hint} · Esc ends")
 
     def action_select_range(self) -> None:
         self.pending_g = False
@@ -390,9 +389,8 @@ class AppNavigationMixin(App):
         self.action_focus_records()
 
     def set_visual_selection_off_status(self) -> None:
-        self.set_status(
-            f"Visual selection off; selected {self.selection_count_label()}"
-        )
+        self.refresh_selection_indicator()
+        self.set_status(self.selection_status_text())
 
     def is_sidebar_table(self, table: DataTable | None) -> bool:
         return table is not None and table.id in SIDEBAR_TABLE_IDS

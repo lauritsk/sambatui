@@ -158,7 +158,7 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
 
             records = app.query_one("#records", DataTable)
             assert str(records.get_row_at(0)[3]) == "Full health dashboard"
-            assert "check(s) failed" in str(records.get_row_at(0)[4])
+            assert "check(s) failed" in app.smart_view_rows[0].evidence
             findings = [
                 str(records.get_row_at(index)[3]) for index in range(records.row_count)
             ]
@@ -368,7 +368,7 @@ def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
 
             assert app.searches == [("users", "", 200), ("users", "alice", 200)]
             assert records.row_count == 1
-            assert str(records.get_row_at(0)[1]) == "Alice"
+            assert str(records.get_row_at(0)[2]) == "Alice"
 
     asyncio.run(run_app())
 
@@ -404,7 +404,7 @@ def test_inline_search_dns_reloads_full_zone_before_filtering() -> None:
 
             assert app.commands == [("query", ["@", "ALL"])]
             assert records.row_count == 1
-            assert str(records.get_row_at(0)[1]) == "www"
+            assert str(records.get_row_at(0)[2]) == "www"
 
     asyncio.run(run_app())
 
@@ -429,7 +429,7 @@ def test_inline_search_filters_dns_directory_and_smart_views() -> None:
             await pilot.pause()
             assert app.search_text == "www"
             assert records.row_count == 1
-            assert str(records.get_row_at(0)[1]) == "www"
+            assert str(records.get_row_at(0)[2]) == "www"
 
             await pilot.press("escape")
             await pilot.pause()
@@ -459,7 +459,7 @@ def test_inline_search_filters_dns_directory_and_smart_views() -> None:
             search.value = "alice"
             await pilot.pause()
             assert records.row_count == 1
-            assert str(records.get_row_at(0)[1]) == "Alice"
+            assert str(records.get_row_at(0)[2]) == "Alice"
 
             app.populate_smart_view(
                 "DNS duplicates/conflicts",
@@ -513,13 +513,13 @@ def test_ldap_kind_header_sorts_directory_rows() -> None:
                 ]
             )
             records = app.query_one("#records", DataTable)
-            column = records.ordered_columns[2]
+            column = records.ordered_columns[3]
 
             app.on_data_table_header_selected(
-                DataTable.HeaderSelected(records, column.key, 2, Text("Kind"))
+                DataTable.HeaderSelected(records, column.key, 3, Text("Kind"))
             )
 
-            assert [str(records.get_row_at(index)[2]) for index in range(2)] == [
+            assert [str(records.get_row_at(index)[3]) for index in range(2)] == [
                 "group",
                 "user",
             ]
@@ -585,7 +585,7 @@ def test_smart_view_header_and_key_sort_rows() -> None:
             )
 
             app.action_sort_value()
-            assert [str(records.get_row_at(index)[4]) for index in range(3)] == [
+            assert [row.evidence for row in app.smart_view_rows] == [
                 "lastLogonTimestamp 100 days ago",
                 "lastLogonTimestamp 200 days ago",
                 "lastLogonTimestamp 300 days ago",
