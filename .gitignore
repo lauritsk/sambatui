@@ -3,6 +3,7 @@
 !.gitignore
 !.env.example
 !.python-version
+!justfile
 !README.md
 !pyproject.toml
 !uv.lock
