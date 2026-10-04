@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from .app_constants import (
     KEY_ACTION_NAMES,
     SIDE_TAB_IDS,
 )
+from .core.view_state import AppViewState
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
 
 DNS_HEADER_SORT_FIELDS = {2: "name", 3: "type", 4: "value"}
@@ -43,14 +45,7 @@ class AppNavigationMixin(App):
         _syncing_search_input: bool
         pending_g: bool
         search_text: str
-        selected_record_rows: set[int]
-        selected_directory_rows: set[int]
-        selected_smart_rows: set[int]
-        selection_anchor: int | None
-        directory_selection_anchor: int | None
-        smart_selection_anchor: int | None
-        view_mode: str
-        visual_selecting: bool
+        views: AppViewState
         zones: list[str]
 
         def action_fix_smart(self) -> object: ...
@@ -93,9 +88,7 @@ class AppNavigationMixin(App):
 
         def update_details_pane(self) -> None: ...
 
-        def visible_directory(self) -> list[object]: ...
-
-        def visible_smart_view(self) -> list[object]: ...
+        def visible_rows_for_mode(self, mode: str) -> Sequence[object]: ...
 
     def sync_inline_search_input(self) -> None:
         with suppress(Exception):
@@ -205,7 +198,7 @@ class AppNavigationMixin(App):
 
     def update_visual_selection(self) -> None:
         anchor = self.current_selection_anchor()
-        if not self.visual_selecting or anchor is None:
+        if not self.views.visual_selecting or anchor is None:
             return
         table = self.records_table()
         if self.focused_table() is table:
@@ -275,7 +268,7 @@ class AppNavigationMixin(App):
             self.move_cursor_to(table, table.row_count - 1)
 
     def ensure_selectable_records_view(self) -> bool:
-        if self.view_mode in SELECTABLE_VIEW_MODES:
+        if self.views.mode in SELECTABLE_VIEW_MODES:
             return True
         self.set_status(
             "Selection applies to DNS records, LDAP entries, and smart findings."
@@ -292,11 +285,8 @@ class AppNavigationMixin(App):
             return None
         if not self.ensure_selectable_records_view():
             return None
-        if self.view_mode == "directory" and not self.visible_directory():
-            self.set_status("Select an LDAP entry first.")
-            return None
-        if self.view_mode == "smart" and not self.visible_smart_view():
-            self.set_status("Select a smart finding first.")
+        if not self.visible_rows_for_mode(self.views.mode):
+            self.set_status("Select a real result row first.")
             return None
         return table
 
@@ -317,17 +307,19 @@ class AppNavigationMixin(App):
         table = self.record_selection_table(focus=True)
         if table is None:
             return
-        if self.visual_selecting:
-            self.visual_selecting = False
+        if self.views.visual_selecting:
+            self.views.visual_selecting = False
             self.refresh_selection_indicator()
             self.set_visual_selection_off_status()
             return
-        self.visual_selecting = True
+        self.views.visual_selecting = True
         self.set_current_selection_anchor(table.cursor_row)
         self.select_current_range(table.cursor_row, table.cursor_row)
         self.refresh_selection_indicator()
         action_hint = (
-            "f to fix selected" if self.view_mode == "smart" else "d to delete selected"
+            "f to fix selected"
+            if self.views.mode == "smart"
+            else "d to delete selected"
         )
         self.set_status(f"VISUAL · use j/k · {action_hint} · Esc ends")
 
@@ -371,15 +363,15 @@ class AppNavigationMixin(App):
             self.action_focus_records()
             self.set_status("Search closed")
             return
-        if self.visual_selecting:
-            self.visual_selecting = False
+        if self.views.visual_selecting:
+            self.views.visual_selecting = False
             self.set_visual_selection_off_status()
             return
         if self.selected_rows_for_current_view():
             self.clear_current_selection()
             self.set_status("Selection cleared")
             return
-        if self.view_mode == "smart":
+        if self.views.mode == "smart":
             self.clear_current_smart_view()
             return
         if self.search_text:
@@ -399,7 +391,7 @@ class AppNavigationMixin(App):
         self.pending_g = False
         table = self.focused_table()
         if table and table.id == "records":
-            match self.view_mode:
+            match self.views.mode:
                 case "dns":
                     self.action_toggle_select()
                 case "smart":
@@ -506,7 +498,7 @@ class AppNavigationMixin(App):
             return
         self.search_text = event.value
         self.refresh_current_view()
-        self.refresh_inline_search_scope(event.value, self.view_mode)
+        self.refresh_inline_search_scope(event.value, self.views.mode)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "records":
@@ -518,7 +510,7 @@ class AppNavigationMixin(App):
         await self.activate_sidebar_selection(event.data_table)
 
     def header_sort_field(self, column_index: int) -> str | None:
-        sort_fields = HEADER_SORT_FIELDS_BY_VIEW_MODE.get(self.view_mode)
+        sort_fields = HEADER_SORT_FIELDS_BY_VIEW_MODE.get(self.views.mode)
         return None if sort_fields is None else sort_fields.get(column_index)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:

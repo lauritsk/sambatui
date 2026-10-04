@@ -5,42 +5,6 @@ import os
 from textual.app import App
 
 from .app_actions import APP_BINDINGS
-from .samba.client import SambaToolClient, SambaToolConfig, parse_samba_options
-from .core.config import (
-    password_file_warning,
-    read_password_file,
-)
-from .dns.parsing import NAME_RE, REC_RE, parse_records, parse_zones
-from .dns.validation import valid_dns_name, validate_record
-from .ldap.sidebar import (
-    ldap_structure_labels,
-    ldap_structure_nodes,
-    split_ldap_dn,
-)
-from .core.models import DnsRow
-from .core.remediation import actionable_error
-from .ui.screens import (
-    CommandPaletteScreen,
-    ConfirmScreen,
-    FormField,
-    FormScreen,
-    HelpScreen,
-    SmartViewPickerScreen,
-)
-from .smart_view_catalog import (
-    SMART_VIEW_LABELS,
-)
-from .ui.styles import APP_CSS
-from .app_layout import AppLayoutMixin
-from .app_navigation import AppNavigationMixin
-from .controllers import (
-    AppCoreMixin,
-    AppDnsActionsMixin,
-    AppLdapActionsMixin,
-    AppSetupMixin,
-    AppSmartActionsMixin,
-    AppViewsMixin,
-)
 from .app_constants import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
@@ -62,7 +26,42 @@ from .app_constants import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
-
+from .app_layout import AppLayoutMixin
+from .app_navigation import AppNavigationMixin
+from .controllers import (
+    AppCoreMixin,
+    AppDnsActionsMixin,
+    AppLdapActionsMixin,
+    AppSetupMixin,
+    AppSmartActionsMixin,
+    AppViewsMixin,
+)
+from .core.config import (
+    password_file_warning,
+    read_password_file,
+)
+from .core.models import DnsRow
+from .core.remediation import actionable_error
+from .dns.parsing import NAME_RE, REC_RE, parse_records, parse_zones
+from .dns.validation import valid_dns_name, validate_record
+from .ldap.sidebar import (
+    ldap_structure_labels,
+    ldap_structure_nodes,
+    split_ldap_dn,
+)
+from .samba.client import SambaToolClient, SambaToolConfig, parse_samba_options
+from .smart_view_catalog import (
+    SMART_VIEW_LABELS,
+)
+from .ui.screens import (
+    CommandPaletteScreen,
+    ConfirmScreen,
+    FormField,
+    FormScreen,
+    HelpScreen,
+    SmartViewPickerScreen,
+)
+from .ui.styles import APP_CSS
 
 __all__ = [
     "DEFAULT_AUTH",
@@ -129,13 +128,12 @@ class SambatuiApp(
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.initialize_state()
         # ANSI themes use the terminal's own foreground, background, and palette.
         # Keep Textual's standard override available for users who prefer a theme.
         requested_theme = os.getenv("SAMBATUI_THEME") or os.getenv("TEXTUAL_THEME")
         self.theme = (
-            requested_theme
-            if requested_theme in self.available_themes
-            else "ansi-dark"
+            requested_theme if requested_theme in self.available_themes else "ansi-dark"
         )
 
 

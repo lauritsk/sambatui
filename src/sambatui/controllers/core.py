@@ -5,8 +5,8 @@ import os
 import shutil
 import socket
 from collections.abc import AsyncIterator
-from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from pathlib import Path
 
 from textual import work
@@ -16,48 +16,6 @@ from textual.widgets import (
     Static,
 )
 
-from ..samba.client import SambaToolClient, SambaToolConfig
-from ..core.config import (
-    DEFAULT_COMMAND_TIMEOUT,
-    fix_password_file_permissions,
-    is_reverse_dns_zone,
-    password_file_permissions_too_open,
-    password_file_warning,
-    read_password_file,
-    save_user_config,
-    write_private_text,
-)
-from ..samba.discovery import (
-    normalize_domain,
-)
-from ..dns.parsing import parse_records
-from ..ldap.client import (
-    LdapDirectoryClient,
-    LdapSearchConfig,
-)
-from ..ldap.rows import DirectoryRow
-from ..ldap.sidebar import (
-    SidebarItem,
-)
-from ..core.models import DnsRow
-from ..core.remediation import actionable_error
-from ..ui.screens import (
-    CommandPaletteScreen,
-    ConfirmScreen,
-    FormField,
-    FormScreen,
-    FormValidator,
-    HelpScreen,
-    infer_domain_from_server,
-)
-from ..core.settings import ConnectionSettings
-from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
-from ..smart_views import (
-    SmartViewRow,
-)
-from ..ui.tables import (
-    DNS_COLUMNS,
-)
 from ..app_constants import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
@@ -72,12 +30,50 @@ from ..app_constants import (
     PALETTE_ACTION_MAP,
     PALETTE_ACTIONS,
 )
+from ..core.config import (
+    DEFAULT_COMMAND_TIMEOUT,
+    fix_password_file_permissions,
+    is_reverse_dns_zone,
+    password_file_permissions_too_open,
+    password_file_warning,
+    read_password_file,
+    save_user_config,
+    write_private_text,
+)
+from ..core.remediation import actionable_error
+from ..core.settings import ConnectionSettings
+from ..core.view_state import AppViewState, DirectoryViewState, SmartViewState
+from ..dns.parsing import parse_records
+from ..ldap.client import (
+    LdapDirectoryClient,
+    LdapSearchConfig,
+)
+from ..ldap.rows import DirectoryRow
+from ..ldap.sidebar import (
+    SidebarItem,
+)
+from ..samba.client import SambaToolClient, SambaToolConfig
+from ..samba.discovery import (
+    normalize_domain,
+)
+from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
+from ..ui.screens import (
+    CommandPaletteScreen,
+    ConfirmScreen,
+    FormField,
+    FormScreen,
+    FormValidator,
+    HelpScreen,
+    infer_domain_from_server,
+)
+from ..ui.tables import (
+    DNS_COLUMNS,
+)
 from .base import AppControllerBase
 
 
 class AppCoreMixin(AppControllerBase):
     def on_mount(self) -> None:
-        self.initialize_state()
         self.initialize_view()
 
         samba_tool = shutil.which("samba-tool")
@@ -95,36 +91,18 @@ class AppCoreMixin(AppControllerBase):
             self.call_after_refresh(self.load_zones)
 
     def initialize_state(self) -> None:
-        self.selected_record_rows: set[int] = set()
-        self.selected_directory_rows: set[int] = set()
-        self.selected_smart_rows: set[int] = set()
-        self.selection_anchor: int | None = None
-        self.directory_selection_anchor: int | None = None
-        self.smart_selection_anchor: int | None = None
-        self.visual_selecting = False
-        self.record_rows: list[DnsRow] = []
-        self.directory_rows: list[DirectoryRow] = []
+        self.views = AppViewState(
+            directory=DirectoryViewState(max_rows=LDAP_DEFAULT_MAX_ROWS),
+            smart=SmartViewState(max_rows=SMART_ROW_LIMIT_DEFAULT),
+        )
         self.ldap_structure_rows: list[DirectoryRow] = []
-        self.current_directory_values: dict[str, str] = {}
-        self.current_directory_max_rows = LDAP_DEFAULT_MAX_ROWS
-        self.smart_view_rows: list[SmartViewRow] = []
-        self.current_smart_view_id = ""
-        self.current_smart_max_rows = SMART_ROW_LIMIT_DEFAULT
-        self.current_smart_values: dict[str, str] = {}
-        self.current_smart_sort_field = ""
-        self.current_smart_sort_reverse = False
         self.records_columns = DNS_COLUMNS
-        self.view_mode = "dns"
-        self.sort_field = "name"
-        self.sort_reverse = False
-        self.directory_sort_field = ""
-        self.directory_sort_reverse = False
         self.search_text = ""
         self._syncing_search_input = False
         self.zones: list[str] = []
         self.sidebar_items: dict[str, list[SidebarItem]] = {}
         self.pending_g = False
-        self._last_dns_search_zone = ""
+        self._busy_depth = 0
 
     def initialize_view(self) -> None:
         self.refresh_connection_summary()
@@ -379,9 +357,7 @@ class AppCoreMixin(AppControllerBase):
                 proc.kill()
             out_bytes, _ = await proc.communicate()
             output = out_bytes.decode(errors="replace")
-            message = (
-                f"samba-tool timed out after {DEFAULT_COMMAND_TIMEOUT} seconds"
-            )
+            message = f"samba-tool timed out after {DEFAULT_COMMAND_TIMEOUT} seconds"
             self.report_error(message)
             return 124, output or message
         except asyncio.CancelledError:
@@ -425,11 +401,15 @@ class AppCoreMixin(AppControllerBase):
 
     @asynccontextmanager
     async def busy(self) -> AsyncIterator[None]:
-        self.set_busy(True)
+        self._busy_depth = getattr(self, "_busy_depth", 0) + 1
+        if self._busy_depth == 1:
+            self.set_busy(True)
         try:
             yield
         finally:
-            self.set_busy(False)
+            self._busy_depth -= 1
+            if self._busy_depth == 0:
+                self.set_busy(False)
 
     async def do_command(
         self, action: str, args: list[str], update_table: bool = False
@@ -437,7 +417,7 @@ class AppCoreMixin(AppControllerBase):
         async with self.busy():
             code, output = await self.run_samba(action, args)
             if update_table and code == 0:
-                self._last_dns_search_zone = (
+                self.views.dns.last_search_zone = (
                     self.val("zone")
                     if action == "query" and args == ["@", "ALL"]
                     else ""
@@ -448,7 +428,7 @@ class AppCoreMixin(AppControllerBase):
             return code
 
     async def action_refresh(self) -> None:
-        match self.view_mode:
+        match self.views.mode:
             case "dns":
                 await self.refresh_current_zone()
             case "directory":

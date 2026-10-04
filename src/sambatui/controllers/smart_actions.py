@@ -4,27 +4,30 @@ import asyncio
 
 from textual import work
 
+from ..app_constants import (
+    DEFAULT_LDAP_COMPATIBILITY,
+    DEFAULT_LDAP_ENCRYPTION,
+    DEFAULT_SMART_DAYS,
+    DEFAULT_SMART_DISABLED_DAYS,
+    DEFAULT_SMART_MAX_ROWS,
+    DEFAULT_SMART_NEVER_LOGGED_DAYS,
+)
+from ..core.models import DnsRow
 from ..dns.names import is_ipv4_reverse_zone
 from ..dns.parsing import parse_records
 from ..dns.validation import validate_record
 from ..ldap.client import LdapDirectoryClient
 from ..ldap.rows import DirectoryRow
-from ..core.models import DnsRow
-from ..ui.screens import (
-    FormField,
-    SmartViewChoice,
-    SmartViewPickerScreen,
-)
 from ..smart_view_catalog import (
     FULL_HEALTH_DNS_VIEW_IDS,
     FULL_HEALTH_LDAP_VIEW_IDS,
     FULL_HEALTH_VIEW_ID,
-    SMART_VIEW_BY_ID,
-    SMART_VIEW_BY_SHORTCUT,
-    SMART_VIEWS,
     SMART_ROW_LIMIT_MAX,
     SMART_ROW_LIMIT_STEP,
+    SMART_VIEW_BY_ID,
+    SMART_VIEW_BY_SHORTCUT,
     SMART_VIEW_DEFAULTS,
+    SMART_VIEWS,
     SmartViewDefinition,
     SmartViewOptions,
     SmartViewSource,
@@ -38,19 +41,15 @@ from ..smart_views import (
     ldap_stale_computers,
     ldap_users_without_groups,
 )
-from ..app_constants import (
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
-    DEFAULT_SMART_DAYS,
-    DEFAULT_SMART_DISABLED_DAYS,
-    DEFAULT_SMART_MAX_ROWS,
-    DEFAULT_SMART_NEVER_LOGGED_DAYS,
+from ..ui.screens import (
+    FormField,
+    SmartViewChoice,
+    SmartViewPickerScreen,
 )
 from .base import AppControllerBase
 from .helpers import (
     DNS_SMART_ROW_BUILDERS,
 )
-
 
 LDAP_INACTIVE_USERS_VIEW_ID = "ldap_inactive_users"
 LDAP_DELETE_CANDIDATES_VIEW_ID = "ldap_delete_candidates"
@@ -205,8 +204,9 @@ class AppSmartActionsMixin(AppControllerBase):
         return builder(records_by_zone)
 
     async def refresh_current_smart_view(self) -> None:
-        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
-        values = getattr(self, "current_smart_values", {})
+        state = self.views.smart
+        view = SMART_VIEW_BY_ID.get(state.view_id)
+        values = state.values.copy()
         if view is None:
             self.refresh_smart_view()
             return
@@ -227,36 +227,37 @@ class AppSmartActionsMixin(AppControllerBase):
         )
         if rows is None:
             return
+        if state.view_id != view.view_id or state.values != values:
+            return
         rows = self.sorted_smart_view(rows)
-        self.populate_smart_view(view.label, rows[: self.current_smart_max_rows])
+        self.populate_smart_view(view.label, rows[: state.max_rows])
         self.notify("Refreshed smart-view findings")
 
     async def load_more_smart_view(self) -> bool:
-        if not self.current_smart_values or not self.current_smart_view_id:
+        state = self.views.smart
+        if not state.values or not state.view_id:
             self.set_status("No smart view to extend. Press S to run a smart view.")
             return False
-        max_rows = min(
-            self.current_smart_max_rows + SMART_ROW_LIMIT_STEP, SMART_ROW_LIMIT_MAX
-        )
-        if max_rows == self.current_smart_max_rows:
+        max_rows = min(state.max_rows + SMART_ROW_LIMIT_STEP, SMART_ROW_LIMIT_MAX)
+        if max_rows == state.max_rows:
             self.set_status(f"Smart-view row limit already at {SMART_ROW_LIMIT_MAX}.")
             return False
-        self.current_smart_max_rows = max_rows
-        self.current_smart_values = {
-            **self.current_smart_values,
+        state.max_rows = max_rows
+        state.values = {
+            **state.values,
             "max_rows": str(max_rows),
         }
         await self.refresh_current_smart_view()
         return True
 
     def selected_smart_rows_for_fix(self) -> list[SmartViewRow]:
-        if self.view_mode != "smart":
+        if self.views.mode != "smart":
             return []
         visible_rows = self.visible_smart_view()
-        if self.selected_smart_rows:
+        if self.views.smart.selected_rows:
             rows = [
                 self.visible_row_at(visible_rows, row_index)
-                for row_index in sorted(self.selected_smart_rows)
+                for row_index in sorted(self.views.smart.selected_rows)
             ]
         else:
             rows = [self.visible_row_at(visible_rows, self.records_cursor_row())]
@@ -300,11 +301,12 @@ class AppSmartActionsMixin(AppControllerBase):
         values: dict[str, str],
         options: SmartViewOptions,
     ) -> None:
-        self.current_smart_view_id = view.view_id
-        self.current_smart_sort_field = ""
-        self.current_smart_sort_reverse = False
-        self.current_smart_max_rows = options.max_rows
-        self.current_smart_values = values
+        state = self.views.smart
+        state.view_id = view.view_id
+        state.sort_field = ""
+        state.sort_reverse = False
+        state.max_rows = options.max_rows
+        state.values = values.copy()
 
     def populate_smart_view_results(
         self, label: str, rows: list[SmartViewRow], max_rows: int
@@ -508,15 +510,16 @@ class AppSmartActionsMixin(AppControllerBase):
             return
         options = SmartViewOptions.from_values(values)
         self.apply_smart_view_options(view, options)
-        self.remember_current_smart_view(view, values, options)
 
         if view.view_id == FULL_HEALTH_VIEW_ID:
+            self.remember_current_smart_view(view, values, options)
             await self.load_full_health_dashboard(values, options)
             return
 
         rows = await self.build_smart_view_rows(view, values, options)
         if rows is None:
             return
+        self.remember_current_smart_view(view, values, options)
         self.populate_smart_view_results(view.label, rows, options.max_rows)
 
     async def apply_smart_fix(self, row: SmartViewRow) -> None:
