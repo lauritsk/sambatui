@@ -89,14 +89,6 @@ def ldap_limit_suffix(row_count: int, limit: int) -> str:
     return " — limit reached; press m to load more"
 
 
-def next_sort_state(
-    current_field: str, current_reverse: bool, requested_field: str
-) -> tuple[str, bool]:
-    if current_field == requested_field:
-        return requested_field, not current_reverse
-    return requested_field, False
-
-
 def sort_direction(reverse: bool) -> str:
     if reverse:
         return "desc"

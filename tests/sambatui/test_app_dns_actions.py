@@ -3,6 +3,7 @@ import ipaddress
 
 from hypothesis import given
 from hypothesis import strategies as st
+from textual.widgets import Button, Input, Static
 
 from sambatui.app import (
     DnsRow,
@@ -11,8 +12,6 @@ from sambatui.app import (
     parse_zones,
     validate_record,
 )
-from textual.widgets import Button, Input, Static
-
 from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
 from sambatui.dns.record_types import (
     DNS_RECORD_TYPE_SPECS,
@@ -134,7 +133,7 @@ def test_update_record_keeps_selected_record_identity_fixed() -> None:
 
 def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
     app = SambatuiApp()
-    app.record_rows = [DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw")]
+    app.views.dns.rows = [DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw")]
 
     assert (
         app.guided_add_record_error(

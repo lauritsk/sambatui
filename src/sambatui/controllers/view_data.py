@@ -62,7 +62,7 @@ class AppViewDataMixin(AppControllerBase):
         self, search_text: str, view_mode: str
     ) -> None:
         await asyncio.sleep(0.35)
-        if search_text != self.search_text or view_mode != self.view_mode:
+        if search_text != self.search_text or view_mode != self.views.mode:
             return
         if view_mode == "directory":
             await self.refresh_directory_search_scope(search_text)
@@ -70,12 +70,12 @@ class AppViewDataMixin(AppControllerBase):
             await self.refresh_dns_search_scope(search_text)
 
     async def refresh_directory_search_scope(self, search_text: str) -> bool:
-        if not self.current_directory_values:
+        if not self.views.directory.values:
             return False
         values = {
-            **self.current_directory_values,
+            **self.views.directory.values,
             "text": search_text,
-            "max_rows": str(self.current_directory_max_rows),
+            "max_rows": str(self.views.directory.max_rows),
         }
         limit = self.ldap_search_max_rows(values)
         kind = values.get("kind") or "users"
@@ -88,11 +88,11 @@ class AppViewDataMixin(AppControllerBase):
         rows = await self.directory_search_rows(client, kind, search_text, limit)
         if rows is None:
             return False
-        if search_text != self.search_text or self.view_mode != "directory":
+        if search_text != self.search_text or self.views.mode != "directory":
             return False
 
-        self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
-        self.current_directory_max_rows = limit
+        self.views.directory.values = {**values, "kind": kind, "max_rows": str(limit)}
+        self.views.directory.max_rows = limit
         self.populate_directory(rows)
         self.set_status(
             f"Search matched {len(rows)} LDAP entries across directory "
@@ -102,15 +102,19 @@ class AppViewDataMixin(AppControllerBase):
 
     async def refresh_dns_search_scope(self, search_text: str) -> bool:
         zone = self.val("zone")
-        if not zone or self._last_dns_search_zone == zone:
+        if not zone or self.views.dns.last_search_zone == zone:
             return False
         async with self.busy():
             code, output = await self.run_samba("query", ["@", "ALL"])
         if code != 0:
             return False
-        if search_text != self.search_text or self.view_mode != "dns":
+        if (
+            search_text != self.search_text
+            or self.views.mode != "dns"
+            or zone != self.val("zone")
+        ):
             return False
-        self._last_dns_search_zone = zone
+        self.views.dns.last_search_zone = zone
         self.populate_records(parse_records(output))
         return True
 

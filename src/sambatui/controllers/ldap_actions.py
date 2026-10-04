@@ -6,20 +6,6 @@ from typing import TypeVar
 
 from textual import work
 
-from ..core.operations import LdapAddOperation, LdapDeleteOperation, LdapModifyOperation
-from ..ldap.client import (
-    LDAP_ADD_KINDS,
-    LDAP_EDITABLE_ATTRIBUTES,
-    LdapDirectoryClient,
-    domain_to_base_dn,
-    ldap_dn_in_scope,
-)
-from ..ldap.rows import DirectoryRow
-from ..core.remediation import bounded_int
-from ..ui.screens import (
-    FormField,
-)
-from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
 from ..app_constants import (
     DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
@@ -28,11 +14,24 @@ from ..app_constants import (
     LDAP_LOAD_MORE_ROWS,
     LDAP_MAX_ROWS,
 )
+from ..core.operations import LdapAddOperation, LdapDeleteOperation, LdapModifyOperation
+from ..core.remediation import bounded_int
+from ..ldap.client import (
+    LDAP_ADD_KINDS,
+    LDAP_EDITABLE_ATTRIBUTES,
+    LdapDirectoryClient,
+    domain_to_base_dn,
+    ldap_dn_in_scope,
+)
+from ..ldap.rows import DirectoryRow
+from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
+from ..ui.screens import (
+    FormField,
+)
 from .base import AppControllerBase
 from .helpers import (
     ldap_limit_suffix,
 )
-
 
 _LdapThreadResult = TypeVar("_LdapThreadResult")
 
@@ -82,7 +81,7 @@ class AppLdapActionsMixin(AppControllerBase):
                 "Max rows",
                 "max_rows",
                 str(LDAP_DEFAULT_MAX_ROWS),
-                str(self.current_directory_max_rows),
+                str(self.views.directory.max_rows),
             ),
         ]
 
@@ -159,8 +158,8 @@ class AppLdapActionsMixin(AppControllerBase):
         if rows is None:
             return False
         container_rows = await self.directory_container_rows(client)
-        self.current_directory_values = {**values, "kind": kind, "max_rows": str(limit)}
-        self.current_directory_max_rows = limit
+        self.views.directory.values = {**values, "kind": kind, "max_rows": str(limit)}
+        self.views.directory.max_rows = limit
         self.set_search_text("", refresh=False)
         self.remember_ldap_structure_rows(container_rows)
         self.populate_directory(rows)
@@ -183,17 +182,17 @@ class AppLdapActionsMixin(AppControllerBase):
         await self.run_directory_search(values, default_kind=default_kind)
 
     async def refresh_current_directory_search(self) -> bool:
-        if not self.current_directory_values:
+        if not self.views.directory.values:
             self.set_status("No LDAP search to refresh. Press L to search directory.")
             return False
         return await self.run_directory_search(
-            self.current_directory_values,
-            max_rows=self.current_directory_max_rows,
+            self.views.directory.values,
+            max_rows=self.views.directory.max_rows,
             action="Refreshed",
         )
 
     async def load_more_current_view(self) -> bool:
-        match self.view_mode:
+        match self.views.mode:
             case "directory":
                 return await self.load_more_directory()
             case "smart":
@@ -206,17 +205,17 @@ class AppLdapActionsMixin(AppControllerBase):
                 return False
 
     async def load_more_directory(self) -> bool:
-        if not self.current_directory_values:
+        if not self.views.directory.values:
             self.set_status("No LDAP search to extend. Press L to search directory.")
             return False
         max_rows = min(
-            self.current_directory_max_rows + LDAP_LOAD_MORE_ROWS, LDAP_MAX_ROWS
+            self.views.directory.max_rows + LDAP_LOAD_MORE_ROWS, LDAP_MAX_ROWS
         )
-        if max_rows == self.current_directory_max_rows:
+        if max_rows == self.views.directory.max_rows:
             self.set_status(f"LDAP row limit already at {LDAP_MAX_ROWS}.")
             return False
         return await self.run_directory_search(
-            self.current_directory_values,
+            self.views.directory.values,
             max_rows=max_rows,
             action="Loaded",
         )
@@ -235,8 +234,8 @@ class AppLdapActionsMixin(AppControllerBase):
 
     def selected_directory_entries(self) -> list[DirectoryRow]:
         rows = self.visible_directory()
-        if self.selected_directory_rows:
-            row_indices = sorted(self.selected_directory_rows)
+        if self.views.directory.selected_rows:
+            row_indices = sorted(self.views.directory.selected_rows)
             if any(
                 row_index < 0 or row_index >= len(rows) for row_index in row_indices
             ):
@@ -298,9 +297,7 @@ class AppLdapActionsMixin(AppControllerBase):
             f"{value or '<delete>'}"
             for attr, value in operation.changes
         ]
-        return "\n".join(
-            ["Edit LDAP entry?", "", f"DN: {operation.dn}", *lines]
-        )
+        return "\n".join(["Edit LDAP entry?", "", f"DN: {operation.dn}", *lines])
 
     async def update_ldap_entry(self) -> None:
         row = self.selected_directory_row()
@@ -338,8 +335,8 @@ class AppLdapActionsMixin(AppControllerBase):
 
     def ldap_add_parent_dn(self) -> str:
         return (
-            self.current_directory_values.get("search_base_dn")
-            or self.current_directory_values.get("base_dn")
+            self.views.directory.values.get("search_base_dn")
+            or self.views.directory.values.get("base_dn")
             or self.ldap_base_default()
         )
 
@@ -372,11 +369,11 @@ class AppLdapActionsMixin(AppControllerBase):
         if not parent_dn:
             return "Enter LDAP parent DN."
         configured_base_dn = (
-            self.current_directory_values.get("base_dn") or self.ldap_base_default()
+            self.views.directory.values.get("base_dn") or self.ldap_base_default()
         ).strip()
         if configured_base_dn and not ldap_dn_in_scope(parent_dn, configured_base_dn):
             return f"Parent DN must be at or below LDAP base: {configured_base_dn}."
-        search_base_dn = self.current_directory_values.get("search_base_dn", "").strip()
+        search_base_dn = self.views.directory.values.get("search_base_dn", "").strip()
         if search_base_dn and not ldap_dn_in_scope(parent_dn, search_base_dn):
             return f"Parent DN must be at or below LDAP search base: {search_base_dn}."
         if not values.get("name", "").strip():
@@ -398,9 +395,7 @@ class AppLdapActionsMixin(AppControllerBase):
         )
 
     def ldap_add_operation_preview(self, operation: LdapAddOperation) -> str:
-        lines = [
-            f"{attr}: {value}" for attr, value in operation.attributes if value
-        ]
+        lines = [f"{attr}: {value}" for attr, value in operation.attributes if value]
         return "\n".join(
             [
                 "Add LDAP entry?",

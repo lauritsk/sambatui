@@ -2,6 +2,7 @@ import asyncio
 
 from hypothesis import given
 from hypothesis import strategies as st
+from textual.widgets import Button, DataTable, Input
 
 from sambatui.app import (
     DnsRow,
@@ -9,13 +10,11 @@ from sambatui.app import (
     actionable_error,
     ldap_structure_labels,
 )
-from textual.widgets import Button, DataTable, Input
-
 from sambatui.app_actions import (
     ACTIONS,
     APP_BINDINGS,
-    PALETTE_ACTIONS,
     PALETTE_ACTION_MAP,
+    PALETTE_ACTIONS,
 )
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_views import SmartViewRow
@@ -241,7 +240,7 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
 
             severity = str(records.get_row_at(0)[1])
             await pilot.press("space")
-            assert app.selected_directory_rows == {0}
+            assert app.views.directory.selected_rows == {0}
             assert str(records.get_row_at(0)[0]) == "✓"
             assert str(records.get_row_at(0)[1]) == severity
             indicator = app.query_one("#selection_state")
@@ -250,14 +249,14 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
 
             await pilot.press("j")
             await pilot.press("V")
-            assert app.selected_directory_rows == {0, 1}
+            assert app.views.directory.selected_rows == {0, 1}
             assert str(records.get_row_at(1)[0]) == "✓"
 
-            app.selected_record_rows.add(42)
+            app.views.dns.selected_rows.add(42)
             await pilot.press("escape")
-            assert app.selected_directory_rows == set()
-            assert app.directory_selection_anchor is None
-            assert app.selected_record_rows == {42}
+            assert app.views.directory.selected_rows == set()
+            assert app.views.directory.selection_anchor is None
+            assert app.views.dns.selected_rows == {42}
             assert not indicator.display
 
     asyncio.run(run_app())
@@ -302,7 +301,7 @@ def test_ldap_directory_selection_clears_on_sort() -> None:
 
             app.sort_directory("name")
 
-            assert app.selected_directory_rows == set()
+            assert app.views.directory.selected_rows == set()
             records = app.query_one("#records", DataTable)
             assert [str(records.get_row_at(index)[2]) for index in range(2)] == [
                 "Alice",
@@ -330,15 +329,15 @@ def test_dns_multi_select_still_works() -> None:
             await pilot.press("j")
             await pilot.press("V")
 
-            assert app.selected_record_rows == {0, 1}
-            assert app.selected_directory_rows == set()
+            assert app.views.dns.selected_rows == {0, 1}
+            assert app.views.directory.selected_rows == set()
             assert [str(records.get_row_at(index)[0]) for index in range(2)] == [
                 "✓",
                 "✓",
             ]
 
             await pilot.press("escape")
-            assert app.selected_record_rows == set()
+            assert app.views.dns.selected_rows == set()
 
     asyncio.run(run_app())
 
@@ -358,9 +357,9 @@ def test_smart_view_multi_select_works_for_dns_and_ldap_findings() -> None:
             await pilot.press("j")
             await pilot.press("V")
 
-            assert app.selected_smart_rows == {0, 1}
-            assert app.selected_record_rows == set()
-            assert app.selected_directory_rows == set()
+            assert app.views.smart.selected_rows == {0, 1}
+            assert app.views.dns.selected_rows == set()
+            assert app.views.directory.selected_rows == set()
             assert app.selection_count_label() == "2 smart findings"
             assert [row.object for row in app.selected_smart_rows_for_fix()] == [
                 "dns-a",
@@ -372,7 +371,7 @@ def test_smart_view_multi_select_works_for_dns_and_ldap_findings() -> None:
             ]
 
             await pilot.press("escape")
-            assert app.selected_smart_rows == set()
+            assert app.views.smart.selected_rows == set()
 
     asyncio.run(run_app())
 
@@ -392,51 +391,50 @@ def test_selection_helpers_cover_smart_and_invalid_directory_edges() -> None:
                     )
                 ]
             )
+            views = app.views
             app.set_directory_selected(99, True)
-            assert app.selected_directory_rows == set()
+            assert views.directory.selected_rows == set()
 
-            app.view_mode = "dns"
-            app.selected_directory_rows.add(0)
+            views.mode = "dns"
+            views.directory.selected_rows.add(0)
             app.clear_directory_selection()
-            assert app.selected_directory_rows == set()
+            assert views.directory.selected_rows == set()
 
-            app.view_mode = "smart"
-            app.visual_selecting = True
-            app.selection_anchor = 1
-            app.directory_selection_anchor = 2
-            app.smart_selection_anchor = 3
-            app.selected_smart_rows.add(0)
+            views.mode = "smart"
+            views.visual_selecting = True
+            views.dns.selection_anchor = 1
+            views.directory.selection_anchor = 2
+            views.smart.selection_anchor = 3
+            views.smart.selected_rows.add(0)
             app.clear_current_selection()
-            assert app.visual_selecting is False
-            assert app.selection_anchor == 1
-            assert app.directory_selection_anchor == 2
-            assert app.smart_selection_anchor is None
-            assert app.selected_smart_rows == set()
+            assert views.visual_selecting is False
+            assert views.dns.selection_anchor == 1
+            assert views.directory.selection_anchor == 2
+            assert views.smart.selection_anchor is None
+            assert views.smart.selected_rows == set()
 
-            app.view_mode = "other"
-            app.visual_selecting = True
-            app.selection_anchor = 1
-            app.directory_selection_anchor = 2
-            app.smart_selection_anchor = 3
+            views.mode = "other"
+            views.visual_selecting = True
+            views.smart.selection_anchor = 3
             app.clear_current_selection()
-            assert app.visual_selecting is False
-            assert app.selection_anchor is None
-            assert app.directory_selection_anchor is None
-            assert app.smart_selection_anchor is None
+            assert views.visual_selecting is False
+            assert views.dns.selection_anchor is None
+            assert views.directory.selection_anchor is None
+            assert views.smart.selection_anchor is None
 
             records = app.query_one("#records", DataTable)
             records.clear()
-            app.view_mode = "directory"
+            views.mode = "directory"
             app.select_directory_range(0, 1)
-            assert app.selected_directory_rows == set()
-            app.view_mode = "smart"
+            assert views.directory.selected_rows == set()
+            views.mode = "smart"
             app.set_smart_selected(99, True)
             app.select_smart_range(0, 1)
-            assert app.selected_smart_rows == set()
-            app.view_mode = "dns"
-            app.selected_smart_rows.add(0)
+            assert views.smart.selected_rows == set()
+            views.mode = "dns"
+            views.smart.selected_rows.add(0)
             app.clear_smart_selection()
-            assert app.selected_smart_rows == set()
+            assert views.smart.selected_rows == set()
             assert app.selected_smart_rows_for_fix() == []
 
     asyncio.run(run_app())
@@ -504,9 +502,9 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
             app.query_one("#server", Input).value = "dc01.example.com"
             app.query_one("#user", Input).value = "admin@example.com"
             app.query_one("#password", Input).value = "secret"
-            app.current_smart_view_id = "ldap_inactive_users"
-            app.current_smart_max_rows = 200
-            app.current_smart_values = {
+            app.views.smart.view_id = "ldap_inactive_users"
+            app.views.smart.max_rows = 200
+            app.views.smart.values = {
                 "days": "90",
                 "base_dn": "DC=example,DC=com",
                 "ldap_encryption": "ldaps",
@@ -517,28 +515,28 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
 
             assert await app.load_more_current_view()
 
-            assert app.view_mode == "smart"
-            assert app.current_smart_view_id == "ldap_inactive_users"
-            assert app.current_smart_max_rows == 400
-            assert app.current_smart_values["max_rows"] == "400"
+            assert app.views.mode == "smart"
+            assert app.views.smart.view_id == "ldap_inactive_users"
+            assert app.views.smart.max_rows == 400
+            assert app.views.smart.values["max_rows"] == "400"
             assert app.query_one("#records", DataTable).row_count == 400
             assert app.search_limits == [400]
-            assert not app.current_directory_values
+            assert not app.views.directory.values
 
             app.return_no_rows = True
             await app.refresh_current_smart_view()
             assert app.search_limits == [400, 400]
 
-            app.current_smart_values = {}
-            app.current_smart_view_id = "ldap_inactive_users"
+            app.views.smart.values = {}
+            app.views.smart.view_id = "ldap_inactive_users"
             await app.refresh_current_smart_view()
 
-            app.current_smart_view_id = ""
+            app.views.smart.view_id = ""
             assert not await app.load_more_current_view()
 
-            app.current_smart_values = {"max_rows": "5000"}
-            app.current_smart_view_id = "ldap_inactive_users"
-            app.current_smart_max_rows = 5000
+            app.views.smart.values = {"max_rows": "5000"}
+            app.views.smart.view_id = "ldap_inactive_users"
+            app.views.smart.max_rows = 5000
             assert not await app.load_more_current_view()
 
     asyncio.run(run_app())
@@ -600,6 +598,6 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
             await app.action_refresh()
 
             assert app.search_limits == [200, 400, 400]
-            assert app.current_directory_max_rows == 400
+            assert app.views.directory.max_rows == 400
 
     asyncio.run(run_app())

@@ -14,11 +14,11 @@ from sambatui.controllers.helpers import (
     SMART_SORT_KEYS,
     directory_sort_label,
     ldap_limit_suffix,
-    next_sort_state,
     setup_auth_values,
     sort_direction,
 )
 from sambatui.core.operations import DnsAddOperation
+from sambatui.core.view_state import next_sort_state
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.ldap.sidebar import SidebarItem
@@ -255,13 +255,13 @@ def test_dns_action_add_update_delete_edges() -> None:
     async def run_app() -> None:
         app = DnsApp()
         async with app.run_test():
-            app.view_mode = "directory"
+            app.views.mode = "directory"
             await app.action_add.__wrapped__(app)
             await app.action_update.__wrapped__(app)
             await app.action_delete.__wrapped__(app)
             assert app.ldap_actions == ["add", "update", "delete"]
 
-            app.view_mode = "smart"
+            app.views.mode = "smart"
             await app.action_add.__wrapped__(app)
             assert "Add is unavailable" in str(
                 app.query_one("#status", Static).render()
@@ -275,13 +275,13 @@ def test_dns_action_add_update_delete_edges() -> None:
                 app.query_one("#status", Static).render()
             )
 
-            app.view_mode = "unknown"
+            app.views.mode = "unknown"
             await app.action_add.__wrapped__(app)
             await app.action_update.__wrapped__(app)
             await app.action_delete.__wrapped__(app)
             assert "No editable" in str(app.query_one("#status", Static).render())
 
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             app.query_one("#auto_ptr", Input).value = "off"
             app.record_values = None
             await app.action_add.__wrapped__(app)
@@ -627,7 +627,7 @@ def test_core_status_password_command_and_actions(
             app.action_save_password_file()
 
             for mode in ("smart", "directory", "dns"):
-                app.view_mode = mode
+                app.views.mode = mode
                 await app.action_refresh()
             assert app.refreshed_modes == ["smart", "directory", "dns"]
 
@@ -853,7 +853,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
         def action_smart_view_shortcut(self, shortcut: str) -> None:
             view_id = SMART_VIEW_BY_SHORTCUT[shortcut].view_id
             self.smart_runs.append(view_id)
-            self.current_smart_view_id = view_id
+            self.views.smart.view_id = view_id
 
     async def run_app() -> None:
         app = ViewApp()
@@ -921,11 +921,11 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             assert len(app.ldap_structure_rows) == 2
 
             assert app.visible_row_at([], 0) is None
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             assert "No DNS" in app.dns_details_text(99)
-            app.view_mode = "directory"
+            app.views.mode = "directory"
             assert "No LDAP" in app.directory_details_text(99)
-            app.view_mode = "smart"
+            app.views.mode = "smart"
             assert "No findings" in app.smart_details_text(99)
 
             app.set_visible_status(0, 1, "records", "dns")
@@ -944,7 +944,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             assert app.severity_marker("") == ""
             app.render_records(duplicate)
             assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == "▌"
-            app.current_smart_view_id = "dns_duplicates"
+            app.views.smart.view_id = "dns_duplicates"
             assert "duplicates/conflicts" in app.active_smart_filter_suffix()
             app.populate_smart_view("x", [smart_row()])
             assert str(app.smart_row_marker(smart_row())) == "•"
@@ -952,14 +952,14 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.sort_records("name")
             assert "Sorted smart view" in str(app.query_one("#status", Static).render())
             app.clear_current_smart_view()
-            assert app.view_mode == "dns"
-            app.current_smart_view_id = "missing"
+            assert app.views.mode == "dns"
+            app.views.smart.view_id = "missing"
             assert app.active_smart_filter_suffix() == ""
-            app.current_smart_view_id = "full_health_dashboard"
+            app.views.smart.view_id = "full_health_dashboard"
             assert app.active_smart_filter_suffix() == ""
             app.sort_smart_view("missing")
             app.search_text = ""
-            app.view_mode = "unknown"
+            app.views.mode = "unknown"
             assert "No active records view" in app.current_details_text()
             app.refresh_current_view()
             assert "No active records view" in str(
@@ -973,26 +973,30 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.populate_directory(
                 [directory_row(name="Bob"), directory_row(name="Alice")]
             )
-            directory_findings = app.passive_directory_findings(app.directory_rows)
-            assert app.directory_row_severity(app.directory_rows[0], directory_findings)
-            app.render_directory(app.directory_rows)
+            directory_findings = app.passive_directory_findings(
+                app.views.directory.rows
+            )
+            assert app.directory_row_severity(
+                app.views.directory.rows[0], directory_findings
+            )
+            app.render_directory(app.views.directory.rows)
             assert str(app.query_one("#records", DataTable).get_row_at(0)[1]) == "▌"
             app.sort_records("name")
-            app.current_smart_view_id = "ldap_inactive_users"
+            app.views.smart.view_id = "ldap_inactive_users"
             app.populate_smart_view("ldap", [smart_row(source="ldap")])
             app.clear_current_smart_view()
-            assert app.view_mode == "directory"
+            assert app.views.mode == "directory"
             app.sort_directory("missing")
 
             records = app.query_one("#records", DataTable)
             app.set_record_selected(-1, True)
             app.select_record_range(0, 99)
-            assert app.selected_record_rows
+            assert app.views.dns.selected_rows
             app.clear_record_selection()
-            assert not app.selected_record_rows
-            app.view_mode = "directory"
+            assert not app.views.dns.selected_rows
+            app.views.mode = "directory"
             assert app.row_to_record(0) is None
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             app.populate_records([row("www")])
             assert app.row_to_record(0) == {
                 "name": "www",
@@ -1005,9 +1009,9 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             assert app.row_to_record(0) is None
             app.search_text = ""
             app.populate_records([row("www"), row("db")])
-            app.selected_record_rows = {0, 1}
+            app.views.dns.selected_rows = {0, 1}
             assert app.selected_record() is None
-            app.selected_record_rows = {0}
+            app.views.dns.selected_rows = {0}
             selected = app.selected_record()
             assert selected is not None
             assert selected["name"] == "www"
@@ -1015,7 +1019,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.select_record_range(0, 1)
 
             for mode in ("directory", "smart", "dns"):
-                app.view_mode = mode
+                app.views.mode = mode
                 app.refresh_current_view()
             await app.action_load_zones()
 
@@ -1031,22 +1035,22 @@ def test_smart_view_default_sort_and_user_override() -> None:
                 smart_row(object="oldest", evidence="lastLogonTimestamp 300 days ago"),
                 smart_row(object="older", evidence="lastLogonTimestamp 200 days ago"),
             ]
-            app.current_smart_view_id = "ldap_inactive_users"
+            app.views.smart.view_id = "ldap_inactive_users"
             app.populate_smart_view("LDAP inactive enabled users", rows)
-            assert [row.object for row in app.smart_view_rows] == [
+            assert [row.object for row in app.views.smart.rows] == [
                 "oldest",
                 "older",
                 "recent",
             ]
 
             app.sort_records("name")
-            assert [row.object for row in app.smart_view_rows] == [
+            assert [row.object for row in app.views.smart.rows] == [
                 "older",
                 "oldest",
                 "recent",
             ]
             app.populate_smart_view("LDAP inactive enabled users", rows)
-            assert [row.object for row in app.smart_view_rows] == [
+            assert [row.object for row in app.views.smart.rows] == [
                 "older",
                 "oldest",
                 "recent",
@@ -1077,7 +1081,7 @@ def test_view_inline_search_scope_edges() -> None:
         app = SearchApp()
         async with app.run_test():
             assert not await app.refresh_directory_search_scope("alice")
-            app.current_directory_values = {
+            app.views.directory.values = {
                 "kind": "",
                 "text": "",
                 "base_dn": "",
@@ -1090,13 +1094,13 @@ def test_view_inline_search_scope_edges() -> None:
             app.query_one("#server", Input).value = "dc01.example.com"
             app.query_one("#user", Input).value = "admin@example.com"
             app.query_one("#password", Input).value = "secret"
-            app.current_directory_values["base_dn"] = "DC=example,DC=com"
-            app.current_directory_values["search_base_dn"] = "DC=example,DC=com"
+            app.views.directory.values["base_dn"] = "DC=example,DC=com"
+            app.views.directory.values["search_base_dn"] = "DC=example,DC=com"
             app.search_rows = None
             assert not await app.refresh_directory_search_scope("alice")
             app.search_rows = [directory_row()]
             app.search_text = "bob"
-            app.view_mode = "directory"
+            app.views.mode = "directory"
             assert not await app.refresh_directory_search_scope("alice")
             app.search_text = "alice"
             assert await app.refresh_directory_search_scope("alice")
@@ -1104,9 +1108,9 @@ def test_view_inline_search_scope_edges() -> None:
             app.query_one("#zone", Input).value = ""
             assert not await app.refresh_dns_search_scope("www")
             app.query_one("#zone", Input).value = "example.com"
-            app._last_dns_search_zone = "example.com"
+            app.views.dns.last_search_zone = "example.com"
             assert not await app.refresh_dns_search_scope("www")
-            app._last_dns_search_zone = ""
+            app.views.dns.last_search_zone = ""
             app.samba_result = (1, "bad")
             assert not await app.refresh_dns_search_scope("www")
             app.samba_result = (
@@ -1114,17 +1118,17 @@ def test_view_inline_search_scope_edges() -> None:
                 "Name=www, Records=1, Children=0\n  A: 192.0.2.10 (flags=f0, serial=1, ttl=1)",
             )
             app.search_text = "other"
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             assert not await app.refresh_dns_search_scope("www")
             app.search_text = "www"
             assert await app.refresh_dns_search_scope("www")
 
             app.search_text = "x"
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             refresh_scope = cast(Any, app.refresh_inline_search_scope).__wrapped__
             await refresh_scope(app, "no", "dns")
             await refresh_scope(app, "x", "dns")
-            app.view_mode = "directory"
+            app.views.mode = "directory"
             await refresh_scope(app, "x", "directory")
 
     asyncio.run(run_app())
@@ -1212,7 +1216,7 @@ def test_ldap_action_edges() -> None:
             app.client.error = ""
             assert not await app.run_directory_search({**values, "kind": "bad"})
             assert await app.run_directory_search(values, default_kind="users")
-            assert app.current_directory_max_rows == 1
+            assert app.views.directory.max_rows == 1
 
             app.forms = [None]
             await app.open_ldap_search()
@@ -1223,16 +1227,16 @@ def test_ldap_action_edges() -> None:
             app.forms = [values]
             await app.action_ldap_search_kind.__wrapped__(app, "computers")
 
-            app.current_directory_values = {}
+            app.views.directory.values = {}
             assert not await app.refresh_current_directory_search()
             assert not await app.load_more_directory()
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             assert not await app.load_more_current_view()
-            app.view_mode = "unknown"
+            app.views.mode = "unknown"
             assert not await app.load_more_current_view()
-            app.view_mode = "directory"
-            app.current_directory_values = values
-            app.current_directory_max_rows = 5000
+            app.views.mode = "directory"
+            app.views.directory.values = values
+            app.views.directory.max_rows = 5000
             assert not await app.load_more_directory()
             await app.action_load_more_directory.__wrapped__(app)
 
@@ -1291,7 +1295,7 @@ def test_ldap_action_edges() -> None:
             }
             assert app.ldap_add_error({"kind": "bad"})
             assert app.ldap_add_error({"kind": "user", "parent_dn": ""})
-            app.current_directory_values = {
+            app.views.directory.values = {
                 "base_dn": "DC=example,DC=com",
                 "search_base_dn": "OU=Sales,DC=example,DC=com",
             }
@@ -1302,7 +1306,7 @@ def test_ldap_action_edges() -> None:
                     "name": "Bob",
                 }
             )
-            app.current_directory_values = {
+            app.views.directory.values = {
                 "base_dn": "DC=example,DC=com",
                 "search_base_dn": "",
             }
@@ -1312,7 +1316,7 @@ def test_ldap_action_edges() -> None:
             )
             assert app.ldap_add_error(add_values) is None
             assert "Type: user" in app.ldap_add_preview(add_values)
-            app.current_directory_values = values
+            app.views.directory.values = values
             app.forms = [None]
             await app.add_ldap_entry()
             app.forms = [add_values]
@@ -1410,19 +1414,19 @@ def test_smart_action_edges() -> None:
             fields = app.smart_view_fields(full)
             assert any(field[1] == "base_dn" for field in fields)
             assert app.dns_smart_rows("missing", {}) == []
-            app.view_mode = "dns"
+            app.views.mode = "dns"
             assert app.selected_smart_row() is None
-            app.current_smart_view_id = "missing"
+            app.views.smart.view_id = "missing"
             await app.refresh_current_smart_view()
-            app.current_smart_view_id = FULL_HEALTH_VIEW_ID
-            app.current_smart_values = {}
+            app.views.smart.view_id = FULL_HEALTH_VIEW_ID
+            app.views.smart.values = {}
             await app.refresh_current_smart_view()
-            app.current_smart_values = {"max_rows": "5", "base_dn": "DC=example,DC=com"}
+            app.views.smart.values = {"max_rows": "5", "base_dn": "DC=example,DC=com"}
             await app.refresh_current_smart_view()
             assert app.loaded_full[-1]
-            app.current_smart_view_id = "ldap_inactive_users"
+            app.views.smart.view_id = "ldap_inactive_users"
             await app.refresh_current_smart_view()
-            app.current_smart_view_id = "dns_duplicates"
+            app.views.smart.view_id = "dns_duplicates"
             app.records_result = None
             await app.refresh_current_smart_view()
 
@@ -1440,7 +1444,7 @@ def test_smart_action_edges() -> None:
             app.forms = [{"max_rows": "5"}]
             app.records_result = {"example.com": [row(), row()]}
             await app.run_smart_view("dns_duplicates")
-            assert app.view_mode == "smart"
+            assert app.views.mode == "smart"
             app.forms = [
                 {
                     "max_rows": "5",

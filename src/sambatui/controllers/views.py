@@ -3,30 +3,23 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 
-from textual.coordinate import Coordinate
 from rich.text import Text
-from textual.widgets import (
-    DataTable,
-    Input,
-    Label,
-    Static,
-    TabbedContent,
-)
+from textual.widgets import DataTable, Input, Label, Static, TabbedContent
 
+from ..app_constants import (
+    DEFAULT_LDAP_COMPATIBILITY,
+    DEFAULT_LDAP_ENCRYPTION,
+    DIRECTORY_SORT_KEYS,
+    LDAP_DEFAULT_MAX_ROWS,
+    RECORD_SORT_KEYS,
+)
+from ..core.models import DnsRow
+from ..core.view_state import ViewMode
 from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
     active_ldap_sidebar_item,
     ldap_sidebar_items,
-)
-from ..core.models import DnsRow
-from ..smart_views import (
-    SmartViewRow,
-    directory_object_name,
-    ldap_delete_candidate_users,
-    ldap_inactive_users,
-    ldap_stale_computers,
-    ldap_users_without_groups,
 )
 from ..smart_view_catalog import (
     FULL_HEALTH_VIEW_ID,
@@ -35,6 +28,14 @@ from ..smart_view_catalog import (
     SmartViewOptions,
     SmartViewSource,
     smart_views_for_source,
+)
+from ..smart_views import (
+    SmartViewRow,
+    directory_object_name,
+    ldap_delete_candidate_users,
+    ldap_inactive_users,
+    ldap_stale_computers,
+    ldap_users_without_groups,
 )
 from ..ui.details import (
     details_empty_text,
@@ -58,26 +59,25 @@ from ..ui.tables import (
     smart_result_values,
     smart_search_values,
 )
-from ..app_constants import (
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
-    DIRECTORY_SORT_KEYS,
-    LDAP_DEFAULT_MAX_ROWS,
-    RECORD_SORT_KEYS,
-)
-from .view_data import AppViewDataMixin
 from .helpers import (
     DNS_SMART_ROW_BUILDERS,
     SMART_SORT_KEYS,
     TableRow,
     directory_sort_label,
-    next_sort_state,
     smart_sort_label,
     sort_direction,
 )
+from .selection import AppSelectionMixin
+from .view_data import AppViewDataMixin
+
+RESULT_COLUMNS = {
+    ViewMode.DNS: DNS_COLUMNS,
+    ViewMode.DIRECTORY: DIRECTORY_COLUMNS,
+    ViewMode.SMART: SMART_COLUMNS,
+}
 
 
-class AppViewsMixin(AppViewDataMixin):
+class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
     def populate_sidebar_table(
         self, table_id: str, items: Sequence[SidebarItem]
     ) -> None:
@@ -115,25 +115,22 @@ class AppViewsMixin(AppViewDataMixin):
         self.select_smart_view_cursor()
 
     def populate_finding_sidebar(self, table_id: str, source: str) -> None:
-        views = list(smart_views_for_source(source))
-        items = [
-            SidebarItem(
-                view.label.removeprefix(f"{source} "), view.view_id, "smart_view"
-            )
-            for view in views
-        ]
-        table = self.query_one(f"#{table_id}", DataTable)
-        self.sidebar_items[table_id] = items
-        table.clear()
-        for item in items:
-            table.add_row(item.label)
+        self.populate_sidebar_table(
+            table_id,
+            [
+                SidebarItem(
+                    view.label.removeprefix(f"{source} "), view.view_id, "smart_view"
+                )
+                for view in smart_views_for_source(source)
+            ],
+        )
 
     def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
         return ldap_sidebar_items(rows, self.ldap_base_default())
 
     def active_ldap_sidebar_item(self) -> SidebarItem | None:
         return active_ldap_sidebar_item(
-            self.current_directory_values, self.ldap_base_default()
+            self.views.directory.values, self.ldap_base_default()
         )
 
     def select_ldap_sidebar_cursor(self) -> None:
@@ -150,12 +147,12 @@ class AppViewsMixin(AppViewDataMixin):
             self.select_sidebar_cursor("zones", SidebarItem("", zone, "dns_zone"))
 
     def select_smart_view_cursor(self) -> None:
-        if not self.current_smart_view_id:
-            return
-        for table_id in ("dns_findings", "ldap_findings"):
-            self.select_sidebar_cursor(
-                table_id, SidebarItem("", self.current_smart_view_id, "smart_view")
-            )
+        view_id = self.views.smart.view_id
+        if view_id:
+            for table_id in ("dns_findings", "ldap_findings"):
+                self.select_sidebar_cursor(
+                    table_id, SidebarItem("", view_id, "smart_view")
+                )
 
     async def restore_active_zone_records(self) -> bool:
         zone = self.val("zone")
@@ -165,16 +162,17 @@ class AppViewsMixin(AppViewDataMixin):
         await self.activate_zone(zone, save=False)
         return True
 
-    def records_title(self) -> str:
+    def dns_title(self) -> str:
         zone = self.val("zone")
+        return f"Records — {zone}" if zone else "Records"
+
+    def records_title(self) -> str:
         suffix = self.active_smart_filter_suffix()
-        base = f"Records — {zone}" if zone else "Records"
+        base = self.dns_title()
         return f"{base} {suffix}" if suffix else base
 
     def active_smart_filter_suffix(self) -> str:
-        if not self.current_smart_view_id:
-            return ""
-        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         if view is None or view.view_id == FULL_HEALTH_VIEW_ID:
             return ""
         label = view.label.removeprefix(f"{view.source_label} ")
@@ -252,16 +250,17 @@ class AppViewsMixin(AppViewDataMixin):
         table.add_columns(*columns)
         self.records_columns = columns
 
+    def activate_results_view(self, mode: ViewMode, title: str) -> None:
+        self.views.activate(mode)
+        self.set_records_columns(RESULT_COLUMNS[mode])
+        self.query_one("#records_title", Label).update(title)
+
     def populate_records(self, rows: list[DnsRow]) -> None:
-        self.current_smart_view_id = ""
-        self.current_smart_values = {}
-        self.view_mode = "dns"
-        self.set_records_columns(DNS_COLUMNS)
-        self.update_records_title()
-        self.record_rows = self.sorted_records(rows)
+        self.activate_results_view(ViewMode.DNS, self.dns_title())
+        self.views.dns.rows = self.sorted_records(rows)
         self.refresh_record_view()
         self.set_status(
-            f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.sort_field}"
+            f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.views.dns.sort_field}"
         )
 
     def remember_ldap_structure_rows(self, rows: Sequence[DirectoryRow]) -> None:
@@ -270,120 +269,26 @@ class AppViewsMixin(AppViewDataMixin):
             by_dn.setdefault(row.dn.casefold(), row)
         self.ldap_structure_rows = list(by_dn.values())
 
-    def directory_title(self) -> str:
-        suffix = self.active_smart_filter_suffix()
-        return f"Directory (LDAP) {suffix}" if suffix else "Directory (LDAP)"
-
     def populate_directory(self, rows: list[DirectoryRow]) -> None:
-        self.current_smart_view_id = ""
-        self.current_smart_values = {}
-        self.view_mode = "directory"
-        self.set_records_columns(DIRECTORY_COLUMNS)
-        self.query_one("#records_title", Label).update(self.directory_title())
-        self.directory_rows = self.sorted_directory(rows)
+        self.activate_results_view(ViewMode.DIRECTORY, "Directory (LDAP)")
+        self.views.directory.rows = self.sorted_directory(rows)
         self.remember_ldap_structure_rows(rows)
         self.populate_ldap_structure(self.ldap_structure_rows)
         self.refresh_directory_view()
         self.set_status(f"Loaded {len(rows)} LDAP entries")
 
     def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
-        self.view_mode = "smart"
-        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
+        self.activate_results_view(ViewMode.SMART, title)
+        view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         source = view.source.sidebar_source if view is not None else None
         tab_id = "ldap_tab" if source is SmartViewSource.LDAP else "dns_tab"
         with suppress(Exception):
             self.query_one("#side_tabs", TabbedContent).active = tab_id
             self.refresh_key_hints()
-        self.set_records_columns(SMART_COLUMNS)
-        self.query_one("#records_title", Label).update(title)
-        self.smart_view_rows = self.sorted_smart_view(rows)
+        self.views.smart.rows = self.sorted_smart_view(rows)
         self.select_smart_view_cursor()
         self.refresh_smart_view()
         self.set_status(f"Loaded {len(rows)} smart-view findings")
-
-    def reset_render_state(self) -> None:
-        self.selected_record_rows.clear()
-        self.selected_directory_rows.clear()
-        self.selected_smart_rows.clear()
-        self.selection_anchor = None
-        self.directory_selection_anchor = None
-        self.smart_selection_anchor = None
-        self.visual_selecting = False
-        self.refresh_selection_indicator()
-
-    def selection_count_label(self) -> str:
-        if self.view_mode == "directory":
-            count = len(self.selected_directory_rows)
-            label = "LDAP entry" if count == 1 else "LDAP entries"
-            return f"{count} {label}"
-        if self.view_mode == "smart":
-            count = len(self.selected_smart_rows)
-            label = "smart finding" if count == 1 else "smart findings"
-            return f"{count} {label}"
-        count = len(self.selected_record_rows)
-        return f"{count} {'record' if count == 1 else 'records'}"
-
-    def selection_status_text(self) -> str:
-        return f"{self.selection_count_label()} selected · Space toggles · Esc clears"
-
-    def refresh_selection_indicator(self) -> None:
-        with suppress(Exception):
-            indicator = self.query_one("#selection_state", Static)
-            count = len(self.selected_rows_for_current_view())
-            indicator.display = bool(count or self.visual_selecting)
-            mode = "VISUAL · " if self.visual_selecting else ""
-            indicator.update(f"{mode}{count} selected")
-
-    def selected_rows_for_current_view(self) -> set[int]:
-        if self.view_mode == "directory":
-            return self.selected_directory_rows
-        if self.view_mode == "smart":
-            return self.selected_smart_rows
-        return self.selected_record_rows
-
-    def current_selection_anchor(self) -> int | None:
-        if self.view_mode == "directory":
-            return self.directory_selection_anchor
-        if self.view_mode == "smart":
-            return self.smart_selection_anchor
-        return self.selection_anchor
-
-    def set_current_selection_anchor(self, row_index: int | None) -> None:
-        if self.view_mode == "directory":
-            self.directory_selection_anchor = row_index
-        elif self.view_mode == "smart":
-            self.smart_selection_anchor = row_index
-        else:
-            self.selection_anchor = row_index
-
-    def set_current_row_selected(self, row_index: int, selected: bool) -> None:
-        if self.view_mode == "directory":
-            self.set_directory_selected(row_index, selected)
-        elif self.view_mode == "smart":
-            self.set_smart_selected(row_index, selected)
-        else:
-            self.set_record_selected(row_index, selected)
-
-    def clear_current_selection(self) -> None:
-        if self.view_mode == "directory":
-            self.clear_directory_selection()
-        elif self.view_mode == "smart":
-            self.clear_smart_selection()
-        elif self.view_mode == "dns":
-            self.clear_record_selection()
-        else:
-            self.visual_selecting = False
-            self.selection_anchor = None
-            self.directory_selection_anchor = None
-            self.smart_selection_anchor = None
-
-    def select_current_range(self, start: int, end: int) -> None:
-        if self.view_mode == "directory":
-            self.select_directory_range(start, end)
-        elif self.view_mode == "smart":
-            self.select_smart_range(start, end)
-        else:
-            self.select_record_range(start, end)
 
     def smart_options_for_passive_findings(self) -> tuple[int, int, int]:
         options = SmartViewOptions.from_values(
@@ -524,7 +429,7 @@ class AppViewsMixin(AppViewDataMixin):
         self.render_result_rows(rows, "smart", smart_result_values)
 
     def details_empty_text(self) -> str:
-        return details_empty_text(self.empty_state_text(self.view_mode))
+        return details_empty_text(self.empty_state_text(self.views.mode))
 
     def records_cursor_row(self) -> int:
         with suppress(Exception):
@@ -557,16 +462,16 @@ class AppViewsMixin(AppViewDataMixin):
         return self.details_empty_text() if row is None else smart_details_text(row)
 
     def current_details_text(self) -> str:
-        row_index = self.records_cursor_row()
-        match self.view_mode:
-            case "dns":
-                return self.dns_details_text(row_index)
-            case "directory":
-                return self.directory_details_text(row_index)
-            case "smart":
-                return self.smart_details_text(row_index)
-            case _:
-                return self.details_empty_text()
+        getter = {
+            ViewMode.DNS: self.dns_details_text,
+            ViewMode.DIRECTORY: self.directory_details_text,
+            ViewMode.SMART: self.smart_details_text,
+        }.get(self.views.mode)
+        return (
+            self.details_empty_text()
+            if getter is None
+            else getter(self.records_cursor_row())
+        )
 
     def update_details_pane(self) -> None:
         with suppress(Exception):
@@ -594,13 +499,23 @@ class AppViewsMixin(AppViewDataMixin):
         return [row for row in rows if self.matches_search(search_values(row))]
 
     def visible_records(self) -> list[DnsRow]:
-        return self.visible_rows(self.record_rows, dns_search_values)
+        return self.visible_rows(self.views.dns.rows, dns_search_values)
 
     def visible_directory(self) -> list[DirectoryRow]:
-        return self.visible_rows(self.directory_rows, directory_search_values)
+        return self.visible_rows(self.views.directory.rows, directory_search_values)
 
     def visible_smart_view(self) -> list[SmartViewRow]:
-        return self.visible_rows(self.smart_view_rows, smart_search_values)
+        return self.visible_rows(self.views.smart.rows, smart_search_values)
+
+    def visible_rows_for_mode(
+        self, mode: ViewMode | str
+    ) -> list[DnsRow] | list[DirectoryRow] | list[SmartViewRow]:
+        getter = {
+            ViewMode.DNS: self.visible_records,
+            ViewMode.DIRECTORY: self.visible_directory,
+            ViewMode.SMART: self.visible_smart_view,
+        }.get(mode)
+        return [] if getter is None else getter()
 
     def set_visible_status(
         self, shown: int, total: int, label: str, view_mode: str
@@ -614,72 +529,61 @@ class AppViewsMixin(AppViewDataMixin):
     def refresh_record_view(self) -> None:
         rows = self.visible_records()
         self.render_records(rows)
-        self.set_visible_status(len(rows), len(self.record_rows), "records", "dns")
+        self.set_visible_status(len(rows), len(self.views.dns.rows), "records", "dns")
 
     def refresh_directory_view(self) -> None:
         rows = self.visible_directory()
         self.render_directory(rows)
         self.set_visible_status(
-            len(rows), len(self.directory_rows), "LDAP entries", "directory"
+            len(rows), len(self.views.directory.rows), "LDAP entries", "directory"
         )
 
     def refresh_smart_view(self) -> None:
         rows = self.visible_smart_view()
         self.render_smart_view(rows)
         self.set_visible_status(
-            len(rows), len(self.smart_view_rows), "smart-view findings", "smart"
+            len(rows), len(self.views.smart.rows), "smart-view findings", "smart"
         )
 
     def clear_current_smart_view(self) -> None:
-        view = SMART_VIEW_BY_ID.get(self.current_smart_view_id)
-        self.current_smart_view_id = ""
-        self.current_smart_values = {}
-        self.smart_view_rows = []
-        self.current_smart_sort_field = ""
-        self.current_smart_sort_reverse = False
+        view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         if view is not None and view.source is SmartViewSource.LDAP:
-            self.view_mode = "directory"
-            self.set_records_columns(DIRECTORY_COLUMNS)
-            self.query_one("#records_title", Label).update(self.directory_title())
-            self.refresh_directory_view()
+            self.activate_results_view(ViewMode.DIRECTORY, "Directory (LDAP)")
         else:
-            self.view_mode = "dns"
-            self.set_records_columns(DNS_COLUMNS)
-            self.update_records_title()
-            self.refresh_record_view()
+            self.activate_results_view(ViewMode.DNS, self.dns_title())
+        self.refresh_current_view()
         self.set_status("Finding filter cleared")
 
     def refresh_current_view(self) -> None:
-        match self.view_mode:
-            case "dns":
-                self.refresh_record_view()
-            case "directory":
-                self.refresh_directory_view()
-            case "smart":
-                self.refresh_smart_view()
-            case _:
-                self.set_status(self.empty_state_status(self.view_mode))
+        refresh = {
+            ViewMode.DNS: self.refresh_record_view,
+            ViewMode.DIRECTORY: self.refresh_directory_view,
+            ViewMode.SMART: self.refresh_smart_view,
+        }.get(self.views.mode)
+        if refresh is None:
+            self.set_status(self.empty_state_status(self.views.mode))
+        else:
+            refresh()
 
     def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
+        state = self.views.dns
         return sorted(
-            rows,
-            key=RECORD_SORT_KEYS[self.sort_field],
-            reverse=self.sort_reverse,
+            rows, key=RECORD_SORT_KEYS[state.sort_field], reverse=state.sort_reverse
         )
 
     def sorted_directory(self, rows: list[DirectoryRow]) -> list[DirectoryRow]:
-        if not self.directory_sort_field:
+        state = self.views.directory
+        if not state.sort_field:
             return rows
         return sorted(
-            rows,
-            key=DIRECTORY_SORT_KEYS[self.directory_sort_field],
-            reverse=self.directory_sort_reverse,
+            rows, key=DIRECTORY_SORT_KEYS[state.sort_field], reverse=state.sort_reverse
         )
 
     def smart_sort_state(self) -> tuple[str, bool]:
-        if self.current_smart_sort_field:
-            return self.current_smart_sort_field, self.current_smart_sort_reverse
-        return SMART_DEFAULT_SORTS.get(self.current_smart_view_id, ("", False))
+        state = self.views.smart
+        if state.sort_field:
+            return state.sort_field, state.sort_reverse
+        return SMART_DEFAULT_SORTS.get(state.view_id, ("", False))
 
     def sorted_smart_view(self, rows: list[SmartViewRow]) -> list[SmartViewRow]:
         field, reverse = self.smart_sort_state()
@@ -690,161 +594,45 @@ class AppViewsMixin(AppViewDataMixin):
     def sort_smart_view(self, field: str) -> None:
         if field not in SMART_SORT_KEYS:
             return
-        self.current_smart_sort_field, self.current_smart_sort_reverse = (
-            next_sort_state(
-                self.current_smart_sort_field, self.current_smart_sort_reverse, field
-            )
-        )
-        self.smart_view_rows = self.sorted_smart_view(self.smart_view_rows)
+        state = self.views.smart
+        state.sort_by(field)
+        state.rows = self.sorted_smart_view(state.rows)
         self.refresh_smart_view()
-        direction = sort_direction(self.current_smart_sort_reverse)
+        direction = sort_direction(state.sort_reverse)
         self.set_status(f"Sorted smart view by {smart_sort_label(field)} ({direction})")
 
     def sort_directory(self, field: str) -> None:
         if field not in DIRECTORY_SORT_KEYS:
             return
-        self.directory_sort_field, self.directory_sort_reverse = next_sort_state(
-            self.directory_sort_field, self.directory_sort_reverse, field
-        )
-        self.directory_rows = self.sorted_directory(self.directory_rows)
+        state = self.views.directory
+        state.sort_by(field)
+        state.rows = self.sorted_directory(state.rows)
         self.refresh_directory_view()
-        direction = sort_direction(self.directory_sort_reverse)
+        direction = sort_direction(state.sort_reverse)
         self.set_status(
             f"Sorted LDAP by {directory_sort_label(field)} ({direction}); selection cleared"
         )
 
     def sort_records(self, field: str) -> None:
-        match self.view_mode:
+        match self.views.mode:
             case "dns":
-                self.sort_field, self.sort_reverse = next_sort_state(
-                    self.sort_field, self.sort_reverse, field
-                )
-                self.record_rows = self.sorted_records(self.record_rows)
+                if field not in RECORD_SORT_KEYS:
+                    return
+                state = self.views.dns
+                state.sort_by(field)
+                state.rows = self.sorted_records(state.rows)
                 self.refresh_record_view()
-                direction = sort_direction(self.sort_reverse)
+                direction = sort_direction(state.sort_reverse)
                 self.set_status(f"Sorted by {field} ({direction}); selection cleared")
             case "directory":
                 self.sort_directory(field)
             case "smart":
                 self.sort_smart_view(field)
             case _:
-                self.set_status(self.empty_state_status(self.view_mode))
-
-    def set_selection_state(
-        self, row_index: int, selected: bool, selected_rows: set[int]
-    ) -> None:
-        table = self.query_one("#records", DataTable)
-        if not 0 <= row_index < table.row_count:
-            return
-        if selected:
-            selected_rows.add(row_index)
-        else:
-            selected_rows.discard(row_index)
-        table.update_cell_at(Coordinate(row_index, 0), "✓" if selected else "")
-        table.refresh_row(row_index)
-        self.refresh_selection_indicator()
-
-    def clear_selection_state(
-        self,
-        selected_rows: set[int],
-        clear_visible_row: Callable[[int], None],
-        *,
-        current_view: bool,
-    ) -> None:
-        if current_view:
-            for row_index in list(selected_rows):
-                clear_visible_row(row_index)
-        else:
-            selected_rows.clear()
-        self.visual_selecting = False
-        self.refresh_selection_indicator()
-
-    def select_range(
-        self,
-        start: int,
-        end: int,
-        set_selected: Callable[[int], None],
-        clear_selection: Callable[[], None],
-        *,
-        clear: bool = True,
-    ) -> None:
-        table = self.query_one("#records", DataTable)
-        if not table.row_count:
-            return
-        start = max(0, min(start, table.row_count - 1))
-        end = max(0, min(end, table.row_count - 1))
-        if clear:
-            clear_selection()
-        low, high = sorted((start, end))
-        for row_index in range(low, high + 1):
-            set_selected(row_index)
-        self.refresh_selection_indicator()
-        self.set_status(self.selection_status_text())
-
-    def set_record_selected(self, row_index: int, selected: bool) -> None:
-        self.set_selection_state(row_index, selected, self.selected_record_rows)
-
-    def clear_record_selection(self) -> None:
-        self.clear_selection_state(
-            self.selected_record_rows,
-            lambda row_index: self.set_record_selected(row_index, False),
-            current_view=self.view_mode == "dns",
-        )
-        self.selection_anchor = None
-
-    def set_directory_selected(self, row_index: int, selected: bool) -> None:
-        self.set_selection_state(row_index, selected, self.selected_directory_rows)
-
-    def clear_directory_selection(self) -> None:
-        self.clear_selection_state(
-            self.selected_directory_rows,
-            lambda row_index: self.set_directory_selected(row_index, False),
-            current_view=self.view_mode == "directory",
-        )
-        self.directory_selection_anchor = None
-
-    def set_smart_selected(self, row_index: int, selected: bool) -> None:
-        self.set_selection_state(row_index, selected, self.selected_smart_rows)
-
-    def clear_smart_selection(self) -> None:
-        self.clear_selection_state(
-            self.selected_smart_rows,
-            lambda row_index: self.set_smart_selected(row_index, False),
-            current_view=self.view_mode == "smart",
-        )
-        self.smart_selection_anchor = None
-
-    def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
-        self.select_range(
-            start,
-            end,
-            lambda row_index: self.set_record_selected(row_index, True),
-            self.clear_record_selection,
-            clear=clear,
-        )
-
-    def select_directory_range(
-        self, start: int, end: int, *, clear: bool = True
-    ) -> None:
-        self.select_range(
-            start,
-            end,
-            lambda row_index: self.set_directory_selected(row_index, True),
-            self.clear_directory_selection,
-            clear=clear,
-        )
-
-    def select_smart_range(self, start: int, end: int, *, clear: bool = True) -> None:
-        self.select_range(
-            start,
-            end,
-            lambda row_index: self.set_smart_selected(row_index, True),
-            self.clear_smart_selection,
-            clear=clear,
-        )
+                self.set_status(self.empty_state_status(self.views.mode))
 
     def row_to_record(self, row_index: int) -> dict[str, str] | None:
-        if self.view_mode != "dns":
+        if self.views.mode != "dns":
             return None
         row = self.visible_row_at(self.visible_records(), row_index)
         if row is None:
@@ -857,8 +645,8 @@ class AppViewsMixin(AppViewDataMixin):
         }
 
     def selected_records(self) -> list[dict[str, str]]:
-        row_indices = sorted(self.selected_record_rows) or [
-            self.query_one("#records", DataTable).cursor_row
+        row_indices = sorted(self.views.dns.selected_rows) or [
+            self.records_cursor_row()
         ]
         records = [self.row_to_record(row_index) for row_index in row_indices]
         return [record for record in records if record]

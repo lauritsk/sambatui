@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from textual import work
 
-from ..core.operations import DnsAddOperation, DnsDeleteOperation, DnsUpdateOperation
-from ..dns.record_types import SUPPORTED_DNS_RECORD_TYPES_TEXT
-from ..ui.screens import (
-    FormField,
-)
 from ..app_constants import (
     DEFAULT_AUTO_PTR,
     GUIDED_RECORD_TYPE_FIELDS,
     GUIDED_RECORD_TYPES,
     GUIDED_RECORD_VALUE_FIELDS,
+)
+from ..core.operations import DnsAddOperation, DnsDeleteOperation, DnsUpdateOperation
+from ..dns.record_types import SUPPORTED_DNS_RECORD_TYPES_TEXT
+from ..ui.screens import (
+    FormField,
 )
 from .base import AppControllerBase
 
@@ -50,10 +50,6 @@ class AppDnsActionsMixin(AppControllerBase):
         ):
             await self.add_ptr(name, value)
 
-    def add_record_args(self, name: str, rtype: str, value: str, ttl: str) -> list[str]:
-        operation = DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
-        return list(operation.command_args)
-
     def record_type_selection_error(self, values: dict[str, str]) -> str | None:
         rtype = (values.get("rtype") or "").upper()
         if rtype in GUIDED_RECORD_TYPES:
@@ -79,7 +75,7 @@ class AppDnsActionsMixin(AppControllerBase):
         return DnsAddOperation.ttl_validation_error(ttl)
 
     def duplicate_record_error(self, name: str, rtype: str, value: str) -> str | None:
-        for row in self.record_rows:
+        for row in self.views.dns.rows:
             if row.name == name and row.rtype == rtype and row.value == value:
                 return "Duplicate record already exists in the loaded zone view."
         return None
@@ -116,9 +112,7 @@ class AppDnsActionsMixin(AppControllerBase):
         client = self.samba_client()
         command = " ".join(
             client.redact_command(
-                client.dns_command(
-                    "add", operation.zone, list(operation.command_args)
-                )
+                client.dns_command("add", operation.zone, list(operation.command_args))
             )
         )
         return (
@@ -175,7 +169,7 @@ class AppDnsActionsMixin(AppControllerBase):
 
     @work
     async def action_add(self) -> None:
-        match self.view_mode:
+        match self.views.mode:
             case "directory":
                 await self.add_ldap_entry()
                 return
@@ -260,14 +254,12 @@ class AppDnsActionsMixin(AppControllerBase):
         self, name: str, rtype: str, old_value: str, value: str
     ) -> None:
         await self.apply_dns_update(
-            DnsUpdateOperation(
-                self.val("zone"), name, rtype, old_value, value
-            )
+            DnsUpdateOperation(self.val("zone"), name, rtype, old_value, value)
         )
 
     @work
     async def action_update(self) -> None:
-        match self.view_mode:
+        match self.views.mode:
             case "directory":
                 await self.update_ldap_entry()
                 return
@@ -311,7 +303,7 @@ class AppDnsActionsMixin(AppControllerBase):
 
     @work
     async def action_delete(self) -> None:
-        match self.view_mode:
+        match self.views.mode:
             case "directory":
                 await self.delete_ldap_entry()
                 return

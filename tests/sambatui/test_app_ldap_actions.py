@@ -3,12 +3,11 @@ from contextlib import suppress
 from typing import Any, cast
 
 from pytest import MonkeyPatch
+from textual.widgets import DataTable, Input
 
 from sambatui.app import (
     SambatuiApp,
 )
-from textual.widgets import DataTable, Input
-
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.ui.screens import (
@@ -165,7 +164,7 @@ def test_add_ldap_entry_creates_entry_and_refreshes() -> None:
     async def run_app() -> None:
         app = LdapAddApp()
         async with app.run_test():
-            app.current_directory_values = {"base_dn": "DC=example,DC=com"}
+            app.views.directory.values = {"base_dn": "DC=example,DC=com"}
             await app.add_ldap_entry()
 
             assert app.added == (
@@ -187,7 +186,7 @@ def test_add_ldap_entry_creates_entry_and_refreshes() -> None:
 
 def test_ldap_add_error_rejects_parent_outside_current_search_base() -> None:
     app = SambatuiApp()
-    app.current_directory_values = {
+    app.views.directory.values = {
         "base_dn": "DC=example,DC=com",
         "search_base_dn": "OU=Users,DC=example,DC=com",
     }
@@ -336,7 +335,7 @@ def test_delete_ldap_entry_bulk_deletes_selected_entries_after_preview() -> None
             assert "DN: CN=Alice,DC=example,DC=com" in app.confirm_message
             assert "DN: CN=Ops,DC=example,DC=com" in app.confirm_message
             assert "recursive delete is not performed" in app.confirm_message
-            assert not app.selected_directory_rows
+            assert not app.views.directory.selected_rows
             assert app.refreshed
 
     asyncio.run(run_app())
@@ -445,7 +444,7 @@ def test_selected_directory_entries_rejects_stale_selection(
                     )
                 ]
             )
-            app.selected_directory_rows.add(5)
+            app.views.directory.selected_rows.add(5)
 
             assert app.selected_directory_entries() == []
             assert app.notifications == [
@@ -597,7 +596,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert app.search_bases == ["DC=example,DC=com"]
 
             records = app.query_one("#records", DataTable)
-            assert app.view_mode == "directory"
+            assert app.views.mode == "directory"
             assert str(records.get_row_at(0)[2]) == "Ops"
             assert structure.row_count == 3
             assert str(structure.get_row_at(1)[0]) == "  CN=Users"

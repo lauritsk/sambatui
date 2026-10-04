@@ -2,13 +2,12 @@ import asyncio
 from typing import cast
 
 from rich.text import Text
+from textual.widgets import DataTable, Input, Static
 
 from sambatui.app import (
     DnsRow,
     SambatuiApp,
 )
-from textual.widgets import DataTable, Input, Static
-
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_view_catalog import SmartViewOptions
@@ -158,7 +157,7 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
 
             records = app.query_one("#records", DataTable)
             assert str(records.get_row_at(0)[3]) == "Full health dashboard"
-            assert "check(s) failed" in app.smart_view_rows[0].evidence
+            assert "check(s) failed" in app.views.smart.rows[0].evidence
             findings = [
                 str(records.get_row_at(index)[3]) for index in range(records.row_count)
             ]
@@ -217,8 +216,8 @@ def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
         app = FixApp()
         async with app.run_test():
             app.zones = ["example.com", "2.0.192.in-addr.arpa"]
-            app.current_smart_view_id = "dns_a_without_ptr"
-            app.current_smart_max_rows = 500
+            app.views.smart.view_id = "dns_a_without_ptr"
+            app.views.smart.max_rows = 500
             row = SmartViewRow(
                 severity="medium",
                 object="host.example.com A 192.0.2.10",
@@ -248,7 +247,7 @@ def test_smart_fix_adds_ptr_and_refreshes_findings() -> None:
                 "2.0.192.in-addr.arpa",
                 ["@", "ALL"],
             ) in app.commands
-            assert app.smart_view_rows == []
+            assert app.views.smart.rows == []
 
     asyncio.run(run_app())
 
@@ -276,7 +275,7 @@ def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
             return cast(LdapDirectoryClient, FakeLdapClient(self.ldap_fixes))
 
         async def refresh_current_smart_view(self) -> None:
-            self.smart_view_rows = []
+            self.views.smart.rows = []
 
     async def run_app() -> None:
         app = LdapFixApp()
@@ -299,7 +298,7 @@ def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
             await app.apply_smart_fix(row)
 
             assert app.ldap_fixes == [("disable", "CN=old,DC=example,DC=com", "514")]
-            assert app.smart_view_rows == []
+            assert app.views.smart.rows == []
 
     asyncio.run(run_app())
 
@@ -534,7 +533,7 @@ def test_smart_view_header_and_key_sort_rows() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.current_smart_view_id = "ldap_inactive_users"
+            app.views.smart.view_id = "ldap_inactive_users"
             app.populate_smart_view(
                 "LDAP inactive enabled users",
                 [
@@ -585,7 +584,7 @@ def test_smart_view_header_and_key_sort_rows() -> None:
             )
 
             app.action_sort_value()
-            assert [row.evidence for row in app.smart_view_rows] == [
+            assert [row.evidence for row in app.views.smart.rows] == [
                 "lastLogonTimestamp 100 days ago",
                 "lastLogonTimestamp 200 days ago",
                 "lastLogonTimestamp 300 days ago",
