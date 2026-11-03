@@ -32,6 +32,7 @@ from ..smart_view_catalog import (
 from ..smart_views import (
     SmartViewRow,
     directory_object_name,
+    dns_duplicate_records,
     ldap_delete_candidate_users,
     ldap_inactive_users,
     ldap_stale_computers,
@@ -60,7 +61,6 @@ from ..ui.tables import (
     smart_search_values,
 )
 from .helpers import (
-    DNS_SMART_ROW_BUILDERS,
     SMART_SORT_KEYS,
     TableRow,
     directory_sort_label,
@@ -304,11 +304,9 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         zone = self.val("zone")
         if not zone:
             return []
-        records_by_zone = {zone: rows}
-        findings: list[SmartViewRow] = []
-        for builder in DNS_SMART_ROW_BUILDERS.values():
-            findings.extend(builder(records_by_zone))
-        return findings
+        # This view only has records from one zone. Forward/reverse checks
+        # require both zones and belong in the explicit DNS finding views.
+        return dns_duplicate_records({zone: rows})
 
     def passive_directory_findings(
         self, rows: Sequence[DirectoryRow]
@@ -635,7 +633,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         if self.views.mode != "dns":
             return None
         row = self.visible_row_at(self.visible_records(), row_index)
-        if row is None:
+        if row is None or row.rtype == "-":
             return None
         return {
             "name": row.name,

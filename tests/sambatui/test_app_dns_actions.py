@@ -33,6 +33,25 @@ DNS_LABEL = st.text(
 DNS_NAME = st.lists(DNS_LABEL, min_size=1, max_size=4).map(".".join)
 
 
+def test_folder_nodes_are_excluded_from_dns_mutation_targets() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            app.populate_records(
+                parse_records(
+                    "Name=folder, Records=0, Children=1\n"
+                    "Name=www, Records=1, Children=0\n"
+                    "  A: 192.0.2.10\n"
+                )
+            )
+            assert app.row_to_record(0) is None
+            assert app.selected_record_for_update() is None
+            app.views.dns.selected_rows = {0, 1}
+            assert [row["name"] for row in app.selected_records()] == ["www"]
+
+    asyncio.run(run_app())
+
+
 @given(st.lists(DNS_NAME, min_size=1, max_size=8))
 def test_parse_zones_deduplicates_zone_names(zones: list[str]) -> None:
     output = "\n".join(
