@@ -1,0 +1,21 @@
+services:
+  app:
+    image: sambatui:dev
+    build:
+      target: development
+    pull_policy: build
+    volumes:
+      - type: bind
+        source: ./src
+        target: /opt/sambatui/src
+        read_only: true
+    develop:
+      watch:
+        - action: rebuild
+          path: ./pyproject.toml
+        - action: rebuild
+          path: ./uv.lock
+        - action: rebuild
+          path: ./Dockerfile
+        - action: rebuild
+          path: ./.dockerignore

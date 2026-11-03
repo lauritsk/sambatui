@@ -1,0 +1,48 @@
+name: sambatui
+
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
+
+x-runtime: &runtime
+  init: true
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=128m
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 10s
+
+services:
+  app:
+    <<: *runtime
+    image: ${SAMBATUI_IMAGE:-sambatui:local}
+    build:
+      <<: *build
+      target: production
+    stdin_open: true
+    tty: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TERM: ${TERM:-xterm-256color}
+    volumes:
+      - type: volume
+        source: preferences
+        target: /home/app/.config/sambatui
+
+  test:
+    <<: *runtime
+    profiles: [test]
+    build:
+      <<: *build
+      target: test
+    environment:
+      HYPOTHESIS_STORAGE_DIRECTORY: /tmp/hypothesis
+    network_mode: none
+
+volumes:
+  preferences:
+    name: ${SAMBATUI_DOCKER_VOLUME:-sambatui-config}

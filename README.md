@@ -25,7 +25,183 @@ records, AD objects, and common DNS/LDAP hygiene findings.
 > `sambatui` can modify Samba AD DNS records and LDAP directory entries. Review
 > command previews and confirmation prompts before applying changes.
 
-## Requirements
+## Docker (recommended)
+
+Docker packages the app, Python 3.14, `samba-tool`, Kerberos/GSSAPI support,
+and DNS utilities together. The host only needs Docker and an interactive
+terminal. The Dockerfile uses the digest-pinned Docker Hardened Python image
+from `ica0022`. Authenticate to DHI before building:
+
+```sh
+docker login dhi.io
+```
+
+The DHI `dev` variant supplies the package manager needed for Samba's OS
+dependencies. Compilers and Python build tools stay in the build/development
+stages. This runtime includes more OS tooling than a minimal DHI Python image;
+it is a custom application image built on DHI, not an unmodified hardened image.
+Update the `PYTHON_IMAGE` tag and digest together when refreshing the base.
+
+From this checkout:
+
+```sh
+docker build -t sambatui:local .
+./scripts/sambatui
+```
+
+Or use `just docker-build` and `just docker-run`. The launcher runs the TUI
+with an attached terminal and removes the container when you quit. The named
+volume `sambatui-config` preserves preferences at
+`/home/app/.config/sambatui`. The image runs as a non-root user (UID 1000).
+No ports need publishing and no privileged container is needed.
+The launcher and Compose run with a read-only root filesystem, writable temporary
+storage, all Linux capabilities dropped, and privilege escalation disabled.
+
+### Docker development and tests
+
+The Dockerfile has `production`, `development`, and `test` targets. Dependencies
+come from `uv.lock` with `--frozen`; BuildKit cache mounts reuse dependency and
+package downloads. Compose follows the base-plus-development-override pattern
+used in `ica0022`:
+
+```sh
+just docker-validate
+just docker-test
+just docker-dev
+```
+
+Without Just:
+
+```sh
+docker compose config --quiet
+docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+docker build --check .
+docker compose --profile test run --build --rm test
+docker compose -f compose.yaml -f compose.dev.yaml run --build --rm app
+```
+
+The test target includes development dependencies and the suite, and runs without
+network access. Pass pytest arguments with `just docker-test -q -k config`.
+The development service bind-mounts `src` read-only into an editable install;
+quit and relaunch to load source changes. Dependencies and Dockerfile changes
+also have Compose Watch rebuild rules. For Watch, use two terminals:
+
+```sh
+# Terminal 1: keep the watcher running.
+docker compose -f compose.yaml -f compose.dev.yaml up --build --watch
+# Terminal 2: attach keyboard input to the TUI.
+docker compose -f compose.yaml -f compose.dev.yaml attach app
+```
+
+Reattach after a rebuild. Compose reads an optional `.env` file (start from
+`.env.example`). Unlike the launcher, it does not automatically forward exported
+application settings; use `just docker-dev -e SAMBATUI_SERVER -e SAMBATUI_AUTH`
+or a local Compose override as needed. Both flows use the same preferences
+volume. Use a current Docker Engine/BuildKit and Compose v2.24+ with Watch and
+optional env-file support. CI validates Compose, checks the Dockerfile, builds
+production, and runs the containerized tests. Configure repository secrets
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` for its DHI registry login.
+
+### Connection settings
+
+Enter your server and credentials in the setup wizard. Exported `SAMBATUI_*`
+variables are forwarded to the container, along with terminal settings and
+`KRB5CCNAME`. Host paths in those variables must refer to files mounted into
+the container. For example:
+
+```sh
+export SAMBATUI_SERVER=dc01.example.com
+export SAMBATUI_DOMAIN=example.com
+export SAMBATUI_USER=administrator@example.com
+export SAMBATUI_AUTH=password
+./scripts/sambatui
+```
+
+Use `SAMBATUI_IMAGE` to select another locally built or published image, and
+`SAMBATUI_DOCKER_VOLUME` to select a different preferences volume. No image
+is published by this repository's build command. The launcher accepts additional
+Docker run options before the image name, for example:
+
+```sh
+./scripts/sambatui --dns 192.0.2.10
+```
+
+The container must resolve your AD names and reach the domain controllers over
+the required DNS, LDAP, Kerberos, and Samba RPC ports. Explicit `--dns` may be
+needed for corporate DNS. Docker Desktop and host VPN combinations may require
+additional routing configuration; verify access from inside the container.
+
+### Private AD certificate authority
+
+For LDAPS/StartTLS with a private CA, build a local derived image that installs
+your CA into the system trust store. Create `Dockerfile.ad` alongside `ad-ca.crt`
+(a PEM certificate):
+
+```dockerfile
+FROM sambatui:local
+USER root
+COPY ad-ca.crt /usr/local/share/ca-certificates/ad-ca.crt
+RUN update-ca-certificates
+USER app
+```
+
+```sh
+docker build -f Dockerfile.ad -t sambatui:ad .
+SAMBATUI_IMAGE=sambatui:ad ./scripts/sambatui
+```
+
+The repository's `.dockerignore` uses an allowlist. Before this derived build,
+create `Dockerfile.ad.dockerignore` with:
+
+```text
+*
+!Dockerfile.ad
+!ad-ca.crt
+```
+
+This makes the CA available in its build context. Keep credentials out of image
+layers.
+
+### Kerberos in Docker
+
+Mount your realm configuration and obtain a ticket inside the container. Store
+the file cache in the preferences volume so it survives container recreation:
+
+```sh
+docker run --rm -it --entrypoint kinit \
+  --mount type=volume,src=sambatui-config,dst=/home/app/.config/sambatui \
+  --mount "type=bind,src=$PWD/krb5.conf,dst=/etc/krb5.conf,readonly" \
+  -e KRB5CCNAME=FILE:/home/app/.config/sambatui/krb5cc \
+  sambatui:local administrator@EXAMPLE.COM
+
+export KRB5CCNAME=FILE:/home/app/.config/sambatui/krb5cc
+export SAMBATUI_KRB5_CCACHE=FILE:/home/app/.config/sambatui/krb5cc
+export SAMBATUI_AUTH=kerberos
+export SAMBATUI_KERBEROS=required
+./scripts/sambatui \
+  --mount "type=bind,src=$PWD/krb5.conf,dst=/etc/krb5.conf,readonly"
+```
+
+Repeat `kinit` when the ticket expires. To remove the cached ticket, use the same
+volume and `KRB5CCNAME` with `--entrypoint kdestroy`. An existing host FILE cache
+can also be bind-mounted if UID 1000 can read it; host KEYRING/KCM caches are not
+automatically accessible in a container. Password files and alternate `smb.conf`
+files can be bind-mounted read-only and selected with the corresponding settings.
+
+### Builds behind a TLS inspection proxy
+
+The Dockerfile accepts an optional BuildKit certificate secret. Pass a PEM CA
+bundle trusted by your proxy; it is mounted only during dependency installation:
+
+```sh
+docker build --secret id=proxy_ca,src=/path/to/proxy-ca-bundle.pem \
+  -t sambatui:local .
+```
+
+Configure Docker's daemon and client proxy settings for your environment. Runtime
+AD CA trust is configured separately as shown above.
+
+## Native installation requirements
 
 - Python 3.14+
 - `samba-tool` in `PATH`
@@ -38,7 +214,7 @@ Useful system packages:
 
 | Distro | Packages |
 | --- | --- |
-| Debian/Ubuntu | `sudo apt install samba-common-bin krb5-user bind9-dnsutils` |
+| Debian/Ubuntu | `sudo apt install samba-common-bin python3-samba krb5-user bind9-dnsutils` |
 | Fedora/RHEL/CentOS | `sudo dnf install samba-common-tools krb5-workstation bind-utils` |
 | Arch Linux | `sudo pacman -S samba krb5 bind` |
 | openSUSE | `sudo zypper install samba krb5-client bind-utils` |

@@ -7,6 +7,15 @@
 !README.md
 !pyproject.toml
 !uv.lock
+!Dockerfile
+!.dockerignore
+!scripts/
+!scripts/sambatui
+!compose.yaml
+!compose.dev.yaml
+!.github/
+!.github/workflows/
+!.github/workflows/ci.yml
 
 !src/
 !src/**/
