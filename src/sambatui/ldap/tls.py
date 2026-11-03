@@ -51,7 +51,11 @@ def _allow_compatibility_tls_versions(context: ssl.SSLContext) -> None:
             context.options &= ~option
 
 
-def ldap_server_tls(config: LdapSearchConfig) -> LdapCompatibilityTls | None:
-    if config.normalized_encryption == "off" or not config.compatibility_enabled:
+def ldap_server_tls(config: LdapSearchConfig) -> Tls | None:
+    if config.normalized_encryption == "off":
         return None
-    return LdapCompatibilityTls()
+    if config.compatibility_enabled:
+        # Explicit legacy opt-in: some AD servers cannot use modern TLS or
+        # present a verifiable certificate. Keep this isolated from normal TLS.
+        return LdapCompatibilityTls()
+    return Tls(validate=ssl.CERT_REQUIRED, version=ssl.PROTOCOL_TLS_CLIENT)

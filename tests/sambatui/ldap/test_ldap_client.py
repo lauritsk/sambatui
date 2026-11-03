@@ -99,6 +99,14 @@ def test_search_config_accepts_kerberos_without_password() -> None:
     )
 
 
+@pytest.mark.parametrize("encryption", ["ldaps", "starttls"])
+def test_normal_ldap_tls_requires_certificate_verification(encryption: str) -> None:
+    tls = ldap_server_tls(LdapSearchConfig(server="dc", encryption=encryption))
+    assert tls is not None
+    assert tls.validate == ssl.CERT_REQUIRED
+    assert tls.version == ssl.PROTOCOL_TLS_CLIENT
+
+
 def test_search_config_accepts_ldap_compatibility_on() -> None:
     config = LdapSearchConfig(
         server="dc01.example.com",

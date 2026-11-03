@@ -178,3 +178,9 @@ domain or current DNS zone.
   cache. Install `sambatui[kerberos]` first.
 - Set `SAMBATUI_LDAP_COMPATIBILITY=on` only for legacy servers that need relaxed
   TLS settings or fail schema probing.
+
+Normal LDAPS and StartTLS connections verify the server certificate using the
+system trust store. Install your AD CA certificate in that trust store when
+using a private CA. Legacy compatibility mode explicitly disables certificate
+verification and permits old TLS versions and weak ciphers; it remains available
+for older AD servers on trusted networks. It is off by default.
