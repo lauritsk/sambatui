@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import ssl
 from typing import Any
 
 import pytest
@@ -290,7 +291,9 @@ def test_ldap_config_validation_and_helpers() -> None:
         ldap_server_tls(LdapSearchConfig("dc", encryption="off", compatibility="on"))
         is None
     )
-    assert ldap_server_tls(LdapSearchConfig("dc", compatibility="off")) is None
+    tls = ldap_server_tls(LdapSearchConfig("dc", compatibility="off"))
+    assert tls is not None
+    assert tls.validate == ssl.CERT_REQUIRED
 
 
 def test_ldap_filter_kwargs_and_entry_mapping() -> None:
