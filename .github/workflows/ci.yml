@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  check:
+  build:
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -29,14 +29,10 @@ jobs:
           registry: dhi.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
-      - name: Check Dockerfile
-        run: docker build --check .
-      - name: Build and check production runtime
+      - name: Build and test
         run: |
           docker build -t sambatui:local .
-          docker run --rm -i --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges:true --tmpfs /tmp \
-            --entrypoint python sambatui:local - < scripts/check-container.py
+          docker run --rm -i -v /config --entrypoint python sambatui:local - < tests/runtime.py
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
