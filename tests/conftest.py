@@ -9,14 +9,12 @@ from pathlib import Path
 import pytest
 from hypothesis import settings
 
-# Never let local connection settings or credentials become test defaults.
 for name in tuple(os.environ):
     if name.startswith("SAMBATUI_"):
         del os.environ[name]
 os.environ["SAMBATUI_AUTH"] = "password"
 
 _TEST_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="sambatui-tests-"))
-os.environ["SAMBATUI_USER_CONFIG"] = str(_TEST_CONFIG_DIR / "config.toml")
 os.environ["SAMBATUI_PASSWORD_FILE"] = str(_TEST_CONFIG_DIR / "password")
 os.environ.pop("SAMBATUI_PASSWORD", None)
 

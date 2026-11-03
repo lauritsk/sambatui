@@ -27,7 +27,7 @@ def _contains_any(*terms: str) -> Callable[[str], bool]:
 ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
     (
         _contains("samba-tool not found"),
-        "install Samba tools or run on a Samba admin host",
+        "check that samba-tool is available in PATH",
     ),
     (
         _contains("enter username"),
@@ -48,7 +48,7 @@ ERROR_ACTION_RULES: tuple[ErrorRule, ...] = (
     ),
     (
         _contains_any("kerberos", "kdc", "krb5"),
-        "run kinit, set krb5 ccache, or switch auth to password",
+        "renew the Kerberos ticket, set krb5 ccache, or switch auth to password",
     ),
     (
         _contains_any("ldap encryption", "starttls", "ldaps"),

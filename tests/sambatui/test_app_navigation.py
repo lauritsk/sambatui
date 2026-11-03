@@ -48,7 +48,7 @@ def test_key_hints_change_by_side_tab(case: tuple[str, str]) -> None:
                 "LDAP bind failed: invalidCredentials",
                 "Action: check credentials, UPN username format, encryption, or Kerberos ticket.",
             ),
-            ("Kerberos ticket expired", "run kinit"),
+            ("Kerberos ticket expired", "renew the Kerberos ticket"),
             ("", ""),
         ]
     )

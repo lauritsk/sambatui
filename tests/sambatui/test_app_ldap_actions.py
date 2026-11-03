@@ -589,7 +589,6 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             app.populate_ldap_structure([])
             structure = app.query_one("#ldap_structure", DataTable)
 
-            # Root is preloaded and acts as the all-entries load/refresh action.
             assert str(structure.get_row_at(0)[0]) == "DC=example,DC=com"
             assert await app.activate_sidebar_selection(structure)
             assert app.searches == [("all", "", 200)]
@@ -602,7 +601,6 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
             assert str(structure.get_row_at(1)[0]) == "  CN=Users"
             assert str(structure.get_row_at(2)[0]) == "  OU=Departments"
 
-            # Discovered structure rows remain actionable; no synthetic Users/Groups rows.
             app.sidebar_cursor_rows.clear()
             structure.move_cursor(row=1)
             assert await app.activate_sidebar_selection(structure)

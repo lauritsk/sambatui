@@ -109,7 +109,6 @@ def test_passive_dns_risk_does_not_infer_missing_records_in_other_zones() -> Non
             app.populate_records([row])
             assert table.get_row_at(0)[1] == ""
 
-            # Zone-local problems must still receive risk markers.
             app.populate_records([row, row])
             assert str(table.get_row_at(0)[1]) == "▌"
 

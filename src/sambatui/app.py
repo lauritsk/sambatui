@@ -129,8 +129,6 @@ class SambatuiApp(
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.initialize_state()
-        # ANSI themes use the terminal's own foreground, background, and palette.
-        # Keep Textual's standard override available for users who prefer a theme.
         requested_theme = os.getenv("SAMBATUI_THEME") or os.getenv("TEXTUAL_THEME")
         self.theme = (
             requested_theme if requested_theme in self.available_themes else "ansi-dark"

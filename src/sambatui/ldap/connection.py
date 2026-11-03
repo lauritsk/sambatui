@@ -144,7 +144,7 @@ def bind_connection(connection: LdapConnection) -> None:
         bound = connection.bind()
     except LDAPPackageUnavailableError as exc:
         raise ValueError(
-            "LDAP Kerberos bind needs optional package. Install sambatui[kerberos]."
+            "LDAP Kerberos support is unavailable in this runtime."
         ) from exc
     except LDAPException as exc:
         raise ValueError(ldap_exception_message(exc, "LDAP bind failed")) from exc

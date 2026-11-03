@@ -9,9 +9,6 @@
 !uv.lock
 !Dockerfile
 !.dockerignore
-!scripts/
-!scripts/sambatui
-!scripts/check-container.py
 !.github/
 !.github/dependabot.yml
 !.github/workflows/

@@ -230,7 +230,7 @@ class ConnectionSettings:
             (
                 "Password file — used at startup and by password load/save commands.",
                 "password_file",
-                "~/.config/sambatui/password",
+                str(DEFAULT_PASSWORD_FILE),
                 self.password_file,
             ),
         ]

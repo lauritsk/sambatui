@@ -92,8 +92,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/6b/fb/9492eb37b5786369b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/c5/abbccc9f3c7efaef68efbb8f2dbcebb610dc6631fd1108556dd2a9d967b4/gssapi-1.12.0-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:fbcf4213d72bde6f836dc96511d7410c4c95e0470ccc690bc7f85e402c9ff5ec", size = 644184, upload-time = "2026-08-26T03:00:23.018Z" },
     { url = "https://files.pythonhosted.org/packages/f3/3d/14bb64c34a1cb1ad6dd86dfdb2d50f2dd9719799edaf5c0a624efbe79a3f/gssapi-1.12.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:ca29e1d31a6edd78d33ec37d0cf7bfde7e259b376051f742816c08380e23e973", size = 676810, upload-time = "2026-08-26T03:00:24.746Z" },
+    { url = "https://files.pythonhosted.org/packages/35/3d/d5f0c7b04c57a1701e664cc50eea88d1c91b876ea7f4b8505aab990210bc/gssapi-1.12.0-cp311-abi3-win32.whl", hash = "sha256:06f3363a5d201cf328e4964e491c37b0777636d67ef19549bbb96792b7293dca", size = 1588670, upload-time = "2026-08-26T03:00:26.438Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/4e/ae027a2e7578a879f476ab0728f32cef86580df05ca56ca1e1918ecb61e8/gssapi-1.12.0-cp311-abi3-win_amd64.whl", hash = "sha256:a953e21f80169bd55fef0d0bf050109ce93d055931558c3b353e8c4e7751f08e", size = 1751663, upload-time = "2026-08-26T03:00:28.267Z" },
     { url = "https://files.pythonhosted.org/packages/12/e2/78321a281815e6e3078f8738539739c6a9f606e2f09f568711ab4bff21cd/gssapi-1.12.0-cp315-cp315t-macosx_10_15_x86_64.whl", hash = "sha256:9d98f9ad2327ab20d7985d0fd413c02c0cce7459ed226952fd078b29c6a2a40b", size = 750982, upload-time = "2026-08-26T03:00:36.208Z" },
     { url = "https://files.pythonhosted.org/packages/47/91/78d098549eea3358e1e8e6a76f254be2e9ac3c6e7117c81edf880e51b9ab/gssapi-1.12.0-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:6e2bf66d0d02e6cafadc9dc944998a9c2edcd553138b9c68b57236bcc827bd15", size = 769098, upload-time = "2026-08-26T03:00:38.419Z" },
+    { url = "https://files.pythonhosted.org/packages/63/a7/370654dd4c0f2400358bd4e68523814932a80503f210dd1426f09fc9d382/gssapi-1.12.0-cp315-cp315t-win32.whl", hash = "sha256:8b6c966d70025e044aa1f67d4e333854aa5e426ac2a75f201f627ede6aacf0c9", size = 1772974, upload-time = "2026-08-26T03:00:39.974Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/eb/d4cc099a600fe07ccf91af52458c910894c87283f259ec8d3a0c63f33bf3/gssapi-1.12.0-cp315-cp315t-win_amd64.whl", hash = "sha256:4f0811ba2df74bb600697d5af5db7e5aecf9361f8081998d7c2cee3f5e59c752", size = 1960691, upload-time = "2026-08-26T03:00:41.737Z" },
 ]
 
 [[package]]
@@ -318,14 +322,9 @@ version = "0.7.2"
 source = { editable = "." }
 dependencies = [
     { name = "dnspython" },
+    { name = "gssapi" },
     { name = "ldap3" },
     { name = "textual" },
-]
-
-[package.optional-dependencies]
-kerberos = [
-    { name = "gssapi", marker = "sys_platform != 'win32'" },
-    { name = "winkerberos", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -339,12 +338,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dnspython", specifier = "==2.9.1" },
-    { name = "gssapi", marker = "sys_platform != 'win32' and extra == 'kerberos'", specifier = "==1.12.0" },
+    { name = "gssapi", specifier = "==1.12.0" },
     { name = "ldap3", specifier = "==2.9.1" },
     { name = "textual", specifier = "==8.2.8" },
-    { name = "winkerberos", marker = "sys_platform == 'win32' and extra == 'kerberos'", specifier = "==0.13.0" },
 ]
-provides-extras = ["kerberos"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -388,9 +385,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3
 wheels = [
     { url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", size = 45571, upload-time = "2026-07-02T08:40:04.659Z" },
 ]
-
-[[package]]
-name = "winkerberos"
-version = "0.13.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ca/6c/455f043bc28694a278125d1fc2ab7cbf0ce0953c97bbe1021f08fd19c7b8/winkerberos-0.13.0.tar.gz", hash = "sha256:f3fbb67346fe8ed697e125724b0699d5c2a15b9a5f9151d25a1be88df8dac427", size = 35677, upload-time = "2025-12-03T14:17:29.882Z" }
