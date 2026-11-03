@@ -1,61 +1,48 @@
 # syntax=docker/dockerfile:1
-# Match the digest-pinned Docker Hardened Python base used in ica0022.
-# Samba requires OS packages, so the shared runtime uses the DHI dev variant.
-ARG PYTHON_IMAGE=dhi.io/python:3.14.7-2-debian13-dev@sha256:42cd56dede69350b250398097287cbf1020d0ead0ad8cb4e179bd3bac1a98634
-FROM ${PYTHON_IMAGE} AS base
+# DHI's dev variant provides apt for Samba's native dependencies.
+ARG UV_IMAGE=dhi.io/uv:0.13.7-debian13-dev@sha256:2585792a493eef2a76aa2910cdf62a99c3c8e9a60aabb95724357d9bfe3f3b90
+FROM ${UV_IMAGE} AS base
 USER root
+WORKDIR /app
+# Samba's post-install script expects Debian's adm group (absent in DHI).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    DEBIAN_FRONTEND=noninteractive apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates samba-common-bin python3-samba krb5-user bind9-dnsutils \
-        libgssapi-krb5-2 passwd
-RUN useradd --create-home --uid 1000 app \
+    apt-get update && apt-get install -y --no-install-recommends passwd \
+    && groupadd --system adm \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates ncurses-base samba-common-bin python3-samba krb5-user bind9-dnsutils \
+        libgssapi-krb5-2 \
+    && useradd --create-home --uid 1000 app \
     && install -d -o app -g app -m 0700 /home/app/.config/sambatui \
-    && samba-tool dns --help >/dev/null \
-    && command -v kinit && klist -V && dig -v
+    && samba-tool dns --help >/dev/null
 ENV HOME=/home/app PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
-FROM base AS build
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+FROM base AS tested
+# uv's Python stays separate from Debian's Samba interpreter.
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    UV_PROJECT_ENVIRONMENT=/app/.venv UV_LINK_MODE=copy \
+    UV_PYTHON_PREFERENCE=only-managed UV_CACHE_DIR=/root/.cache/uv
+RUN --mount=type=bind,target=/source,readonly \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-        gcc libc6-dev libkrb5-dev
-RUN --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
-    python -m venv /opt/uv && /opt/uv/bin/pip install --no-cache-dir uv==0.11.14
-ENV PATH="/opt/uv/bin:$PATH" \
-    UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_CACHE_DIR=/root/.cache/uv
-WORKDIR /opt/sambatui
-COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    uv sync --frozen --no-dev --extra kerberos --no-install-project
-COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    uv sync --frozen --no-dev --extra kerberos --no-editable
+    cp -a /source/. . \
+    && apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libkrb5-dev \
+    && if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi \
+    && uv python install && uv sync --frozen --extra kerberos --no-editable
 
-FROM build AS development
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    uv sync --frozen --extra kerberos
-COPY tests ./tests
-RUN chown -R app:app /opt/sambatui
-ENV PATH="/opt/sambatui/.venv/bin:$PATH" UV_CACHE_DIR=/tmp/uv-cache
-USER app
-ENTRYPOINT ["sambatui"]
-
-FROM development AS test
-ENTRYPOINT ["python", "-m", "pytest"]
-CMD ["-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest"]
+# The release artifact exists only after tests and coverage pass without network.
+RUN --network=none --mount=type=cache,target=/root/.cache/uv \
+    HYPOTHESIS_STORAGE_DIRECTORY=/tmp/hypothesis COVERAGE_FILE=/tmp/.coverage \
+    /app/.venv/bin/python -m pytest \
+        -q -p no:cacheprovider --basetemp=/tmp/pytest \
+        --cov=sambatui --cov-report=term-missing \
+    && uv sync --offline --frozen --no-dev --extra kerberos --no-editable
 
 FROM base AS production
-COPY --from=build /opt/sambatui/.venv /opt/sambatui/.venv
-ENV PATH="/opt/sambatui/.venv/bin:$PATH"
+COPY --from=tested /opt/python /opt/python
+COPY --from=tested /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH" SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 USER app
-WORKDIR /home/app
 ENTRYPOINT ["sambatui"]

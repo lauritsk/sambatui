@@ -27,80 +27,88 @@ records, AD objects, and common DNS/LDAP hygiene findings.
 
 ## Docker (recommended)
 
-Docker packages the app, Python 3.14, `samba-tool`, Kerberos/GSSAPI support,
+Docker packages the TUI, Python 3.15, `samba-tool`, Kerberos/GSSAPI support,
 and DNS utilities together. The host only needs Docker and an interactive
-terminal. The Dockerfile uses the digest-pinned Docker Hardened Python image
-from `ica0022`. Authenticate to DHI before building:
+terminal. Authenticate to Docker Hardened Images, build, and run:
 
 ```sh
 docker login dhi.io
-```
-
-The DHI `dev` variant supplies the package manager needed for Samba's OS
-dependencies. Compilers and Python build tools stay in the build/development
-stages. This runtime includes more OS tooling than a minimal DHI Python image;
-it is a custom application image built on DHI, not an unmodified hardened image.
-Update the `PYTHON_IMAGE` tag and digest together when refreshing the base.
-
-From this checkout:
-
-```sh
 docker build -t sambatui:local .
 ./scripts/sambatui
 ```
 
-Or use `just docker-build` and `just docker-run`. The launcher runs the TUI
-with an attached terminal and removes the container when you quit. The named
-volume `sambatui-config` preserves preferences at
-`/home/app/.config/sambatui`. The image runs as a non-root user (UID 1000).
-No ports need publishing and no privileged container is needed.
-The launcher and Compose run with a read-only root filesystem, writable temporary
-storage, all Linux capabilities dropped, and privilege escalation disabled.
+Or use `just docker-build` and `just docker-run` for this disposable interactive
+CLI.
+The launcher attaches your terminal and removes the container when you quit.
+The named volume `sambatui-config` preserves preferences at
+`/home/app/.config/sambatui`. It runs as UID 1000 with a read-only root filesystem,
+writable temporary storage, all capabilities dropped, and privilege escalation
+disabled. Additional Docker run options can be passed to the launcher.
 
-### Docker development and tests
+The Dockerfile uses digest-pinned `dhi.io/uv` on Debian 13. uv installs a
+separate managed Python 3.15.2 and the locked application dependencies,
+including the Kerberos extra. Samba keeps Debian's system Python; mixing Samba's
+packages into a DHI Python image would replace its interpreter. The DHI `dev`
+variant provides apt for Samba's OS dependencies. Compilers stay in the tested
+build stage; test dependencies are removed before copying the release artifact.
+This is a custom image based on DHI; uv's managed Python and additional packages
+are not covered by the base image's hardening guarantees. Update the `UV_IMAGE`
+tag and digest together when refreshing the base.
 
-The Dockerfile has `production`, `development`, and `test` targets. Dependencies
-come from `uv.lock` with `--frozen`; BuildKit cache mounts reuse dependency and
-package downloads. Compose follows the base-plus-development-override pattern
-used in `ica0022`:
+### Development and tests
+
+Use `uv run sambatui` for source development, or rebuild the image to try changes
+in Docker. BuildKit cache mounts reuse package downloads, and `uv sync --frozen`
+installs from `uv.lock`. Docker Engine with BuildKit is required.
 
 ```sh
 just docker-validate
-just docker-test
-just docker-dev
+just docker-build
 ```
 
-Without Just:
+`docker build -t sambatui:local .` runs the entire test suite and enforces the
+project's 100% coverage threshold with network access disabled. The production
+stage copies its Python and virtual environment from the tested stage only after
+tests pass and uv removes development dependencies. A failing test stops the
+build. BuildKit may reuse a successful test layer when its inputs are unchanged;
+use `docker build --no-cache -t sambatui:local .` to rerun everything.
+
+To check the installed production dependencies and start the TUI headlessly:
 
 ```sh
-docker compose config --quiet
-docker compose -f compose.yaml -f compose.dev.yaml config --quiet
-docker build --check .
-docker compose --profile test run --build --rm test
-docker compose -f compose.yaml -f compose.dev.yaml run --build --rm app
+docker run --rm -i --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges:true --tmpfs /tmp \
+  --entrypoint python sambatui:local - < scripts/check-container.py
 ```
 
-The test target includes development dependencies and the suite, and runs without
-network access. Pass pytest arguments with `just docker-test -q -k config`.
-The development service bind-mounts `src` read-only into an editable install;
-quit and relaunch to load source changes. Dependencies and Dockerfile changes
-also have Compose Watch rebuild rules. For Watch, use two terminals:
+CI checks the Dockerfile, builds the tested image, and runs this smoke check.
+Configure repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_PASSWORD`
+for its DHI registry login.
+
+### Updates and releases
+
+Dependabot opens weekly grouped updates for uv dependencies and GitHub Actions,
+and updates the digest-pinned DHI uv base. Actions are pinned to commit SHAs.
+Python is pinned to 3.15.2 in `.python-version`; update that file when
+refreshing Python. `requires-python` sets the supported minor version.
+
+Set `DOCKERHUB_USERNAME` and `DOCKERHUB_PASSWORD` as both **Actions secrets** and
+**Dependabot secrets** in GitHub repository settings. Dependabot needs its own
+secrets to resolve DHI updates and run their CI. Use a read-only Docker Hub token
+for DHI pulls. The local environment's credentials are separate from GitHub's.
+
+After CI passes, pushing a `v*` tag publishes an image to
+`ghcr.io/lauritsk/sambatui:<tag>` with an SBOM and build provenance. Only the
+release job has package write permission; GHCR uses GitHub's built-in token.
+For example, after publishing `v0.7.2`:
 
 ```sh
-# Terminal 1: keep the watcher running.
-docker compose -f compose.yaml -f compose.dev.yaml up --build --watch
-# Terminal 2: attach keyboard input to the TUI.
-docker compose -f compose.yaml -f compose.dev.yaml attach app
+docker pull ghcr.io/lauritsk/sambatui:v0.7.2
+SAMBATUI_IMAGE=ghcr.io/lauritsk/sambatui:v0.7.2 ./scripts/sambatui
 ```
 
-Reattach after a rebuild. Compose reads an optional `.env` file (start from
-`.env.example`). Unlike the launcher, it does not automatically forward exported
-application settings; use `just docker-dev -e SAMBATUI_SERVER -e SAMBATUI_AUTH`
-or a local Compose override as needed. Both flows use the same preferences
-volume. Use a current Docker Engine/BuildKit and Compose v2.24+ with Watch and
-optional env-file support. CI validates Compose, checks the Dockerfile, builds
-production, and runs the containerized tests. Configure repository secrets
-`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` for its DHI registry login.
+GHCR packages inherit their configured visibility; authenticate to GHCR when
+pulling a private package. The release workflow currently builds for Linux amd64.
 
 ### Connection settings
 
@@ -203,7 +211,7 @@ AD CA trust is configured separately as shown above.
 
 ## Native installation requirements
 
-- Python 3.14+
+- Python 3.15+
 - `samba-tool` in `PATH`
 - Network access to a Samba AD DNS/domain controller endpoint
 - Credentials allowed to manage the DNS records and LDAP objects you edit

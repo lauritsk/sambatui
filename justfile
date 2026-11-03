@@ -30,7 +30,7 @@ run *args:
 build:
     uv build
 
-# Build the self-contained interactive Docker image.
+# Build and test the self-contained interactive Docker image.
 docker-build:
     docker build -t sambatui:local .
 
@@ -38,16 +38,6 @@ docker-build:
 docker-run *args:
     ./scripts/sambatui "$@"
 
-# Validate production/development Compose and Dockerfile with BuildKit.
+# Check Dockerfile with BuildKit.
 docker-validate:
-    docker compose config --quiet
-    docker compose -f compose.yaml -f compose.dev.yaml config --quiet
     docker build --check .
-
-# Run the test suite in the Docker test target, without AD/network access.
-docker-test *args:
-    docker compose --profile test run --build --rm test "$@"
-
-# Develop against bind-mounted source; quit and relaunch to reload changes.
-docker-dev *args:
-    docker compose -f compose.yaml -f compose.dev.yaml run --build --rm "$@" app
