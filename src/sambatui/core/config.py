@@ -13,9 +13,10 @@ from typing import Literal, Protocol
 
 from ..dns.names import is_reverse_dns_zone
 
-USER_CONFIG_PATH = Path(
-    os.getenv("SAMBATUI_USER_CONFIG", "~/.config/sambatui/config.toml")
-).expanduser()
+CONFIG_DIR = Path("/config")
+SECRETS_DIR = Path("/run/secrets")
+USER_CONFIG_PATH = CONFIG_DIR / "config.toml"
+PASSWORD_FILE_PATH = CONFIG_DIR / "password"
 type UserConfigValidation = Literal["choice", "on_off", "integer"]
 
 
@@ -236,24 +237,6 @@ def _integer_value_error(key: str, value: str) -> str | None:
 USER_CONFIG = load_user_config()
 
 
-def _default(envvar: str, key: str, fallback: str) -> str:
-    return os.getenv(envvar, USER_CONFIG.get(key, fallback))
-
-
-def _default_domain() -> str:
-    configured = os.getenv("SAMBATUI_DOMAIN", USER_CONFIG.get("domain", ""))
-    if configured:
-        return configured
-    legacy_zone = USER_CONFIG.get("zone", "")
-    return "" if is_reverse_dns_zone(legacy_zone) else legacy_zone
-
-
-def _default_zone() -> str:
-    return os.getenv(
-        "SAMBATUI_ZONE", USER_CONFIG.get("last_zone") or USER_CONFIG.get("zone", "")
-    )
-
-
 def has_valid_kerberos_ticket(
     runner: CompletedProcessRunner | None = None,
 ) -> bool:
@@ -298,27 +281,23 @@ def fix_password_file_permissions(path: Path) -> None:
     if not stat.S_ISREG(info.st_mode):
         raise OSError(f"Password file is not a regular file: {path}")
 
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    file_descriptor = os.open(path, flags)
+    file_descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         opened_info = os.fstat(file_descriptor)
         if not stat.S_ISREG(opened_info.st_mode):
             raise OSError(f"Password file is not a regular file: {path}")
-        if hasattr(os, "getuid") and opened_info.st_uid != os.getuid():
+        if opened_info.st_uid != os.getuid():
             raise OSError(f"Password file must be owned by the current user: {path}")
-        if hasattr(os, "fchmod"):
-            os.fchmod(file_descriptor, 0o600)
-        else:
-            path.chmod(0o600)
+        os.fchmod(file_descriptor, 0o600)
     finally:
         os.close(file_descriptor)
 
 
-_BOOTSTRAP_PASSWORD_FILE = Path(
-    _default("SAMBATUI_PASSWORD_FILE", "password_file", "~/.config/sambatui/password")
-).expanduser()
+def _is_read_only_secret(path: Path, file_descriptor: int | None = None) -> bool:
+    if path.parent != SECRETS_DIR:
+        return False
+    info = os.statvfs(path) if file_descriptor is None else os.fstatvfs(file_descriptor)
+    return bool(info.f_flag & os.ST_RDONLY)
 
 
 def password_file_warning(path: Path) -> str | None:
@@ -333,7 +312,12 @@ def password_file_warning(path: Path) -> str | None:
         return f"Password file must not be a symlink: {path}."
     if not stat.S_ISREG(mode):
         return f"Password file must be a regular file: {path}."
-    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+    try:
+        if _is_read_only_secret(path):
+            return None
+    except OSError as exc:
+        return f"Cannot inspect password file {path}: {exc}"
+    if info.st_uid != os.getuid():
         return f"Password file must be owned by the current user: {path}."
     if mode & 0o077:
         return (
@@ -348,15 +332,14 @@ def _password_file_lstat(path: Path) -> os.stat_result:
 
 
 def _open_private_password_file(path: Path) -> int:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    file_descriptor = os.open(path, flags)
+    file_descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         info = os.fstat(file_descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise OSError(f"Password file must be a regular file: {path}")
-        if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        if _is_read_only_secret(path, file_descriptor):
+            return file_descriptor
+        if info.st_uid != os.getuid():
             raise OSError(f"Password file must be owned by the current user: {path}")
         if info.st_mode & 0o077:
             raise OSError(f"Password file permissions too open: {path}")
@@ -366,7 +349,7 @@ def _open_private_password_file(path: Path) -> int:
         raise
 
 
-def read_password_file(path: Path = _BOOTSTRAP_PASSWORD_FILE) -> str:
+def read_password_file(path: Path = PASSWORD_FILE_PATH) -> str:
     if password_file_warning(path):
         return ""
     try:
@@ -426,7 +409,7 @@ class AppConfig:
             value(
                 "SAMBATUI_PASSWORD_FILE",
                 "password_file",
-                "~/.config/sambatui/password",
+                str(PASSWORD_FILE_PATH),
             )
         ).expanduser()
         auth = detected_default_auth(
@@ -451,7 +434,9 @@ class AppConfig:
             password=password,
             auth=auth,
             kerberos=value("SAMBATUI_KERBEROS", "kerberos", "off"),
-            krb5_ccache=value("SAMBATUI_KRB5_CCACHE", "krb5_ccache", ""),
+            krb5_ccache=value(
+                "SAMBATUI_KRB5_CCACHE", "krb5_ccache", environment.get("KRB5CCNAME", "")
+            ),
             configfile=value("SAMBATUI_CONFIGFILE", "configfile", ""),
             options=value("SAMBATUI_OPTIONS", "options", ""),
             ldap_base=value("SAMBATUI_LDAP_BASE", "ldap_base", ""),

@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 
 from sambatui.core import config as config_module
 from sambatui.core.config import (
-    _default_domain,
     _safe_user_config_values,
     password_file_permissions_too_open,
     password_file_warning,
@@ -49,10 +48,6 @@ def test_config_last_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         "Smart days must be a whole number."
     )
     assert user_config_value_error("server", "dc01") is None
-
-    monkeypatch.setattr(config_module, "USER_CONFIG", {"domain": "example.com"})
-    monkeypatch.delenv("SAMBATUI_DOMAIN", raising=False)
-    assert _default_domain() == "example.com"
 
     assert password_file_permissions_too_open(Path("/definitely/missing")) is False
 

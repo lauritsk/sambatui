@@ -277,7 +277,7 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
             app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
             app.query_one("#auto_ptr", Input).value = "off"
             app.query_one("#smart_days", Input).value = "120"
-            app.query_one("#password_file", Input).value = "~/.config/sambatui/pw"
+            app.query_one("#password_file", Input).value = "/config/pw"
 
             prefs = app.preference_values()
 
@@ -290,7 +290,7 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
             assert prefs["krb5_ccache"] == "/tmp/krb5cc_1000"
             assert prefs["configfile"] == "/etc/samba/smb.conf"
             assert prefs["options"] == "--debuglevel=1"
-            assert prefs["password_file"] == "~/.config/sambatui/pw"
+            assert prefs["password_file"] == "/config/pw"
             assert prefs["auto_ptr"] == "off"
             assert prefs["smart_days"] == "120"
             assert "password" not in prefs

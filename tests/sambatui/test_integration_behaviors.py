@@ -408,7 +408,7 @@ def test_ldap_search_success_starttls_and_package_error(
             raise LDAPPackageUnavailableError("missing gssapi")
 
     monkeypatch.setattr("ldap3.Connection", KerberosConnection)
-    with pytest.raises(ValueError, match=r"Install sambatui\[kerberos\]"):
+    with pytest.raises(ValueError, match="LDAP Kerberos support is unavailable"):
         LdapDirectoryClient(
             LdapSearchConfig(
                 "dc.example.com",
