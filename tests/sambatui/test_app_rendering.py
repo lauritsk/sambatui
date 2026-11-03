@@ -93,6 +93,29 @@ def test_passive_dns_findings_empty_without_zone() -> None:
     asyncio.run(run_app())
 
 
+def test_passive_dns_risk_does_not_infer_missing_records_in_other_zones() -> None:
+    async def run_app() -> None:
+        app = SambatuiApp()
+        async with app.run_test():
+            table = app.query_one("#records", DataTable)
+            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
+            app.populate_records(
+                [DnsRow("10", "1", "0", "PTR", "www.example.com", "", "")]
+            )
+            assert table.get_row_at(0)[1] == ""
+
+            app.query_one("#zone", Input).value = "example.com"
+            row = DnsRow("www", "1", "0", "A", "192.0.2.10", "", "")
+            app.populate_records([row])
+            assert table.get_row_at(0)[1] == ""
+
+            # Zone-local problems must still receive risk markers.
+            app.populate_records([row, row])
+            assert str(table.get_row_at(0)[1]) == "▌"
+
+    asyncio.run(run_app())
+
+
 def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
     class DashboardApp(SambatuiApp):
         def save_preferences(self) -> None:
