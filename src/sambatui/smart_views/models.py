@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SmartViewRow:
     severity: str
     object: str
@@ -22,7 +22,7 @@ class SmartViewRow:
     fix_attribute: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SmartViewCheckResult:
     view_id: str
     label: str

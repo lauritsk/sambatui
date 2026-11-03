@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import ClassVar
 
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input
 
 
-ScreenResult = TypeVar("ScreenResult")
-
-
-ScreenResult = TypeVar("ScreenResult")
-
-
-class FocusedModalScreen(ModalScreen[ScreenResult], Generic[ScreenResult]):
-    BINDINGS = [
+class FocusedModalScreen[ScreenResult](ModalScreen[ScreenResult]):
+    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ("tab", "modal_focus_next", "Next field"),
         ("shift+tab", "modal_focus_previous", "Previous field"),
     ]

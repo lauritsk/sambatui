@@ -29,3 +29,15 @@ run *args:
 # Build source and wheel distributions.
 build:
     uv build
+
+# Build and test the self-contained interactive Docker image.
+docker-build:
+    docker build -t sambatui:local .
+
+# Launch the Docker TUI; arguments are Docker run options.
+docker-run *args:
+    ./scripts/sambatui "$@"
+
+# Check Dockerfile with BuildKit.
+docker-validate:
+    docker build --check .
