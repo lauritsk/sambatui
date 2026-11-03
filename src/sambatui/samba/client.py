@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
 import os
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Literal
 
 AuthMode = Literal["password", "kerberos"]
@@ -15,7 +15,7 @@ class SambaToolConfig:
     server: str
     executable: str = "samba-tool"
     user: str = ""
-    password: str = ""
+    password: str = field(default="", repr=False)
     auth_mode: str = "password"
     kerberos: str = "off"
     krb5_ccache: str = ""
@@ -86,9 +86,7 @@ class SambaToolClient:
     def _auth_args(self) -> list[str]:
         args: list[str] = []
         auth_mode = self.config.normalized_auth_mode
-        if auth_mode == "password":
-            args.extend(["-U", self.config.user])
-        elif self.config.user:
+        if auth_mode == "password" or self.config.user:
             args.extend(["-U", self.config.user])
 
         args.append(f"--use-kerberos={self.config.normalized_kerberos}")

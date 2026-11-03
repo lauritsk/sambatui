@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
@@ -34,7 +34,7 @@ ALL_LDAP_EDITABLE_ATTRIBUTES = frozenset(
 class LdapSearchConfig:
     server: str
     user: str = ""
-    password: str = ""
+    password: str = field(default="", repr=False)
     base_dn: str = ""
     encryption: str = "ldaps"
     auth_mode: str = "password"
