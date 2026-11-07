@@ -25,6 +25,7 @@ assert os.getuid() == 1000
 assert sys.version_info[:2] == (3, 15)
 assert gssapi.raw.indicate_mechs()
 assert importlib.util.find_spec("pytest") is None
+assert importlib.util.find_spec("ty") is None
 assert shutil.which("gcc") is None
 assert ssl.create_default_context().get_ca_certs()
 assert APP_CONFIG.krb5_ccache == os.environ["KRB5CCNAME"] == "FILE:/config/krb5cc"

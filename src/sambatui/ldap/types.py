@@ -1,7 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol
+
+# Raw LDAP responses are decoded defensively at the library boundary. Writes
+# have a narrower contract: add values and modify operations are not interchangeable.
+type LdapResult = Mapping[str, object]
+type LdapAttributes = Mapping[str, str | int]
+type LdapChanges = Mapping[str, Sequence[tuple[str, Sequence[str]]]]
+type LdapCookie = bytes | str | None
+
+
+class LdapEntry(Protocol):
+    """Read-only projection of ldap3 entries used by the row decoder."""
+
+    @property
+    def entry_dn(self) -> str: ...
+
+    @property
+    def entry_attributes_as_dict(self) -> Mapping[str, object]: ...
+
 
 DirectorySearchKind = Literal["users", "groups", "computers", "ous", "all"]
 DirectoryAddKind = Literal["user", "group", "computer", "ou"]

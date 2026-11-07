@@ -741,6 +741,9 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
         def status_command(self, cmd: list[str]) -> str:
             return " ".join(cmd)
 
+        def execution_env(self) -> None:
+            return None
+
     class FakeProc:
         def __init__(self, code: int, output: bytes) -> None:
             self.returncode = code
@@ -760,7 +763,7 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
                 return FakeProc(0, b"ok")
 
             monkeypatch.setattr(
-                "sambatui.controllers.core.asyncio.create_subprocess_exec", ok_exec
+                "sambatui.samba.execution.asyncio.create_subprocess_exec", ok_exec
             )
             assert await app.run_command(cast(Any, FakeClient()), ["cmd"]) == (0, "ok")
 
@@ -768,7 +771,7 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
                 return FakeProc(4, b"first\nsecond")
 
             monkeypatch.setattr(
-                "sambatui.controllers.core.asyncio.create_subprocess_exec", bad_exec
+                "sambatui.samba.execution.asyncio.create_subprocess_exec", bad_exec
             )
             code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
             assert (code, output) == (4, "first\nsecond")
@@ -777,7 +780,7 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
                 raise OSError("missing executable")
 
             monkeypatch.setattr(
-                "sambatui.controllers.core.asyncio.create_subprocess_exec",
+                "sambatui.samba.execution.asyncio.create_subprocess_exec",
                 missing_exec,
             )
             code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
@@ -805,7 +808,7 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
                 return slow_proc
 
             monkeypatch.setattr(
-                "sambatui.controllers.core.asyncio.create_subprocess_exec", slow_exec
+                "sambatui.samba.execution.asyncio.create_subprocess_exec", slow_exec
             )
             monkeypatch.setattr(
                 "sambatui.controllers.core.DEFAULT_COMMAND_TIMEOUT", 0.001
