@@ -4,14 +4,15 @@ from collections.abc import Mapping, Sequence
 
 from sambatui.ldap.filters import KIND_LABELS
 from sambatui.ldap.rows import DirectoryRow
+from sambatui.ldap.types import LdapEntry
 
 
-def entry_to_directory_row(entry: object, kind: str = "all") -> DirectoryRow:
-    attributes = getattr(entry, "entry_attributes_as_dict", {})
+def entry_to_directory_row(entry: LdapEntry, kind: str = "all") -> DirectoryRow:
+    attributes = entry.entry_attributes_as_dict
     attrs = normalize_entry_attributes(
         attributes if isinstance(attributes, Mapping) else {}
     )
-    dn = str(getattr(entry, "entry_dn", ""))
+    dn = str(entry.entry_dn)
     name = first_attr(attrs, "displayName", "cn", "name", "sAMAccountName") or dn
     row_kind = infer_kind(attrs, kind)
     summary = directory_summary(attrs)

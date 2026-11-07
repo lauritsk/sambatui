@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from typing import Protocol, cast
 
 from sambatui.ldap.config import (
@@ -10,16 +10,27 @@ from sambatui.ldap.config import (
     parse_ldap_server,
 )
 from sambatui.ldap.tls import ldap_server_tls
-from sambatui.ldap.types import LdapSearchConfig, LdapServerSettings
+from sambatui.ldap.types import (
+    LdapAttributes,
+    LdapChanges,
+    LdapCookie,
+    LdapEntry,
+    LdapResult,
+    LdapSearchConfig,
+    LdapServerSettings,
+)
 
-LDAPResult = Mapping[str, object]
-LdapAttributes = Mapping[str, object]
+# Retain the original public spelling for callers of the connection helpers.
+type LDAPResult = LdapResult
 LdapOperation = Callable[["LdapConnection"], bool]
 
 
 class LdapConnection(Protocol):
-    result: LDAPResult
-    entries: Sequence[object]
+    @property
+    def result(self) -> LDAPResult: ...
+
+    @property
+    def entries(self) -> Sequence[LdapEntry]: ...
 
     def start_tls(self) -> bool: ...
 
@@ -30,10 +41,10 @@ class LdapConnection(Protocol):
         search_base: str,
         search_filter: str,
         *,
-        search_scope: object,
+        search_scope: str,
         attributes: list[str],
         paged_size: int,
-        paged_cookie: bytes | str | None,
+        paged_cookie: LdapCookie,
     ) -> bool: ...
 
     def add(
@@ -42,9 +53,32 @@ class LdapConnection(Protocol):
 
     def delete(self, dn: str) -> bool: ...
 
-    def modify(self, dn: str, changes: LdapAttributes) -> bool: ...
+    def modify(self, dn: str, changes: LdapChanges) -> bool: ...
 
     def unbind(self) -> object: ...
+
+
+class LdapConnectionFactory(Protocol):
+    def __call__(
+        self, config: LdapSearchConfig, *, read_only: bool = True
+    ) -> tuple[LdapConnection, LdapServerSettings]: ...
+
+
+@contextmanager
+def ldap_session(
+    config: LdapSearchConfig,
+    *,
+    factory: LdapConnectionFactory,
+    read_only: bool = True,
+) -> Generator[LdapConnection]:
+    """Own bind/TLS/cleanup for both read and write operations."""
+    connection, settings = factory(config, read_only=read_only)
+    try:
+        start_tls_if_needed(connection, config, settings)
+        bind_connection(connection)
+        yield connection
+    finally:
+        unbind_suppressing_ldap_error(connection)
 
 
 DEFAULT_LDAP_ATTRIBUTES = (
@@ -159,13 +193,13 @@ def search_connection(
     max_entries: int | None = None,
     *,
     one_level: bool = False,
-) -> list[object]:
+) -> list[LdapEntry]:
     from ldap3 import LEVEL, SUBTREE
     from ldap3.core.exceptions import LDAPException
 
     search_scope = LEVEL if one_level else SUBTREE
-    rows: list[object] = []
-    cookie: bytes | str | None = None
+    rows: list[LdapEntry] = []
+    cookie: LdapCookie = None
     while True:
         try:
             ok = connection.search(
@@ -191,7 +225,7 @@ def search_connection(
             return rows
 
 
-def paged_search_cookie(result: LDAPResult | None) -> bytes | str | None:
+def paged_search_cookie(result: LDAPResult | None) -> LdapCookie:
     if result is None:
         return None
     controls = object_mapping(result.get("controls"))

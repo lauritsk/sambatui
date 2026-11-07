@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from urllib.parse import urlparse
 
 from sambatui.ldap.types import (
@@ -108,4 +109,4 @@ def ldap_compatibility_enabled(value: str) -> bool:
 def ldap_server_get_info(config: LdapSearchConfig) -> str:
     from ldap3 import ALL, NONE
 
-    return NONE if config.compatibility_enabled else ALL
+    return cast(str, NONE if config.compatibility_enabled else ALL)

@@ -28,15 +28,16 @@ from sambatui.ldap.config import (  # noqa: E402
 )
 from sambatui.ldap.connection import (  # noqa: E402
     LdapConnection,
+    LdapConnectionFactory,
     bind_connection,
     ldap_connection_kwargs as ldap_connection_kwargs,
     ldap_exception_message,
     ldap_result_message,
+    ldap_session,
     new_ldap_connection,
     paged_search_cookie,
     search_connection,
     start_tls_if_needed,
-    unbind_suppressing_ldap_error,
 )
 from sambatui.ldap.dn import (  # noqa: E402
     build_add_entry as build_add_entry,
@@ -73,14 +74,21 @@ from sambatui.ldap.types import (  # noqa: E402
     DirectoryAddKind as DirectoryAddKind,
     DirectorySearchKind as DirectorySearchKind,
     LdapAuthMode as LdapAuthMode,
+    LdapChanges,
     LdapSearchConfig,
     LdapServerSettings as LdapServerSettings,
 )
 
 
 class LdapDirectoryClient:
-    def __init__(self, config: LdapSearchConfig) -> None:
+    def __init__(
+        self,
+        config: LdapSearchConfig,
+        *,
+        connection_factory: LdapConnectionFactory = new_ldap_connection,
+    ) -> None:
         self.config = config
+        self._connection_factory = connection_factory
 
     def validation_error(self) -> str | None:
         return self.config.validation_error()
@@ -93,12 +101,8 @@ class LdapDirectoryClient:
     def check_connection(self) -> None:
         self._raise_validation_error()
 
-        connection, settings = new_ldap_connection(self.config)
-        try:
-            start_tls_if_needed(connection, self.config, settings)
-            bind_connection(connection)
-        finally:
-            unbind_suppressing_ldap_error(connection)
+        with ldap_session(self.config, factory=self._connection_factory):
+            pass
 
     def search(
         self, kind: str, text: str = "", max_entries: int | None = None
@@ -173,7 +177,7 @@ class LdapDirectoryClient:
 
         from ldap3 import MODIFY_DELETE, MODIFY_REPLACE
 
-        ldap_changes = {
+        ldap_changes: LdapChanges = {
             attr: [(MODIFY_DELETE, [])] if value == "" else [(MODIFY_REPLACE, [value])]
             for attr, value in changes.items()
         }
@@ -186,10 +190,9 @@ class LdapDirectoryClient:
     ) -> None:
         from ldap3.core.exceptions import LDAPException
 
-        connection, settings = new_ldap_connection(self.config, read_only=False)
-        try:
-            start_tls_if_needed(connection, self.config, settings)
-            bind_connection(connection)
+        with ldap_session(
+            self.config, factory=self._connection_factory, read_only=False
+        ) as connection:
             try:
                 ok = operation(connection)
             except LDAPException as exc:
@@ -198,8 +201,6 @@ class LdapDirectoryClient:
                 raise ValueError(
                     ldap_result_message(connection.result, failure_message)
                 )
-        finally:
-            unbind_suppressing_ldap_error(connection)
 
     def _search_rows(
         self,
@@ -211,10 +212,7 @@ class LdapDirectoryClient:
     ) -> list[DirectoryRow]:
         self._raise_validation_error()
 
-        connection, settings = new_ldap_connection(self.config)
-        try:
-            start_tls_if_needed(connection, self.config, settings)
-            bind_connection(connection)
+        with ldap_session(self.config, factory=self._connection_factory) as connection:
             entries = search_connection(
                 connection,
                 self.config,
@@ -223,8 +221,6 @@ class LdapDirectoryClient:
                 one_level=one_level,
             )
             return [entry_to_directory_row(entry, kind) for entry in entries]
-        finally:
-            unbind_suppressing_ldap_error(connection)
 
 
 # Backwards-compatible private aliases for tests and downstream users that imported them.
