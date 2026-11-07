@@ -48,7 +48,8 @@ FROM dev AS test
 ENV COVERAGE_FILE=/tmp/.coverage \
     HYPOTHESIS_STORAGE_DIRECTORY=/tmp/hypothesis
 RUN --network=none --mount=type=cache,target=/root/.cache/uv \
-    python -m pytest \
+    ty check --error-on-warning \
+    && python -m pytest \
         --basetemp=/tmp/pytest \
         --cov=sambatui \
         --cov-report=term-missing \

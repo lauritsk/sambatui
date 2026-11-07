@@ -26,11 +26,23 @@ dev = [
   "pytest==9.2.0",
   "pytest-cov==7.1.0",
   "pytest-xdist==3.8.0",
+  "ty==0.0.99",
 ]
 
 [build-system]
 requires = ["uv_build==0.13.7"]
 build-backend = "uv_build"
+
+# Incremental gate: check library/IO boundaries and their structural test fakes
+# while the Textual mixins are migrated separately.
+[tool.ty.src]
+include = [
+  "src/sambatui/ldap",
+  "src/sambatui/samba/client.py",
+  "src/sambatui/samba/execution.py",
+  "tests/sambatui/ldap/test_connection_contracts.py",
+  "tests/sambatui/samba/test_execution.py",
+]
 
 [tool.coverage.run]
 omit = [
