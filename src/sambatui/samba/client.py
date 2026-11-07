@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol
 
 AuthMode = Literal["password", "kerberos"]
 KERBEROS_MODES = frozenset({"off", "desired", "required"})
@@ -32,6 +32,16 @@ class SambaToolConfig:
         if self.normalized_auth_mode == "kerberos" and kerberos == "off":
             return "required"
         return kerberos
+
+
+class SambaCommandClient(Protocol):
+    """Authentication and safe status reporting required by command callers."""
+
+    def authentication_error(self) -> str | None: ...
+
+    def execution_env(self) -> Mapping[str, str] | None: ...
+
+    def status_command(self, command: Iterable[str], *, max_len: int = 140) -> str: ...
 
 
 class SambaToolClient:

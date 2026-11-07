@@ -253,7 +253,7 @@ def test_cancelling_command_reaps_its_subprocess(monkeypatch) -> None:
         return process
 
     monkeypatch.setattr(
-        "sambatui.controllers.core.asyncio.create_subprocess_exec", fake_exec
+        "sambatui.samba.execution.asyncio.create_subprocess_exec", fake_exec
     )
 
     async def run_app() -> None:
@@ -261,6 +261,7 @@ def test_cancelling_command_reaps_its_subprocess(monkeypatch) -> None:
         client = SimpleNamespace(
             authentication_error=lambda: None,
             status_command=lambda cmd: "fake command",
+            execution_env=lambda: None,
         )
         with pytest.raises(asyncio.CancelledError):
             await app.run_command(client, ["never-executed"])

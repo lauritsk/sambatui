@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import socket
@@ -52,10 +51,11 @@ from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
 )
-from ..samba.client import SambaToolClient, SambaToolConfig
+from ..samba.client import SambaCommandClient, SambaToolClient, SambaToolConfig
 from ..samba.discovery import (
     normalize_domain,
 )
+from ..samba.execution import execute_command
 from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
 from ..ui.screens import (
     CommandPaletteScreen,
@@ -327,7 +327,7 @@ class AppCoreMixin(AppControllerBase):
         self.save_password()
 
     async def run_command(
-        self, client: SambaToolClient, cmd: list[str]
+        self, client: SambaCommandClient, cmd: list[str]
     ) -> tuple[int, str]:
         error = client.authentication_error()
         if error:
@@ -335,47 +335,14 @@ class AppCoreMixin(AppControllerBase):
             return 2, error
 
         self.set_status(f"Running: {client.status_command(cmd)}")
-        env = client.execution_env() if hasattr(client, "execution_env") else None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env=env,
-            )
-        except OSError as exc:
-            message = f"Cannot start samba-tool: {exc}"
-            self.report_error(message)
-            return 127, message
-
-        try:
-            out_bytes, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=DEFAULT_COMMAND_TIMEOUT
-            )
-        except TimeoutError:
-            with suppress(ProcessLookupError):
-                proc.kill()
-            out_bytes, _ = await proc.communicate()
-            output = out_bytes.decode(errors="replace")
-            message = f"samba-tool timed out after {DEFAULT_COMMAND_TIMEOUT} seconds"
-            self.report_error(message)
-            return 124, output or message
-        except asyncio.CancelledError:
-            with suppress(ProcessLookupError):
-                proc.kill()
-            await proc.communicate()
-            raise
-
-        output = out_bytes.decode(errors="replace")
-        code = proc.returncode or 0
-        if code == 0:
-            self.set_status("OK")
+        result = await execute_command(
+            cmd, env=client.execution_env(), timeout=DEFAULT_COMMAND_TIMEOUT
+        )
+        if result.error is not None:
+            self.report_error(result.error)
         else:
-            first_line = next(
-                (line for line in output.splitlines() if line.strip()), f"exit {code}"
-            )
-            self.report_error(first_line)
-        return code, output
+            self.set_status("OK")
+        return result.code, result.output
 
     async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
         client = self.samba_client()
