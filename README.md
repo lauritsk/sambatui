@@ -37,8 +37,25 @@ Kerberos uses `FILE:/config/krb5cc` by default. Never commit credentials or `.en
 
 ## Development
 
-- `just build`: run tests with 100% coverage, build, and smoke-test the image.
+- `just build`: type-check, run tests with 100% coverage, build, and smoke-test the image.
 - `just test -q -k dns`: run selected tests.
 - `just lint`: check Python style.
+
+### Architecture boundaries
+
+Textual controllers own UI state, confirmations, and notifications. Samba command
+construction/authentication lives in `src/sambatui/samba/client.py`; subprocess
+execution and cleanup live in `src/sambatui/samba/execution.py`, which returns a
+typed result without importing the UI.
+
+LDAP library objects stay behind the protocols in `ldap/types.py` and
+`ldap/connection.py`. Add attributes and modify operations have separate types;
+searches return typed entries that `ldap/entries.py` normalizes into directory
+rows. `ldap_session` owns TLS, binding, and cleanup for every operation.
+`LdapDirectoryClient` accepts a connection factory for testing without a server.
+
+The `ty` gate currently covers the LDAP package, Samba client/runner, and their
+typed boundary tests. The remaining Textual mixins are not yet part of this gate;
+expand it as their implicit app dependencies are replaced with explicit contracts.
 
 Rebuild after source changes. Use `just build --no-cache` to bypass cached tests.
