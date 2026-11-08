@@ -3,22 +3,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import suppress
 from ipaddress import ip_address
-from typing import TypeAlias
 from urllib.parse import urlparse
 
 from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Key
-from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import Suggester
 from textual.widgets import Button, Input, Static
 
-from ...ldap.client import domain_to_base_dn
+from sambatui.ldap.config import domain_to_base_dn
+
 from .base import FocusedModalScreen
 
-
-FormField: TypeAlias = tuple[str, str, str, str]
-FormValidator: TypeAlias = Callable[[dict[str, str]], str | None]
+type FormField = tuple[str, str, str, str]
+type FormValidator = Callable[[dict[str, str]], str | None]
 
 
 def user_principal_name_suggestion(value: str, domain: str) -> str:
@@ -104,14 +103,14 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form_dialog"):
-            yield Static(self.form_title, id="form_title")
+            yield Static(self.form_title, id="form_title", markup=False)
             if self.hint:
-                yield Static(self.hint, id="form_hint")
+                yield Static(self.hint, id="form_hint", markup=False)
             if self.validator:
-                yield Static("", id="form_error")
+                yield Static("", id="form_error", markup=False)
             with VerticalScroll(id="form_fields"):
                 for label, field_id, placeholder, value in self.fields:
-                    yield Static(label, classes="form_label")
+                    yield Static(label, classes="form_label", markup=False)
                     with Horizontal(classes="form_row"):
                         yield Input(
                             value=value,
@@ -127,7 +126,8 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
     def form_values(self) -> dict[str, str]:
         values = {}
         for _, field_id, _, _ in self.fields:
-            values[field_id] = self.query_one(f"#{field_id}", Input).value.strip()
+            value = self.query_one(f"#{field_id}", Input).value
+            values[field_id] = value if field_id == "password" else value.strip()
         if self.should_suggest_upn_domain():
             values["user"] = user_principal_name_suggestion(
                 values.get("user", ""), values.get("domain", "")
@@ -159,7 +159,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
     def refresh_upn_suggestion(self) -> None:
         if not self.should_suggest_upn_domain():
             return
-        with suppress(Exception):
+        with suppress(NoMatches):
             user_input = self.query_one("#user", Input)
             suggestion = self.upn_suggestion_for_input(user_input)
             user_input._suggestion = (
@@ -169,7 +169,7 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
     def accept_upn_suggestion(self) -> None:
         if not self.should_suggest_upn_domain():
             return
-        with suppress(Exception):
+        with suppress(NoMatches):
             user_input = self.query_one("#user", Input)
             suggestion = self.upn_suggestion_for_input(user_input)
             if suggestion == user_input.value.strip():
@@ -217,9 +217,9 @@ class FormScreen(FocusedModalScreen[dict[str, str] | None]):
 
     def refresh_validation(self) -> str | None:
         error = self.validation_error()
-        with suppress(Exception):
+        with suppress(NoMatches):
             self.query_one("#form_error", Static).update(error or "")
-        with suppress(Exception):
+        with suppress(NoMatches):
             self.query_one("#submit", Button).disabled = error is not None
         return error
 

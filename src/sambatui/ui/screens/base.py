@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from textual.binding import BindingType
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input
 
 
 class FocusedModalScreen[ScreenResult](ModalScreen[ScreenResult]):
-    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         ("tab", "modal_focus_next", "Next field"),
         ("shift+tab", "modal_focus_previous", "Previous field"),
     ]

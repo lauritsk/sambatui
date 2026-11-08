@@ -12,29 +12,13 @@ class DnsAddOperation:
     name: str
     rtype: str
     value: str
-    ttl: str = ""
 
     @property
     def command_args(self) -> tuple[str, ...]:
-        args = [self.name, self.rtype, self.value]
-        if self.ttl:
-            args.append(f"--ttl={self.ttl}")
-        return tuple(args)
-
-    @staticmethod
-    def ttl_validation_error(ttl: str) -> str | None:
-        if not ttl:
-            return None
-        if not ttl.isdecimal():
-            return "TTL must be whole seconds, e.g. 3600."
-        if int(ttl) <= 0:
-            return "TTL must be greater than zero."
-        return None
+        return self.name, self.rtype, self.value
 
     def validation_error(self) -> str | None:
-        return validate_record(
-            self.name, self.rtype, self.value
-        ) or self.ttl_validation_error(self.ttl)
+        return validate_record(self.name, self.rtype, self.value)
 
 
 @dataclass(frozen=True)
@@ -85,22 +69,3 @@ class LdapAddOperation:
     @property
     def attribute_values(self) -> dict[str, str]:
         return dict(self.attributes)
-
-
-@dataclass(frozen=True)
-class LdapModifyOperation:
-    dn: str
-    changes: tuple[tuple[str, str], ...]
-
-    @classmethod
-    def create(cls, dn: str, changes: Mapping[str, str]) -> LdapModifyOperation:
-        return cls(dn, tuple(changes.items()))
-
-    @property
-    def change_values(self) -> dict[str, str]:
-        return dict(self.changes)
-
-
-@dataclass(frozen=True)
-class LdapDeleteOperation:
-    dn: str

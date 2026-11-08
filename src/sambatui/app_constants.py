@@ -3,33 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .app_actions import (
-    CASE_SENSITIVE_ACTION_NAMES,
-    CHAR_ACTION_NAMES,
-    KEY_ACTION_NAMES,
-    PALETTE_ACTION_MAP,
-    PALETTE_ACTIONS,
     shortcut_for,
-)
-from .core.config import (
-    DEFAULT_AUTH,
-    DEFAULT_AUTO_PTR,
-    DEFAULT_CONFIGFILE,
-    DEFAULT_DOMAIN,
-    DEFAULT_KERBEROS,
-    DEFAULT_KRB5_CCACHE,
-    DEFAULT_LDAP_BASE,
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
-    DEFAULT_OPTIONS,
-    DEFAULT_PASSWORD,
-    DEFAULT_PASSWORD_FILE,
-    DEFAULT_SERVER,
-    DEFAULT_SMART_DAYS,
-    DEFAULT_SMART_DISABLED_DAYS,
-    DEFAULT_SMART_MAX_ROWS,
-    DEFAULT_SMART_NEVER_LOGGED_DAYS,
-    DEFAULT_USER,
-    DEFAULT_ZONE,
 )
 from .core.models import DnsRow
 from .dns.record_types import DNS_RECORD_TYPE_SPECS, SUPPORTED_DNS_RECORD_TYPES
@@ -65,27 +39,6 @@ KEY_HINTS = {
     ),
 }
 SIDE_TAB_IDS = ("dns_tab", "ldap_tab")
-CONNECTION_STATE_INPUTS = (
-    (DEFAULT_SERVER, "server", False),
-    (DEFAULT_DOMAIN, "domain", False),
-    (DEFAULT_ZONE, "zone", False),
-    (DEFAULT_USER, "user", False),
-    (DEFAULT_PASSWORD, "password", True),
-    (DEFAULT_AUTH, "auth", False),
-    (DEFAULT_KERBEROS, "kerberos", False),
-    (DEFAULT_KRB5_CCACHE, "krb5_ccache", False),
-    (DEFAULT_CONFIGFILE, "configfile", False),
-    (DEFAULT_OPTIONS, "options", False),
-    (DEFAULT_LDAP_BASE, "ldap_base", False),
-    (DEFAULT_LDAP_ENCRYPTION, "ldap_encryption", False),
-    (DEFAULT_LDAP_COMPATIBILITY, "ldap_compatibility", False),
-    (DEFAULT_AUTO_PTR, "auto_ptr", False),
-    (DEFAULT_SMART_DAYS, "smart_days", False),
-    (DEFAULT_SMART_DISABLED_DAYS, "smart_disabled_days", False),
-    (DEFAULT_SMART_NEVER_LOGGED_DAYS, "smart_never_logged_days", False),
-    (DEFAULT_SMART_MAX_ROWS, "smart_max_rows", False),
-    (str(DEFAULT_PASSWORD_FILE), "password_file", False),
-)
 RECORD_SORT_KEYS: dict[str, Callable[[DnsRow], str]] = {
     "name": lambda row: row.name.casefold(),
     "type": lambda row: row.rtype.casefold(),

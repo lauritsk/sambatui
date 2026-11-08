@@ -11,3 +11,8 @@ class DirectoryRow:
     name: str
     summary: str
     attributes: Mapping[str, Sequence[str]]
+
+    @property
+    def revision(self) -> str:
+        values = self.attributes.get("uSNChanged", ())
+        return values[0] if len(values) == 1 else ""

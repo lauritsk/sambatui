@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import TypeAlias
 
+from sambatui.ldap.config import domain_to_base_dn
+from sambatui.ldap.types import LdapSearchConfig
 from sambatui.samba.client import SambaToolConfig, parse_samba_options
+
 from .config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
@@ -14,7 +16,6 @@ from .config import (
     DEFAULT_KERBEROS,
     DEFAULT_KRB5_CCACHE,
     DEFAULT_LDAP_BASE,
-    DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_OPTIONS,
     DEFAULT_PASSWORD,
@@ -27,10 +28,9 @@ from .config import (
     DEFAULT_USER,
     DEFAULT_ZONE,
 )
-from sambatui.ldap.config import LdapSearchConfig, domain_to_base_dn
 
-FormField: TypeAlias = tuple[str, str, str, str]
-FieldTemplate: TypeAlias = tuple[str, str, str]
+type FormField = tuple[str, str, str, str]
+type FieldTemplate = tuple[str, str, str]
 
 SAMBA_FIELD_TEMPLATES: tuple[FieldTemplate, ...] = (
     (
@@ -88,7 +88,7 @@ class ConnectionSettings:
     domain: str = DEFAULT_DOMAIN
     zone: str = DEFAULT_ZONE
     user: str = DEFAULT_USER
-    password: str = DEFAULT_PASSWORD
+    password: str = field(default=DEFAULT_PASSWORD, repr=False)
     auth: str = DEFAULT_AUTH
     kerberos: str = DEFAULT_KERBEROS
     krb5_ccache: str = DEFAULT_KRB5_CCACHE
@@ -96,7 +96,6 @@ class ConnectionSettings:
     options: str = DEFAULT_OPTIONS
     ldap_base: str = DEFAULT_LDAP_BASE
     ldap_encryption: str = DEFAULT_LDAP_ENCRYPTION
-    ldap_compatibility: str = DEFAULT_LDAP_COMPATIBILITY
     auto_ptr: str = DEFAULT_AUTO_PTR
     smart_days: str = DEFAULT_SMART_DAYS
     smart_disabled_days: str = DEFAULT_SMART_DISABLED_DAYS
@@ -104,46 +103,21 @@ class ConnectionSettings:
     smart_max_rows: str = DEFAULT_SMART_MAX_ROWS
     password_file: str = str(DEFAULT_PASSWORD_FILE)
 
-    @classmethod
-    def from_lookup(cls, lookup: Callable[[str], str]) -> ConnectionSettings:
-        def value(key: str) -> str:
-            try:
-                return lookup(key)
-            except KeyError, LookupError:
-                return ""
+    def __post_init__(self) -> None:
+        for setting in fields(self):
+            if setting.name != "password":
+                object.__setattr__(self, setting.name, self.value(setting.name).strip())
 
-        def value_or_default(key: str, default: str) -> str:
-            return value(key) or default
+    def value(self, name: str) -> str:
+        if name not in {setting.name for setting in fields(self)}:
+            raise KeyError(name)
+        value: str = getattr(self, name)
+        return value
 
-        return cls(
-            server=value("server"),
-            domain=value("domain"),
-            zone=value("zone"),
-            user=value("user"),
-            password=value("password"),
-            auth=value_or_default("auth", DEFAULT_AUTH),
-            kerberos=value_or_default("kerberos", DEFAULT_KERBEROS),
-            krb5_ccache=value("krb5_ccache"),
-            configfile=value("configfile"),
-            options=value("options"),
-            ldap_base=value("ldap_base"),
-            ldap_encryption=value_or_default(
-                "ldap_encryption", DEFAULT_LDAP_ENCRYPTION
-            ),
-            ldap_compatibility=value_or_default(
-                "ldap_compatibility", DEFAULT_LDAP_COMPATIBILITY
-            ),
-            auto_ptr=value_or_default("auto_ptr", DEFAULT_AUTO_PTR),
-            smart_days=value_or_default("smart_days", DEFAULT_SMART_DAYS),
-            smart_disabled_days=value_or_default(
-                "smart_disabled_days", DEFAULT_SMART_DISABLED_DAYS
-            ),
-            smart_never_logged_days=value_or_default(
-                "smart_never_logged_days", DEFAULT_SMART_NEVER_LOGGED_DAYS
-            ),
-            smart_max_rows=value_or_default("smart_max_rows", DEFAULT_SMART_MAX_ROWS),
-            password_file=value_or_default("password_file", str(DEFAULT_PASSWORD_FILE)),
-        )
+    def updated(self, values: Mapping[str, str]) -> ConnectionSettings:
+        for name in values:
+            self.value(name)
+        return replace(self, **values)
 
     @property
     def path_password_file(self) -> Path:
@@ -188,7 +162,6 @@ class ConnectionSettings:
             encryption=self.ldap_encryption or DEFAULT_LDAP_ENCRYPTION,
             auth_mode=self.auth or DEFAULT_AUTH,
             krb5_ccache=self.krb5_ccache,
-            compatibility=self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,
         )
 
     def samba_form_fields(self) -> list[FormField]:
@@ -206,16 +179,10 @@ class ConnectionSettings:
                 self.ldap_base or domain_to_base_dn(self.domain or self.zone),
             ),
             (
-                "LDAP encryption — password bind requires ldaps or starttls; kerberos also supports off.",
+                "LDAP encryption — verified TLS is required for both authentication modes.",
                 "ldap_encryption",
-                "off | ldaps | starttls",
+                "ldaps | starttls",
                 self.ldap_encryption or DEFAULT_LDAP_ENCRYPTION,
-            ),
-            (
-                "LDAP compatibility — WARNING: on disables TLS certificate verification and allows legacy TLS; use only for trusted DCs.",
-                "ldap_compatibility",
-                "on | off",
-                self.ldap_compatibility or DEFAULT_LDAP_COMPATIBILITY,
             ),
         ]
 

@@ -1,82 +1,39 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sambatui.ldap.rows import DirectoryRow
 
 
-def _install_pyasn1_ber_legacy_aliases() -> None:
-    with suppress(ImportError, AttributeError):
-        from pyasn1.codec.ber import encoder
-
-        encoder.tagMap = encoder.TAG_MAP
-        encoder.typeMap = encoder.TYPE_MAP
-
-
-_install_pyasn1_ber_legacy_aliases()
-
-from sambatui.ldap.config import (  # noqa: E402
-    domain_to_base_dn as domain_to_base_dn,
-    gssapi_cred_store as gssapi_cred_store,
-    ldap_compatibility_enabled as ldap_compatibility_enabled,
-    ldap_server_get_info as ldap_server_get_info,
-    ldap_server_scheme as ldap_server_scheme,
-    parse_ldap_server as parse_ldap_server,
-)
-from sambatui.ldap.connection import (  # noqa: E402
+from sambatui.ldap.connection import (
     LdapConnection,
     LdapConnectionFactory,
-    bind_connection,
-    ldap_connection_kwargs as ldap_connection_kwargs,
     ldap_exception_message,
     ldap_result_message,
     ldap_session,
     new_ldap_connection,
-    paged_search_cookie,
     search_connection,
-    start_tls_if_needed,
 )
-from sambatui.ldap.dn import (  # noqa: E402
-    build_add_entry as build_add_entry,
+from sambatui.ldap.controls import entry_assertion
+from sambatui.ldap.dn import (
+    build_add_entry,
     ldap_dn_equal,
-    ldap_dn_in_scope as ldap_dn_in_scope,
-    normalized_ldap_dn_parts as normalized_ldap_dn_parts,
+    ldap_dn_in_scope,
 )
-from sambatui.ldap.entries import (  # noqa: E402
-    directory_summary as directory_summary,
+from sambatui.ldap.entries import (
     entry_to_directory_row,
-    first_attr as first_attr,
-    infer_kind as infer_kind,
-    normalize_attribute_values as normalize_attribute_values,
-    normalize_entry_attributes as normalize_entry_attributes,
 )
-from sambatui.ldap.filters import (  # noqa: E402
+from sambatui.ldap.errors import LdapConflictError, LdapOperationError
+from sambatui.ldap.filters import (
     CHILD_CONTAINER_FILTER,
-    build_directory_filter as build_directory_filter,
+    build_directory_filter,
 )
-from sambatui.ldap.tls import (  # noqa: E402
-    LdapCompatibilityTls as LdapCompatibilityTls,
-    ldap_server_tls as ldap_server_tls,
-    ssl as ssl,
-)
-from sambatui.ldap.types import (  # noqa: E402
+from sambatui.ldap.types import (
     ALL_LDAP_EDITABLE_ATTRIBUTES,
-    LDAP_ADD_KINDS as LDAP_ADD_KINDS,
-    LDAP_AUTH_MODES as LDAP_AUTH_MODES,
-    LDAP_COMPATIBILITY_OFF as LDAP_COMPATIBILITY_OFF,
-    LDAP_COMPATIBILITY_ON as LDAP_COMPATIBILITY_ON,
-    LDAP_EDITABLE_ATTRIBUTES as LDAP_EDITABLE_ATTRIBUTES,
-    LDAP_ENCRYPTION_MODES as LDAP_ENCRYPTION_MODES,
-    LDAP_SEARCH_KINDS as LDAP_SEARCH_KINDS,
-    DirectoryAddKind as DirectoryAddKind,
-    DirectorySearchKind as DirectorySearchKind,
-    LdapAuthMode as LdapAuthMode,
     LdapChanges,
     LdapSearchConfig,
-    LdapServerSettings as LdapServerSettings,
 )
 
 
@@ -137,53 +94,69 @@ class LdapDirectoryClient:
         )
         return dn
 
-    def delete_entry(self, dn: str) -> None:
+    def delete_entry(self, dn: str, *, expected_revision: str) -> None:
         if not dn.strip():
             raise ValueError("LDAP delete needs a DN.")
         if ldap_dn_equal(dn, self.config.base_dn):
             raise ValueError("Refusing to delete LDAP base DN.")
         self._raise_validation_error()
         self._raise_out_of_scope(dn, "LDAP delete target")
-        self._write(lambda connection: connection.delete(dn), "LDAP delete failed")
+        control = entry_assertion(expected_revision)
+        self._write(
+            lambda connection: connection.delete(dn, controls=[control]),
+            "LDAP delete failed",
+        )
 
-    def modify_attributes(self, dn: str, changes: Mapping[str, str]) -> None:
+    def modify_attributes(
+        self, dn: str, changes: Mapping[str, str], *, expected_revision: str
+    ) -> None:
         self._raise_validation_error()
         self._raise_out_of_scope(dn, "LDAP modify target")
         invalid = sorted(set(changes) - ALL_LDAP_EDITABLE_ATTRIBUTES)
         if invalid:
             raise ValueError(f"LDAP attribute is not editable: {', '.join(invalid)}")
-        self._modify_attributes(dn, changes, "LDAP modify failed")
+        if not changes:
+            return
+        from ldap3 import MODIFY_DELETE, MODIFY_REPLACE
 
-    def disable_account(self, dn: str, user_account_control: int) -> None:
+        control = entry_assertion(expected_revision)
+        ldap_changes: LdapChanges = {
+            attr: [(MODIFY_DELETE, [])] if value == "" else [(MODIFY_REPLACE, [value])]
+            for attr, value in changes.items()
+        }
+        self._write(
+            lambda connection: connection.modify(dn, ldap_changes, controls=[control]),
+            "LDAP modify failed",
+        )
+
+    def disable_account(
+        self, dn: str, user_account_control: int, *, expected_revision: str
+    ) -> None:
+        from ldap3 import MODIFY_REPLACE
+
         if not dn.strip():
             raise ValueError("LDAP disable needs a DN.")
         self._raise_validation_error()
         self._raise_out_of_scope(dn, "LDAP disable target")
-        self._modify_attributes(
-            dn,
-            {"userAccountControl": str(user_account_control | 0x0002)},
+        if user_account_control < 0:
+            raise ValueError("Invalid userAccountControl.")
+        control = entry_assertion(expected_revision, user_account_control)
+        self._write(
+            lambda connection: connection.modify(
+                dn,
+                {
+                    "userAccountControl": [
+                        (MODIFY_REPLACE, [str(user_account_control | 0x0002)])
+                    ]
+                },
+                controls=[control],
+            ),
             "LDAP disable failed",
         )
 
     def _raise_out_of_scope(self, dn: str, label: str) -> None:
         if not ldap_dn_in_scope(dn, self.config.base_dn):
             raise ValueError(f"{label} must be at or below LDAP base DN.")
-
-    def _modify_attributes(
-        self, dn: str, changes: Mapping[str, str], failure_message: str
-    ) -> None:
-        if not changes:
-            return
-
-        from ldap3 import MODIFY_DELETE, MODIFY_REPLACE
-
-        ldap_changes: LdapChanges = {
-            attr: [(MODIFY_DELETE, [])] if value == "" else [(MODIFY_REPLACE, [value])]
-            for attr, value in changes.items()
-        }
-        self._write(
-            lambda connection: connection.modify(dn, ldap_changes), failure_message
-        )
 
     def _write(
         self, operation: Callable[[LdapConnection], bool], failure_message: str
@@ -196,9 +169,20 @@ class LdapDirectoryClient:
             try:
                 ok = operation(connection)
             except LDAPException as exc:
-                raise ValueError(ldap_exception_message(exc, failure_message)) from exc
+                raise LdapOperationError(
+                    ldap_exception_message(exc, failure_message)
+                ) from exc
             if not ok:
-                raise ValueError(
+                if connection.result.get("result") == 122:
+                    raise LdapConflictError(
+                        "LDAP entry changed; refresh before retrying."
+                    )
+                if connection.result.get("result") == 12:
+                    raise LdapOperationError(
+                        "Server does not support conditional LDAP writes; "
+                        "the operation was refused without an unsafe fallback."
+                    )
+                raise LdapOperationError(
                     ldap_result_message(connection.result, failure_message)
                 )
 
@@ -221,13 +205,3 @@ class LdapDirectoryClient:
                 one_level=one_level,
             )
             return [entry_to_directory_row(entry, kind) for entry in entries]
-
-
-# Backwards-compatible private aliases for tests and downstream users that imported them.
-_new_ldap_connection = new_ldap_connection
-_start_tls_if_needed = start_tls_if_needed
-_bind_connection = bind_connection
-_search_connection = search_connection
-_paged_search_cookie = paged_search_cookie
-_ldap_result_message = ldap_result_message
-_ldap_exception_message = ldap_exception_message

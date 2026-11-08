@@ -1,60 +1,27 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import ClassVar
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from ldap3.core.exceptions import LDAPException
 
-from sambatui.ldap import client as ldap_module
-from sambatui.ldap.client import (
-    LdapCompatibilityTls,
-    LdapDirectoryClient,
-    LdapSearchConfig,
-    _ldap_result_message,
-    _paged_search_cookie,
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.connection import ldap_result_message as _ldap_result_message
+from sambatui.ldap.connection import paged_search_cookie as _paged_search_cookie
+from sambatui.ldap.dn import (
     build_add_entry,
-    infer_kind,
     ldap_dn_equal,
     ldap_dn_in_scope,
     normalized_ldap_dn_parts,
 )
+from sambatui.ldap.entries import infer_kind
+from sambatui.ldap.errors import LdapOperationError
+from sambatui.ldap.types import LdapSearchConfig
 
 
-def test_ldap_tls_wrap_socket_and_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
-    contexts: list[Any] = []
-
-    class FakeContext:
-        def __init__(self, _protocol: object) -> None:
-            self.check_hostname = True
-            self.verify_mode = None
-            self.options = 0xFFFF
-            contexts.append(self)
-
-        def set_ciphers(self, ciphers: str) -> None:
-            self.ciphers = ciphers
-
-        def wrap_socket(
-            self, socket: object, **kwargs: object
-        ) -> tuple[object, dict[str, object]]:
-            return socket, kwargs
-
-    monkeypatch.setattr(ldap_module.ssl, "SSLContext", FakeContext)
-    monkeypatch.setattr(ldap_module.ssl, "OP_NO_TLSv1", 0x1, raising=False)
-    monkeypatch.setattr(ldap_module.ssl, "OP_NO_TLSv1_1", 0x2, raising=False)
-
-    class Connection:
-        socket: Any = object()
-
-    connection = Connection()
-    LdapCompatibilityTls().wrap_socket(connection, do_handshake=True)
-
-    assert contexts[0].check_hostname is False
-    assert contexts[0].verify_mode == ldap_module.ssl.CERT_NONE
-    assert contexts[0].options & 0x3 == 0
-    assert connection.socket[1]["do_handshake_on_connect"] is True
-
+def test_ldap_helpers() -> None:
     normalized_ldap_dn_parts(r"CN=Doe\, Jane,DC=example,DC=com")
     assert ldap_dn_in_scope("bad dn", "DC=example,DC=com") is False
     assert ldap_dn_equal("bad dn", "DC=example,DC=com") is False
@@ -67,7 +34,7 @@ def test_ldap_tls_wrap_socket_and_helpers(monkeypatch: pytest.MonkeyPatch) -> No
             base_dn="DC=example,DC=com",
             encryption="off",
         ).validation_error()
-        == "LDAP password bind requires ldaps or starttls."
+        == "LDAP encryption must be ldaps or starttls."
     )
     assert _paged_search_cookie(None) is None
     assert _paged_search_cookie({"controls": {}}) is None
@@ -128,11 +95,14 @@ def test_ldap_write_delete_modify_and_exception_paths(
     )
 
     with pytest.raises(ValueError, match="LDAP delete needs a DN"):
-        client.delete_entry(" ")
-    client.modify_attributes("CN=Alice,DC=example,DC=com", {})
+        client.delete_entry(" ", expected_revision="17")
+    client.modify_attributes("CN=Alice,DC=example,DC=com", {}, expected_revision="17")
 
     class FailedConnection:
-        result = {"description": "constraintViolation", "message": "denied"}
+        result: ClassVar[dict[str, object]] = {
+            "description": "constraintViolation",
+            "message": "denied",
+        }
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
@@ -149,18 +119,18 @@ def test_ldap_write_delete_modify_and_exception_paths(
     monkeypatch.setattr("ldap3.Connection", FailedConnection)
     monkeypatch.setattr("ldap3.Server", lambda *_args, **_kwargs: object())
     with pytest.raises(
-        ValueError, match="LDAP add failed: constraintViolation: denied"
+        LdapOperationError, match="LDAP add failed: constraintViolation: denied"
     ):
         client.add_entry("ou", "DC=example,DC=com", "Ops", {})
 
     class ExceptionConnection(FailedConnection):
-        result = {}
+        result: ClassVar[dict[str, object]] = {}
 
         def add(self, *_args: object) -> bool:
             raise LDAPException("boom")
 
     monkeypatch.setattr("ldap3.Connection", ExceptionConnection)
-    with pytest.raises(ValueError, match="LDAP add failed: boom"):
+    with pytest.raises(LdapOperationError, match="LDAP add failed: boom"):
         client.add_entry("ou", "DC=example,DC=com", "Ops", {})
 
 
@@ -168,8 +138,8 @@ def test_ldap_starttls_and_search_exception_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class StartTlsExceptionConnection:
-        result = {}
-        entries: list[object] = []
+        result: ClassVar[dict[str, object]] = {}
+        entries: ClassVar[list[object]] = []
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
@@ -189,7 +159,7 @@ def test_ldap_starttls_and_search_exception_paths(
         base_dn="DC=example,DC=com",
         encryption="starttls",
     )
-    with pytest.raises(ValueError, match="LDAP StartTLS failed: tls exploded"):
+    with pytest.raises(LdapOperationError, match="LDAP StartTLS failed: tls exploded"):
         LdapDirectoryClient(cfg).search("users")
 
     class SearchExceptionConnection(StartTlsExceptionConnection):
@@ -203,5 +173,5 @@ def test_ldap_starttls_and_search_exception_paths(
             raise LDAPException("search exploded")
 
     monkeypatch.setattr("ldap3.Connection", SearchExceptionConnection)
-    with pytest.raises(ValueError, match="LDAP search failed: search exploded"):
+    with pytest.raises(LdapOperationError, match="LDAP search failed: search exploded"):
         LdapDirectoryClient(cfg).search("users")

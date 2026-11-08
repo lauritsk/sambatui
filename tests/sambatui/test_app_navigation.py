@@ -2,21 +2,19 @@ import asyncio
 
 from hypothesis import given
 from hypothesis import strategies as st
-from textual.widgets import Button, DataTable, Input
+from textual.widgets import Button, DataTable
 
-from sambatui.app import (
-    DnsRow,
-    SambatuiApp,
-    actionable_error,
-    ldap_structure_labels,
-)
+from sambatui.app import SambatuiApp
 from sambatui.app_actions import (
     ACTIONS,
     APP_BINDINGS,
     PALETTE_ACTION_MAP,
     PALETTE_ACTIONS,
 )
+from sambatui.core.models import DnsRow
+from sambatui.core.remediation import actionable_error
 from sambatui.ldap.rows import DirectoryRow
+from sambatui.ldap.sidebar import ldap_structure_labels
 from sambatui.smart_views import SmartViewRow
 from sambatui.ui.screens import (
     CommandPaletteScreen,
@@ -25,7 +23,7 @@ from sambatui.ui.screens import (
 
 
 def test_action_registry_derives_bindings_and_palette_routes() -> None:
-    assert SambatuiApp.BINDINGS == APP_BINDINGS
+    assert SambatuiApp.BINDINGS == list(APP_BINDINGS)
     assert len({action.action_id for action in ACTIONS}) == len(ACTIONS)
     assert len({action.binding for action in ACTIONS if action.binding}) == len(
         APP_BINDINGS
@@ -139,7 +137,7 @@ def test_sidebar_uses_current_list_widgets() -> None:
             assert ldap_findings.row_count == 4
             assert len(dns_findings.get_row_at(0)) == 1
             assert len(ldap_findings.get_row_at(0)) == 1
-            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            app.set_val("ldap_base", "DC=example,DC=com")
             app.populate_ldap_structure([])
             assert app.query_one("#ldap_structure", DataTable).row_count == 1
 
@@ -153,14 +151,14 @@ def test_ldap_structure_labels_show_base_and_containers() -> None:
             kind="user",
             name="Alice",
             summary="",
-            attributes={},
+            attributes={"uSNChanged": ("17",)},
         ),
         DirectoryRow(
             dn="OU=Servers,DC=example,DC=com",
             kind="ou",
             name="Servers",
             summary="",
-            attributes={},
+            attributes={"uSNChanged": ("17",)},
         ),
     ]
 
@@ -217,21 +215,21 @@ def test_ldap_directory_rows_support_multi_select_and_escape_clear() -> None:
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Bob,DC=example,DC=com",
                         kind="user",
                         name="Bob",
                         summary="bob@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Ops,DC=example,DC=com",
                         kind="group",
                         name="Ops",
                         summary="ops@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )
@@ -285,14 +283,14 @@ def test_ldap_directory_selection_clears_on_sort() -> None:
                         kind="user",
                         name="Bob",
                         summary="bob@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Alice,DC=example,DC=com",
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )
@@ -387,7 +385,7 @@ def test_selection_helpers_cover_smart_and_invalid_directory_edges() -> None:
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     )
                 ]
             )
@@ -476,7 +474,7 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
                     kind="user",
                     name=f"User {index}",
                     summary="",
-                    attributes={},
+                    attributes={"uSNChanged": ("17",)},
                 )
                 for index in range(count)
             ]
@@ -499,16 +497,15 @@ def test_smart_view_load_more_preserves_active_smart_view() -> None:
     async def run_app() -> None:
         app = SmartLoadMoreApp()
         async with app.run_test():
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin@example.com"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("user", "admin@example.com")
+            app.set_val("password", "secret")
             app.views.smart.view_id = "ldap_inactive_users"
             app.views.smart.max_rows = 200
             app.views.smart.values = {
                 "days": "90",
                 "base_dn": "DC=example,DC=com",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
                 "max_rows": "200",
             }
             app.populate_smart_view("LDAP inactive enabled users", [])
@@ -566,7 +563,7 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
                     kind="user",
                     name=f"User {index}",
                     summary="",
-                    attributes={},
+                    attributes={"uSNChanged": ("17",)},
                 )
                 for index in range(count)
             ]
@@ -582,12 +579,11 @@ def test_ldap_search_load_more_and_refresh_reuse_last_search() -> None:
                 "text": "",
                 "base_dn": "DC=example,DC=com",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
                 "max_rows": "200",
             }
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin@example.com"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("user", "admin@example.com")
+            app.set_val("password", "secret")
 
             assert await app.run_directory_search(values)
             assert app.query_one("#records", DataTable).row_count == 200

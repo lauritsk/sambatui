@@ -3,19 +3,16 @@ from sambatui.core.operations import (
     DnsDeleteOperation,
     DnsUpdateOperation,
     LdapAddOperation,
-    LdapModifyOperation,
 )
 
 
 def test_dns_operations_validate_and_build_stable_arguments() -> None:
-    add = DnsAddOperation("example.com", "www", "A", "192.0.2.10", "300")
-    update = DnsUpdateOperation(
-        "example.com", "www", "A", "192.0.2.10", "192.0.2.11"
-    )
+    add = DnsAddOperation("example.com", "www", "A", "192.0.2.10")
+    update = DnsUpdateOperation("example.com", "www", "A", "192.0.2.10", "192.0.2.11")
     delete = DnsDeleteOperation("example.com", "www", "A", "192.0.2.11")
 
     assert add.validation_error() is None
-    assert add.command_args == ("www", "A", "192.0.2.10", "--ttl=300")
+    assert add.command_args == ("www", "A", "192.0.2.10")
     assert update.validation_error() is None
     assert update.command_args == ("www", "A", "192.0.2.10", "192.0.2.11")
     assert delete.command_args == ("www", "A", "192.0.2.11")
@@ -24,10 +21,6 @@ def test_dns_operations_validate_and_build_stable_arguments() -> None:
 def test_ldap_operations_copy_mutable_form_values() -> None:
     attributes = {"description": "before"}
     add = LdapAddOperation.create("user", "DC=example,DC=com", "Alice", attributes)
-    modify = LdapModifyOperation.create(
-        "CN=Alice,DC=example,DC=com", {"description": "after"}
-    )
     attributes["description"] = "mutated"
 
     assert add.attribute_values == {"description": "before"}
-    assert modify.change_values == {"description": "after"}

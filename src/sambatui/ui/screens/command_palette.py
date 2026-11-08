@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-from typing import TypeAlias
-
 from textual.app import ComposeResult
-from textual.events import Key
 from textual.containers import Horizontal, Vertical
+from textual.events import Key
 from textual.widgets import Button, DataTable, Input, Static
 
 from .base import FocusedModalScreen
 
-
-CommandPaletteChoice: TypeAlias = tuple[str, str, str, str]
+type CommandPaletteChoice = tuple[str, str, str, str]
 
 
 def command_palette_choice_matches(choice: CommandPaletteChoice, query: str) -> bool:

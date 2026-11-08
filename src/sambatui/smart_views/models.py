@@ -19,7 +19,7 @@ class SmartViewRow:
     fix_rtype: str = ""
     fix_value: str = ""
     fix_dn: str = ""
-    fix_attribute: str = ""
+    fix_revision: str = ""
 
 
 @dataclass(frozen=True, slots=True)

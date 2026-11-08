@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import ipaddress
+from collections.abc import Iterable
 
 import dns.reversename
 

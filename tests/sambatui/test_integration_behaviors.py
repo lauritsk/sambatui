@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import ssl
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from hypothesis import given
@@ -11,7 +10,6 @@ from hypothesis import strategies as st
 from ldap3 import NTLM, SIMPLE
 from ldap3.core.exceptions import LDAPPackageUnavailableError
 
-from sambatui.samba.client import SambaToolClient, SambaToolConfig
 from sambatui.core.config import (
     DEFAULT_AUTH,
     load_user_config,
@@ -20,27 +18,27 @@ from sambatui.core.config import (
     save_user_config,
     user_config_validation_error,
 )
+from sambatui.core.models import DnsRow
+from sambatui.core.remediation import actionable_error, bounded_int
+from sambatui.core.settings import ConnectionSettings
 from sambatui.dns.parsing import parse_records, parse_zones
 from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
 from sambatui.dns.validation import valid_dns_name, validate_record
-from sambatui.ldap.client import (
-    LdapDirectoryClient,
-    LdapSearchConfig,
-    build_directory_filter,
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.config import domain_to_base_dn, gssapi_cred_store, parse_ldap_server
+from sambatui.ldap.connection import ldap_connection_kwargs
+from sambatui.ldap.entries import (
     directory_summary,
-    domain_to_base_dn,
     entry_to_directory_row,
     first_attr,
-    gssapi_cred_store,
     infer_kind,
-    ldap_connection_kwargs,
-    ldap_server_tls,
     normalize_entry_attributes,
-    parse_ldap_server,
 )
+from sambatui.ldap.errors import LdapOperationError
+from sambatui.ldap.filters import build_directory_filter
 from sambatui.ldap.rows import DirectoryRow
-from sambatui.core.remediation import actionable_error, bounded_int
-from sambatui.core.settings import ConnectionSettings
+from sambatui.ldap.types import LdapSearchConfig
+from sambatui.samba.client import SambaToolClient, SambaToolConfig
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
     age_text,
@@ -60,7 +58,6 @@ from sambatui.smart_views import (
     normalized_now,
     parse_ad_datetime,
 )
-from sambatui.core.models import DnsRow
 
 
 def dns_row(name: str, rtype: str, value: str) -> DnsRow:
@@ -80,7 +77,7 @@ def filetime_for(value: datetime) -> str:
 
 class FakeEntry:
     entry_dn = "CN=Ops,DC=example,DC=com"
-    entry_attributes_as_dict = {
+    entry_attributes_as_dict: ClassVar[dict[str, object]] = {
         "cn": "Ops",
         "objectClass": ["top", "group"],
         "description": None,
@@ -100,7 +97,8 @@ def test_client_validation_redaction_and_status_edges() -> None:
         == "Kerberos must be off, desired, or required."
     )
     client = SambaToolClient(SambaToolConfig("dc", user="u", password="p"))
-    assert client.dns_zone_command("query", "example.com", ["@", "ALL"])[3:6] == [
+    command = client.dns_command("query", "example.com", ["@", "ALL"])
+    assert command[command.index("--") + 1 : -1] == [
         "dc",
         "example.com",
         "@",
@@ -183,15 +181,17 @@ def test_user_config_persists_only_non_secret_preferences(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     assert load_user_config(path) == {"domain": "example.com", "zone": "example.com"}
-    assert save_user_config(
-        {
-            "auto_ptr": "always",
-            "kerberos": "maybe",
-            "ldap_compatibility": "on",
-            "smart_days": "0",
-        },
-        path,
-    ) == {"ldap_compatibility": "on"}
+    assert (
+        save_user_config(
+            {
+                "auto_ptr": "always",
+                "kerberos": "maybe",
+                "smart_days": "0",
+            },
+            path,
+        )
+        == {}
+    )
     assert user_config_validation_error({"auth": "bad"}) == (
         "Auth must be password or kerberos."
     )
@@ -269,7 +269,7 @@ def test_ldap_config_validation_and_helpers() -> None:
         == "LDAP auth mode must be password or kerberos."
     )
     assert (
-        LdapSearchConfig(server="ldaps://dc", encryption="off").validation_error()
+        LdapSearchConfig(server="ldaps://dc", encryption="starttls").validation_error()
         == "ldaps:// server URLs require LDAP encryption ldaps."
     )
     assert (
@@ -287,13 +287,6 @@ def test_ldap_config_validation_and_helpers() -> None:
     with pytest.raises(ValueError, match="Enter LDAP server"):
         parse_ldap_server("")
     assert gssapi_cred_store("") is None
-    assert (
-        ldap_server_tls(LdapSearchConfig("dc", encryption="off", compatibility="on"))
-        is None
-    )
-    tls = ldap_server_tls(LdapSearchConfig("dc", compatibility="off"))
-    assert tls is not None
-    assert tls.validate == ssl.CERT_REQUIRED
 
 
 def test_ldap_filter_kwargs_and_entry_mapping() -> None:
@@ -323,47 +316,27 @@ def test_ldap_filter_kwargs_and_entry_mapping() -> None:
     assert directory_summary({"memberOf": ("a", "b")}) == "memberOf=2"
 
 
-def test_ldap_disable_account_sets_account_disable_bit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[str, dict[str, str], str]] = []
-
-    def fake_modify(
-        self: LdapDirectoryClient,
-        dn: str,
-        changes: dict[str, str],
-        failure_message: str,
-    ) -> None:
-        calls.append((dn, changes, failure_message))
-
+def test_ldap_disable_account_rejects_blank_dn() -> None:
     client = LdapDirectoryClient(
         LdapSearchConfig(
             "dc", user="alice@example.com", password="pw", base_dn="DC=example,DC=com"
         )
     )
-    monkeypatch.setattr(LdapDirectoryClient, "_modify_attributes", fake_modify)
-
     with pytest.raises(ValueError, match="LDAP disable needs a DN"):
-        client.disable_account("", 512)
-    client.disable_account("CN=old,DC=example,DC=com", 512)
-
-    assert calls == [
-        (
-            "CN=old,DC=example,DC=com",
-            {"userAccountControl": str(512 | 0x0002)},
-            "LDAP disable failed",
-        )
-    ]
+        client.disable_account("", 512, expected_revision="17")
 
 
 def test_ldap_search_success_starttls_and_package_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "sambatui.ldap.connection.Credentials", lambda **kwargs: object()
+    )
     captured: dict[str, Any] = {}
 
     class FakeConnection:
-        result = {"description": "ok", "message": ""}
-        entries = [FakeEntry()]
+        result: ClassVar[dict[str, object]] = {"description": "ok", "message": ""}
+        entries: ClassVar[list[object]] = [FakeEntry()]
 
         def __init__(self, server: object, **kwargs: object) -> None:
             captured["server"] = server
@@ -408,7 +381,9 @@ def test_ldap_search_success_starttls_and_package_error(
             raise LDAPPackageUnavailableError("missing gssapi")
 
     monkeypatch.setattr("ldap3.Connection", KerberosConnection)
-    with pytest.raises(ValueError, match="LDAP Kerberos support is unavailable"):
+    with pytest.raises(
+        LdapOperationError, match="LDAP Kerberos support is unavailable"
+    ):
         LdapDirectoryClient(
             LdapSearchConfig(
                 "dc.example.com",
@@ -422,7 +397,7 @@ def test_ldap_search_starttls_and_search_result_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeConnection:
-        entries: list[object] = []
+        entries: ClassVar[list[object]] = []
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             self.result = {"description": "unwillingToPerform", "message": "no tls"}
@@ -450,7 +425,7 @@ def test_ldap_search_starttls_and_search_result_errors(
         encryption="starttls",
     )
     with pytest.raises(
-        ValueError, match="LDAP StartTLS failed: unwillingToPerform: no tls"
+        LdapOperationError, match="LDAP StartTLS failed: unwillingToPerform: no tls"
     ):
         LdapDirectoryClient(cfg).search("users")
 
@@ -459,7 +434,9 @@ def test_ldap_search_starttls_and_search_result_errors(
             return True
 
     monkeypatch.setattr("ldap3.Connection", SearchFailConnection)
-    with pytest.raises(ValueError, match="LDAP search failed: noSuchObject: bad base"):
+    with pytest.raises(
+        LdapOperationError, match="LDAP search failed: noSuchObject: bad base"
+    ):
         LdapDirectoryClient(cfg).search("users")
 
 
@@ -477,11 +454,10 @@ def test_settings_branches_and_config_conversion(tmp_path: Path) -> None:
         "options": "x=y; debug=1",
         "ldap_base": "",
         "ldap_encryption": "",
-        "ldap_compatibility": "",
         "auto_ptr": "",
         "password_file": str(tmp_path / "pw"),
     }
-    settings = ConnectionSettings.from_lookup(lambda key: values[key])
+    settings = ConnectionSettings(**values)
     assert settings.summary == f"dc · 2.0.192.in-addr.arpa · {DEFAULT_AUTH} auth"
     assert settings.needs_setup(lambda _path: "loaded") is False
     assert ConnectionSettings(server="", zone="z").needs_setup(lambda _path: "") is True

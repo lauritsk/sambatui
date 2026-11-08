@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.events import Key
 from textual.containers import Horizontal, Vertical
+from textual.events import Key
 from textual.widgets import Button, Static
 
 from sambatui.app_actions import shortcut_for

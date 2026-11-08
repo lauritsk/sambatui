@@ -13,7 +13,9 @@ from sambatui.ldap.sidebar import (
 
 
 def directory_row(dn: str, kind: str = "user") -> DirectoryRow:
-    return DirectoryRow(dn=dn, kind=kind, name="", summary="", attributes={})
+    return DirectoryRow(
+        dn=dn, kind=kind, name="", summary="", attributes={"uSNChanged": ("17",)}
+    )
 
 
 RDN_VALUE = st.text(

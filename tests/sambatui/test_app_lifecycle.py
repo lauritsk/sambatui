@@ -1,11 +1,8 @@
 import asyncio
 
+from textual.widgets import DataTable, Static
 
-from sambatui.app import (
-    SambatuiApp,
-)
-from textual.widgets import DataTable, Input, Static
-
+from sambatui.app import SambatuiApp
 from sambatui.samba.discovery import DiscoveredService
 
 
@@ -96,16 +93,15 @@ def test_setup_wizard_discovers_checks_and_loads_zones() -> None:
                 "auth": "password",
                 "kerberos": "off",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
             }
 
             assert await app.run_setup_wizard(values)
 
             records = app.query_one("#records", DataTable)
-            assert app.query_one("#server", Input).value == "dc01.example.com"
-            assert app.query_one("#domain", Input).value == "example.com"
-            assert app.query_one("#zone", Input).value == "example.com"
-            assert app.query_one("#ldap_base", Input).value == "DC=example,DC=com"
+            assert app.val("server") == "dc01.example.com"
+            assert app.val("domain") == "example.com"
+            assert app.val("zone") == "example.com"
+            assert app.val("ldap_base") == "DC=example,DC=com"
             assert app.zones == ["example.com", "2.0.192.in-addr.arpa"]
             assert app.ldap_checked
             assert app.saved_preferences == 1
@@ -118,8 +114,8 @@ def test_discovered_controller_sets_empty_zone_and_ldap_base() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.query_one("#zone", Input).value = ""
-            app.query_one("#ldap_base", Input).value = ""
+            app.set_val("zone", "")
+            app.set_val("ldap_base", "")
 
             app.apply_discovered_ad_controller(
                 DiscoveredService(
@@ -127,9 +123,9 @@ def test_discovered_controller_sets_empty_zone_and_ldap_base() -> None:
                 )
             )
 
-            assert app.query_one("#server", Input).value == "dc01.example.com"
-            assert app.query_one("#zone", Input).value == "example.com"
-            assert app.query_one("#ldap_base", Input).value == "DC=example,DC=com"
+            assert app.val("server") == "dc01.example.com"
+            assert app.val("zone") == "example.com"
+            assert app.val("ldap_base") == "DC=example,DC=com"
 
     asyncio.run(run_app())
 
@@ -152,7 +148,6 @@ def test_setup_wizard_failed_check_explains_next_action() -> None:
                 "auth": "password",
                 "kerberos": "off",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
             }
 
             assert not await app.run_setup_wizard(values)
@@ -168,13 +163,13 @@ def test_reverse_zone_does_not_become_setup_domain_default() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.query_one("#domain", Input).value = ""
-            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
-            app.query_one("#server", Input).value = "dc01.example.com"
+            app.set_val("domain", "")
+            app.set_val("zone", "2.0.192.in-addr.arpa")
+            app.set_val("server", "dc01.example.com")
 
             assert app.connection_domain_default() == "example.com"
 
-            app.query_one("#domain", Input).value = "ad.example.com"
+            app.set_val("domain", "ad.example.com")
             prefs = app.preference_values()
 
             assert prefs["domain"] == "ad.example.com"
@@ -219,9 +214,7 @@ def test_zone_activation_restores_saved_zone_and_updates_title() -> None:
         async with app.run_test():
             title = app.query_one("#records_title", Static)
             status = app.query_one("#status", Static)
-            zone = app.query_one("#zone", Input)
-
-            zone.value = "example.com"
+            app.set_val("zone", "example.com")
             await app.load_zones()
             assert app.commands[-1] == ("example.com", "query", ["@", "ALL"])
             assert str(title.render()) == "Records — example.com"
@@ -229,7 +222,7 @@ def test_zone_activation_restores_saved_zone_and_updates_title() -> None:
             assert app.saved_preferences == 0
 
             assert await app.activate_zone("other.example")
-            assert zone.value == "other.example"
+            assert app.val("zone") == "other.example"
             assert app.commands[-1] == ("other.example", "query", ["@", "ALL"])
             assert str(title.render()) == "Records — other.example"
             assert app.saved_preferences == 1
@@ -249,11 +242,11 @@ def test_load_password_can_fix_open_permissions(tmp_path) -> None:
         path.chmod(0o644)
         app = PasswordApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(path)
+            app.set_val("password_file", str(path))
 
             await app.load_password()
 
-            assert app.query_one("#password", Input).value == "secret"
+            assert app.val("password") == "secret"
             assert "chmod 600" in app.confirm_message
             assert path.stat().st_mode & 0o077 == 0
 
@@ -264,20 +257,20 @@ def test_preferences_snapshot_excludes_secrets_and_tracks_smart_defaults() -> No
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#domain", Input).value = "example.com"
-            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
-            app.query_one("#user", Input).value = "admin"
-            app.query_one("#password", Input).value = "secret"
-            app.query_one("#auth", Input).value = "kerberos"
-            app.query_one("#kerberos", Input).value = "required"
-            app.query_one("#krb5_ccache", Input).value = "/tmp/krb5cc_1000"
-            app.query_one("#configfile", Input).value = "/etc/samba/smb.conf"
-            app.query_one("#options", Input).value = "--debuglevel=1"
-            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
-            app.query_one("#auto_ptr", Input).value = "off"
-            app.query_one("#smart_days", Input).value = "120"
-            app.query_one("#password_file", Input).value = "/config/pw"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("domain", "example.com")
+            app.set_val("zone", "2.0.192.in-addr.arpa")
+            app.set_val("user", "admin")
+            app.set_val("password", "secret")
+            app.set_val("auth", "kerberos")
+            app.set_val("kerberos", "required")
+            app.set_val("krb5_ccache", "/tmp/krb5cc_1000")
+            app.set_val("configfile", "/etc/samba/smb.conf")
+            app.set_val("options", "--debuglevel=1")
+            app.set_val("ldap_base", "DC=example,DC=com")
+            app.set_val("auto_ptr", "off")
+            app.set_val("smart_days", "120")
+            app.set_val("password_file", "/config/pw")
 
             prefs = app.preference_values()
 

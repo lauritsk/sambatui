@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Mapping
 from typing import Protocol, cast
-import importlib
+
+from ldap3.core.exceptions import LDAPInvalidDnError
 
 from sambatui.ldap.types import LDAP_ADD_KINDS
 
@@ -14,8 +16,8 @@ class ParseDn(Protocol):
 
 
 _ldap3_dn = importlib.import_module("ldap3.utils.dn")
-escape_rdn = cast(Callable[[str], str], getattr(_ldap3_dn, "escape_rdn"))
-parse_dn = cast(ParseDn, getattr(_ldap3_dn, "parse_dn"))
+escape_rdn = cast(Callable[[str], str], _ldap3_dn.escape_rdn)
+parse_dn = cast(ParseDn, _ldap3_dn.parse_dn)
 
 LDAP_ADD_OBJECT_CLASSES: Mapping[str, tuple[str, ...]] = {
     "user": ("top", "person", "organizationalPerson", "user"),
@@ -64,7 +66,7 @@ def ldap_dn_in_scope(dn: str, base_dn: str) -> bool:
     try:
         dn_parts = normalized_ldap_dn_parts(dn)
         base_parts = normalized_ldap_dn_parts(base_dn)
-    except Exception:
+    except LDAPInvalidDnError, ValueError, TypeError:
         return False
     return (
         bool(base_parts)
@@ -76,7 +78,7 @@ def ldap_dn_in_scope(dn: str, base_dn: str) -> bool:
 def ldap_dn_equal(left: str, right: str) -> bool:
     try:
         return normalized_ldap_dn_parts(left) == normalized_ldap_dn_parts(right)
-    except Exception:
+    except LDAPInvalidDnError, ValueError, TypeError:
         return False
 
 

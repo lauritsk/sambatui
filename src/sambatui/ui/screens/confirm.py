@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.events import Key
 from textual.containers import Horizontal, Vertical
+from textual.events import Key
 from textual.widgets import Button, Static
 
 from .base import FocusedModalScreen
@@ -31,7 +31,7 @@ class ConfirmScreen(FocusedModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm_dialog"):
-            yield Static(self.message, id="confirm_message")
+            yield Static(self.message, id="confirm_message", markup=False)
             yield Static(
                 f"Keys: y=yes  n=no  Esc=no  Enter={self.default_action_label}",
                 id="confirm_keys",

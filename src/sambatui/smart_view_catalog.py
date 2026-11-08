@@ -12,7 +12,6 @@ from .core.config import (
 )
 from .core.remediation import bounded_int
 
-
 FULL_HEALTH_VIEW_ID = "full_health_dashboard"
 FULL_HEALTH_DNS_VIEW_IDS = (
     "dns_duplicates",
@@ -43,7 +42,7 @@ class SmartViewSource(StrEnum):
         return "dashboard" if self is SmartViewSource.FULL else self.value.lower()
 
     @property
-    def sidebar_source(self) -> "SmartViewSource | None":
+    def sidebar_source(self) -> SmartViewSource | None:
         return self if self in {SmartViewSource.DNS, SmartViewSource.LDAP} else None
 
 
@@ -55,7 +54,7 @@ class SmartViewDefaults:
     max_rows: int
 
     @classmethod
-    def configured(cls) -> "SmartViewDefaults":
+    def configured(cls) -> SmartViewDefaults:
         return cls(
             days=bounded_int(DEFAULT_SMART_DAYS, SMART_DAYS_FALLBACK),
             disabled_days=bounded_int(
@@ -116,7 +115,7 @@ class SmartViewOptions:
         cls,
         values: Mapping[str, str],
         defaults: SmartViewDefaults = SMART_VIEW_DEFAULTS,
-    ) -> "SmartViewOptions":
+    ) -> SmartViewOptions:
         return cls(
             days=bounded_int(
                 values.get("days") or values.get("smart_days"), defaults.days

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Mapping
 from typing import cast
-import importlib
 
 from sambatui.ldap.types import LDAP_SEARCH_KINDS
 
 _ldap3_conv = importlib.import_module("ldap3.utils.conv")
-escape_filter_chars = cast(
-    Callable[[str], str], getattr(_ldap3_conv, "escape_filter_chars")
-)
+escape_filter_chars = cast(Callable[[str], str], _ldap3_conv.escape_filter_chars)
 
 KIND_FILTERS: Mapping[str, str] = {
     "users": "(&(objectCategory=person)(objectClass=user))",

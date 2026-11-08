@@ -1,65 +1,57 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
-from typing import TypeVar
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from textual import work
 
-from ..app_constants import (
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
-    DEFAULT_SMART_MAX_ROWS,
+from sambatui.app_constants import (
     LDAP_DEFAULT_MAX_ROWS,
     LDAP_LOAD_MORE_ROWS,
     LDAP_MAX_ROWS,
 )
-from ..core.operations import LdapAddOperation, LdapDeleteOperation, LdapModifyOperation
+from sambatui.core.config import DEFAULT_LDAP_ENCRYPTION, DEFAULT_SMART_MAX_ROWS
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.config import domain_to_base_dn
+from sambatui.ldap.dn import ldap_dn_in_scope
+from sambatui.ldap.types import LDAP_ADD_KINDS, LDAP_EDITABLE_ATTRIBUTES
+
+from ..core.mutations import mutation_action
+from ..core.operations import LdapAddOperation
 from ..core.remediation import bounded_int
-from ..ldap.client import (
-    LDAP_ADD_KINDS,
-    LDAP_EDITABLE_ATTRIBUTES,
-    LdapDirectoryClient,
-    domain_to_base_dn,
-    ldap_dn_in_scope,
-)
+from ..ldap.errors import LdapOperationError
 from ..ldap.rows import DirectoryRow
 from ..smart_view_catalog import SMART_ROW_LIMIT_DEFAULT
 from ..ui.screens import (
     FormField,
 )
-from .base import AppControllerBase
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 from .helpers import (
     ldap_limit_suffix,
 )
 
-_LdapThreadResult = TypeVar("_LdapThreadResult")
 
-
-class AppLdapActionsMixin(AppControllerBase):
-    def ldap_base_default(self) -> str:
+class AppLdapActionsMixin:
+    def ldap_base_default(self: SambatuiApp) -> str:
         return self.val("ldap_base") or domain_to_base_dn(
             self.connection_domain_default() or self.val("zone")
         )
 
-    def ldap_connection_fields(self, base_dn: str) -> list[FormField]:
+    def ldap_connection_fields(self: SambatuiApp, base_dn: str) -> list[FormField]:
         return [
             ("Base DN", "base_dn", "DC=example,DC=com", base_dn),
             (
                 "LDAP encryption",
                 "ldap_encryption",
-                "off | ldaps | starttls",
+                "ldaps | starttls",
                 self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            ),
-            (
-                "LDAP compatibility — WARNING: disables TLS certificate verification; use only for trusted legacy DCs",
-                "ldap_compatibility",
-                "on | off",
-                self.val("ldap_compatibility") or DEFAULT_LDAP_COMPATIBILITY,
             ),
         ]
 
-    def smart_max_rows_field(self) -> FormField:
+    def smart_max_rows_field(self: SambatuiApp) -> FormField:
         return (
             "Max rows",
             "max_rows",
@@ -67,7 +59,9 @@ class AppLdapActionsMixin(AppControllerBase):
             self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS,
         )
 
-    def ldap_search_fields(self, default_kind: str = "users") -> list[FormField]:
+    def ldap_search_fields(
+        self: SambatuiApp, default_kind: str = "users"
+    ) -> list[FormField]:
         return [
             (
                 "Search type",
@@ -86,34 +80,39 @@ class AppLdapActionsMixin(AppControllerBase):
         ]
 
     def apply_ldap_connection_values(
-        self, values: dict[str, str], *, refresh_sidebar: bool = True
+        self: SambatuiApp, values: dict[str, str], *, refresh_sidebar: bool = True
     ) -> None:
         if values["base_dn"].casefold() != self.val("ldap_base").casefold():
             self.ldap_structure_rows = []
-        self.set_val("ldap_base", values["base_dn"])
-        self.set_val("ldap_encryption", values["ldap_encryption"])
-        self.set_val("ldap_compatibility", values["ldap_compatibility"])
+        updates = {"ldap_base": values["base_dn"]}
+        updates.update(
+            (key, values[key]) for key in ("ldap_encryption",) if key in values
+        )
+        self.set_connection_values(updates)
         if refresh_sidebar:
             self.populate_ldap_structure(self.ldap_structure_rows)
         self.save_preferences()
 
-    async def ldap_thread_result(
-        self,
-        operation: Callable[[], _LdapThreadResult],
+    async def ldap_thread_result[Result](
+        self: SambatuiApp,
+        operation: Callable[[], Result],
         *,
         report_error: bool = True,
-    ) -> tuple[_LdapThreadResult | None, str]:
+        write: bool = False,
+    ) -> tuple[Result | None, str]:
         async with self.busy():
             try:
+                if write:
+                    return await self.mutations.run_thread(operation), ""
                 return await asyncio.to_thread(operation), ""
-            except ValueError as exc:
+            except (ValueError, LdapOperationError) as exc:
                 error = str(exc)
                 if report_error:
                     self.report_error(error)
                 return None, error
 
     async def directory_search_rows(
-        self,
+        self: SambatuiApp,
         client: LdapDirectoryClient,
         kind: str,
         text: str,
@@ -125,20 +124,20 @@ class AppLdapActionsMixin(AppControllerBase):
         return rows
 
     async def directory_container_rows(
-        self, client: LdapDirectoryClient
+        self: SambatuiApp, client: LdapDirectoryClient
     ) -> list[DirectoryRow]:
         rows, _error = await self.ldap_thread_result(
             lambda: client.child_containers(LDAP_MAX_ROWS), report_error=False
         )
         return rows or []
 
-    def ldap_search_max_rows(self, values: dict[str, str]) -> int:
+    def ldap_search_max_rows(self: SambatuiApp, values: dict[str, str]) -> int:
         return bounded_int(
             values.get("max_rows", ""), LDAP_DEFAULT_MAX_ROWS, maximum=LDAP_MAX_ROWS
         )
 
     async def run_directory_search(
-        self,
+        self: SambatuiApp,
         values: dict[str, str],
         *,
         default_kind: str = "users",
@@ -154,10 +153,13 @@ class AppLdapActionsMixin(AppControllerBase):
             return False
 
         kind = values["kind"] or default_kind
+        revision, mode = self.connection_revision, self.views.mode
         rows = await self.directory_search_rows(client, kind, values["text"], limit)
         if rows is None:
             return False
         container_rows = await self.directory_container_rows(client)
+        if revision != self.connection_revision or mode != self.views.mode:
+            return False
         self.views.directory.values = {**values, "kind": kind, "max_rows": str(limit)}
         self.views.directory.max_rows = limit
         self.set_search_text("", refresh=False)
@@ -170,7 +172,7 @@ class AppLdapActionsMixin(AppControllerBase):
         self.notify(f"{action} {len(rows)} LDAP entries")
         return True
 
-    async def open_ldap_search(self, default_kind: str = "users") -> None:
+    async def open_ldap_search(self: SambatuiApp, default_kind: str = "users") -> None:
         values = await self.form(
             "Search AD directory",
             "LDAP via ldap3. Password bind requires LDAPS/StartTLS; UPN usernames work best.",
@@ -181,7 +183,9 @@ class AppLdapActionsMixin(AppControllerBase):
             return
         await self.run_directory_search(values, default_kind=default_kind)
 
-    async def refresh_current_directory_search(self) -> bool:
+    async def refresh_current_directory_search(self: SambatuiApp) -> bool:
+        if not self.connection_is_current():
+            return False
         if not self.views.directory.values:
             self.set_status("No LDAP search to refresh. Press L to search directory.")
             return False
@@ -191,7 +195,7 @@ class AppLdapActionsMixin(AppControllerBase):
             action="Refreshed",
         )
 
-    async def load_more_current_view(self) -> bool:
+    async def load_more_current_view(self: SambatuiApp) -> bool:
         match self.views.mode:
             case "directory":
                 return await self.load_more_directory()
@@ -204,7 +208,7 @@ class AppLdapActionsMixin(AppControllerBase):
                 self.set_status("No active view to load more rows for.")
                 return False
 
-    async def load_more_directory(self) -> bool:
+    async def load_more_directory(self: SambatuiApp) -> bool:
         if not self.views.directory.values:
             self.set_status("No LDAP search to extend. Press L to search directory.")
             return False
@@ -221,18 +225,18 @@ class AppLdapActionsMixin(AppControllerBase):
         )
 
     @work
-    async def action_ldap_search(self) -> None:
+    async def action_ldap_search(self: SambatuiApp) -> None:
         await self.open_ldap_search()
 
     @work
-    async def action_ldap_search_kind(self, kind: str) -> None:
+    async def action_ldap_search_kind(self: SambatuiApp, kind: str) -> None:
         await self.open_ldap_search(kind)
 
     @work
-    async def action_load_more_directory(self) -> None:
+    async def action_load_more_directory(self: SambatuiApp) -> None:
         await self.load_more_current_view()
 
-    def selected_directory_entries(self) -> list[DirectoryRow]:
+    def selected_directory_entries(self: SambatuiApp) -> list[DirectoryRow]:
         rows = self.visible_directory()
         if self.views.directory.selected_rows:
             row_indices = sorted(self.views.directory.selected_rows)
@@ -252,7 +256,7 @@ class AppLdapActionsMixin(AppControllerBase):
             return []
         return [row]
 
-    def selected_directory_row(self) -> DirectoryRow | None:
+    def selected_directory_row(self: SambatuiApp) -> DirectoryRow | None:
         rows = self.selected_directory_entries()
         if len(rows) > 1:
             self.notify(
@@ -262,14 +266,16 @@ class AppLdapActionsMixin(AppControllerBase):
             return None
         return rows[0] if rows else None
 
-    def ldap_editable_attributes(self, row: DirectoryRow) -> tuple[str, ...]:
+    def ldap_editable_attributes(
+        self: SambatuiApp, row: DirectoryRow
+    ) -> tuple[str, ...]:
         return LDAP_EDITABLE_ATTRIBUTES.get(row.kind, ())
 
-    def ldap_attribute_value(self, row: DirectoryRow, attr: str) -> str:
+    def ldap_attribute_value(self: SambatuiApp, row: DirectoryRow, attr: str) -> str:
         values = row.attributes.get(attr, ())
         return values[0] if values else ""
 
-    def ldap_edit_fields(self, row: DirectoryRow) -> list[FormField]:
+    def ldap_edit_fields(self: SambatuiApp, row: DirectoryRow) -> list[FormField]:
         return [
             (
                 attr,
@@ -281,7 +287,7 @@ class AppLdapActionsMixin(AppControllerBase):
         ]
 
     def ldap_attribute_changes(
-        self, row: DirectoryRow, values: dict[str, str]
+        self: SambatuiApp, row: DirectoryRow, values: dict[str, str]
     ) -> dict[str, str]:
         return {
             attr: values[attr]
@@ -290,16 +296,17 @@ class AppLdapActionsMixin(AppControllerBase):
         }
 
     def ldap_edit_preview(
-        self, row: DirectoryRow, operation: LdapModifyOperation
+        self: SambatuiApp, row: DirectoryRow, changes: Mapping[str, str]
     ) -> str:
         lines = [
             f"{attr}: {self.ldap_attribute_value(row, attr) or '<empty>'} -> "
             f"{value or '<delete>'}"
-            for attr, value in operation.changes
+            for attr, value in changes.items()
         ]
-        return "\n".join(["Edit LDAP entry?", "", f"DN: {operation.dn}", *lines])
+        return "\n".join(["Edit LDAP entry?", "", f"DN: {row.dn}", *lines])
 
-    async def update_ldap_entry(self) -> None:
+    @mutation_action
+    async def update_ldap_entry(self: SambatuiApp) -> None:
         row = self.selected_directory_row()
         if row is None:
             return
@@ -317,30 +324,31 @@ class AppLdapActionsMixin(AppControllerBase):
         if not changes:
             self.notify("No LDAP attribute changes.")
             return
-        operation = LdapModifyOperation.create(row.dn, changes)
         if not await self.confirm(
-            self.ldap_edit_preview(row, operation), default_confirm=True
+            self.ldap_edit_preview(row, changes), default_confirm=True
         ):
             self.notify("LDAP edit cancelled")
             return
+        client = self.ldap_client()
         _result, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().modify_attributes(
-                operation.dn, operation.change_values
-            )
+            lambda: client.modify_attributes(
+                row.dn, changes, expected_revision=row.revision
+            ),
+            write=True,
         )
         if error:
             return
         self.notify("LDAP entry updated")
         await self.refresh_current_directory_search()
 
-    def ldap_add_parent_dn(self) -> str:
+    def ldap_add_parent_dn(self: SambatuiApp) -> str:
         return (
             self.views.directory.values.get("search_base_dn")
             or self.views.directory.values.get("base_dn")
             or self.ldap_base_default()
         )
 
-    def ldap_add_fields(self) -> list[FormField]:
+    def ldap_add_fields(self: SambatuiApp) -> list[FormField]:
         return [
             ("Object type", "kind", "user | group | computer | ou", "user"),
             (
@@ -361,7 +369,7 @@ class AppLdapActionsMixin(AppControllerBase):
             ("Description", "description", "optional", ""),
         ]
 
-    def ldap_add_error(self, values: dict[str, str]) -> str | None:
+    def ldap_add_error(self: SambatuiApp, values: dict[str, str]) -> str | None:
         kind = values.get("kind", "").casefold()
         if kind not in LDAP_ADD_KINDS:
             return f"Choose LDAP type: {', '.join(LDAP_ADD_KINDS)}."
@@ -380,13 +388,17 @@ class AppLdapActionsMixin(AppControllerBase):
             return "Enter LDAP object name."
         return None
 
-    def ldap_add_attributes(self, values: dict[str, str]) -> dict[str, str]:
+    def ldap_add_attributes(
+        self: SambatuiApp, values: dict[str, str]
+    ) -> dict[str, str]:
         return {
             attr: values.get(attr, "").strip()
             for attr in ("sAMAccountName", "userPrincipalName", "mail", "description")
         }
 
-    def ldap_add_operation(self, values: dict[str, str]) -> LdapAddOperation:
+    def ldap_add_operation(
+        self: SambatuiApp, values: dict[str, str]
+    ) -> LdapAddOperation:
         return LdapAddOperation.create(
             values["kind"].casefold(),
             values["parent_dn"],
@@ -394,7 +406,9 @@ class AppLdapActionsMixin(AppControllerBase):
             self.ldap_add_attributes(values),
         )
 
-    def ldap_add_operation_preview(self, operation: LdapAddOperation) -> str:
+    def ldap_add_operation_preview(
+        self: SambatuiApp, operation: LdapAddOperation
+    ) -> str:
         lines = [f"{attr}: {value}" for attr, value in operation.attributes if value]
         return "\n".join(
             [
@@ -407,10 +421,8 @@ class AppLdapActionsMixin(AppControllerBase):
             ]
         )
 
-    def ldap_add_preview(self, values: dict[str, str]) -> str:
-        return self.ldap_add_operation_preview(self.ldap_add_operation(values))
-
-    async def add_ldap_entry(self) -> None:
+    @mutation_action
+    async def add_ldap_entry(self: SambatuiApp) -> None:
         values = await self.form(
             "Add LDAP entry",
             "Create a user, group, computer, or OU under the chosen parent DN.",
@@ -426,25 +438,27 @@ class AppLdapActionsMixin(AppControllerBase):
         ):
             self.notify("LDAP add cancelled")
             return
+        client = self.ldap_client()
         dn, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().add_entry(
+            lambda: client.add_entry(
                 operation.kind,
                 operation.parent_dn,
                 operation.name,
                 operation.attribute_values,
-            )
+            ),
+            write=True,
         )
         if error:
             return
         self.notify(f"LDAP entry added: {dn}")
         await self.refresh_current_directory_search()
 
-    def ldap_entry_count_label(self, count: int) -> str:
+    def ldap_entry_count_label(self: SambatuiApp, count: int) -> str:
         label = "LDAP entry" if count == 1 else "LDAP entries"
         return f"{count} {label}"
 
     def ldap_delete_preview(
-        self, rows: Sequence[DirectoryRow], *, preview_limit: int = 12
+        self: SambatuiApp, rows: Sequence[DirectoryRow], *, preview_limit: int = 12
     ) -> str:
         preview_rows = rows[:preview_limit]
         lines = [
@@ -464,7 +478,8 @@ class AppLdapActionsMixin(AppControllerBase):
             ]
         )
 
-    async def delete_ldap_entry(self) -> None:
+    @mutation_action
+    async def delete_ldap_entry(self: SambatuiApp) -> None:
         rows = self.selected_directory_entries()
         if not rows:
             return
@@ -472,13 +487,14 @@ class AppLdapActionsMixin(AppControllerBase):
             self.notify("LDAP delete cancelled")
             return
 
-        operations = [LdapDeleteOperation(row.dn) for row in rows]
         failed = 0
-        for operation in operations:
+        client = self.ldap_client()
+        for row in rows:
             _result, error = await self.ldap_thread_result(
-                lambda operation=operation: self.ldap_client().delete_entry(
-                    operation.dn
-                )
+                lambda row=row: client.delete_entry(
+                    row.dn, expected_revision=row.revision
+                ),
+                write=True,
             )
             if error:
                 failed += 1

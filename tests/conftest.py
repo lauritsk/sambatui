@@ -36,9 +36,14 @@ def _deny_dns_lookup(*args: object, **kwargs: object) -> None:
 
 
 @pytest.fixture(autouse=True)
-def no_external_io(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_external_io(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    if request.node.get_closest_marker("samba"):
+        return
     for name in ("connect", "connect_ex", "sendto"):
         monkeypatch.setattr(socket.socket, name, _deny_external_io)
     for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr"):
         monkeypatch.setattr(socket, name, _deny_dns_lookup)
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", _deny_external_io)
+    if not request.node.get_closest_marker("local_process"):
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _deny_external_io)

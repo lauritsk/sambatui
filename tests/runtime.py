@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 import gssapi
+from cryptography.hazmat.backends import default_backend
 
 from sambatui.app import SambatuiApp
 from sambatui.core.config import (
@@ -24,9 +25,12 @@ from sambatui.core.config import (
 assert os.getuid() == 1000
 assert sys.version_info[:2] == (3, 15)
 assert gssapi.raw.indicate_mechs()
+assert default_backend().openssl_version_text()
 assert importlib.util.find_spec("pytest") is None
 assert importlib.util.find_spec("ty") is None
+assert importlib.util.find_spec("ruff") is None
 assert shutil.which("gcc") is None
+assert shutil.which("samba") is None
 assert ssl.create_default_context().get_ca_certs()
 assert APP_CONFIG.krb5_ccache == os.environ["KRB5CCNAME"] == "FILE:/config/krb5cc"
 save_user_config({"server": "dc.example.com", "password": "not-a-preference"})

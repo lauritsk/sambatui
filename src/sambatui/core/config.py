@@ -7,7 +7,7 @@ import tempfile
 import tomllib
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -17,7 +17,7 @@ CONFIG_DIR = Path("/config")
 SECRETS_DIR = Path("/run/secrets")
 USER_CONFIG_PATH = CONFIG_DIR / "config.toml"
 PASSWORD_FILE_PATH = CONFIG_DIR / "password"
-type UserConfigValidation = Literal["choice", "on_off", "integer"]
+type UserConfigValidation = Literal["choice", "integer"]
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,6 @@ USER_CONFIG_FIELDS = (
     UserConfigField("options"),
     UserConfigField("ldap_base"),
     UserConfigField("ldap_encryption", "choice"),
-    UserConfigField("ldap_compatibility", "on_off"),
     UserConfigField("auto_ptr", "choice"),
     UserConfigField("smart_days", "integer"),
     UserConfigField("smart_disabled_days", "integer"),
@@ -54,11 +53,9 @@ VALIDATED_USER_CONFIG_KEYS = tuple(
 CHOICE_VALUES = {
     "auth": frozenset({"password", "kerberos"}),
     "kerberos": frozenset({"off", "desired", "required"}),
-    "ldap_encryption": frozenset({"off", "ldaps", "starttls"}),
+    "ldap_encryption": frozenset({"ldaps", "starttls"}),
     "auto_ptr": frozenset({"ask", "on", "off"}),
 }
-ON_VALUES = frozenset({"on"})
-OFF_VALUES = frozenset({"off"})
 INTEGER_RANGES = {
     "smart_days": (1, None),
     "smart_disabled_days": (1, None),
@@ -68,14 +65,13 @@ INTEGER_RANGES = {
 CHOICE_LABELS = {
     "auth": "password or kerberos",
     "kerberos": "off, desired, or required",
-    "ldap_encryption": "off, ldaps, or starttls",
+    "ldap_encryption": "ldaps or starttls",
     "auto_ptr": "ask, on, or off",
 }
 FIELD_LABELS = {
     "auth": "Auth",
     "kerberos": "Kerberos",
     "ldap_encryption": "LDAP encryption",
-    "ldap_compatibility": "LDAP compatibility",
     "auto_ptr": "Auto PTR",
     "smart_days": "Smart days",
     "smart_disabled_days": "Smart disabled days",
@@ -165,22 +161,11 @@ def _safe_user_config_value(key: str, value: object) -> str:
     normalized = _preference_value(value)
     if key not in USER_CONFIG_KEYS or not normalized:
         return ""
-    if key == "ldap_compatibility":
-        return _normalized_on_off(normalized)
     if key in CHOICE_VALUES:
         return _normalized_choice(key, normalized)
     if key in INTEGER_RANGES:
         return _normalized_integer(key, normalized)
     return normalized
-
-
-def _normalized_on_off(value: str) -> str:
-    normalized = value.casefold()
-    if normalized in ON_VALUES:
-        return "on"
-    if normalized in OFF_VALUES:
-        return "off"
-    return ""
 
 
 def _normalized_choice(key: str, value: str) -> str:
@@ -196,17 +181,11 @@ def user_config_value_error(key: str, value: object) -> str | None:
     normalized = _preference_value(value)
     if not normalized or key not in USER_CONFIG_KEYS:
         return None
-    if key == "ldap_compatibility":
-        return None if _normalized_on_off(normalized) else _on_off_error()
     if key in CHOICE_VALUES:
         return None if _normalized_choice(key, normalized) else _choice_error(key)
     if key in INTEGER_RANGES:
         return _integer_value_error(key, normalized)
     return None
-
-
-def _on_off_error() -> str:
-    return "LDAP compatibility must be on or off."
 
 
 def _choice_error(key: str) -> str:
@@ -355,8 +334,8 @@ def read_password_file(path: Path = PASSWORD_FILE_PATH) -> str:
     try:
         file_descriptor = _open_private_password_file(path)
         with os.fdopen(file_descriptor, "r", encoding="utf-8") as file:
-            return file.read().splitlines()[0].strip()
-    except FileNotFoundError, IndexError, OSError:
+            return file.readline().removesuffix("\n").removesuffix("\r")
+    except FileNotFoundError, OSError:
         return ""
 
 
@@ -366,7 +345,7 @@ class AppConfig:
     domain: str
     zone: str
     user: str
-    password: str
+    password: str = field(repr=False)
     auth: str
     kerberos: str
     krb5_ccache: str
@@ -374,7 +353,6 @@ class AppConfig:
     options: str
     ldap_base: str
     ldap_encryption: str
-    ldap_compatibility: str
     auto_ptr: str
     smart_days: str
     smart_disabled_days: str
@@ -402,9 +380,7 @@ class AppConfig:
         domain = configured_domain or (
             "" if is_reverse_dns_zone(legacy_zone) else legacy_zone
         )
-        zone = environment.get(
-            "SAMBATUI_ZONE", saved.get("last_zone") or legacy_zone
-        )
+        zone = environment.get("SAMBATUI_ZONE", saved.get("last_zone") or legacy_zone)
         password_file = Path(
             value(
                 "SAMBATUI_PASSWORD_FILE",
@@ -443,9 +419,6 @@ class AppConfig:
             ldap_encryption=value(
                 "SAMBATUI_LDAP_ENCRYPTION", "ldap_encryption", "ldaps"
             ),
-            ldap_compatibility=value(
-                "SAMBATUI_LDAP_COMPATIBILITY", "ldap_compatibility", "off"
-            ),
             auto_ptr=value("SAMBATUI_AUTO_PTR", "auto_ptr", "ask"),
             smart_days=value("SAMBATUI_SMART_DAYS", "smart_days", "90"),
             smart_disabled_days=value(
@@ -456,9 +429,7 @@ class AppConfig:
                 "smart_never_logged_days",
                 "30",
             ),
-            smart_max_rows=value(
-                "SAMBATUI_SMART_MAX_ROWS", "smart_max_rows", "500"
-            ),
+            smart_max_rows=value("SAMBATUI_SMART_MAX_ROWS", "smart_max_rows", "500"),
             password_file=password_file,
             command_timeout=command_timeout,
         )
@@ -477,7 +448,6 @@ DEFAULT_CONFIGFILE = APP_CONFIG.configfile
 DEFAULT_OPTIONS = APP_CONFIG.options
 DEFAULT_LDAP_BASE = APP_CONFIG.ldap_base
 DEFAULT_LDAP_ENCRYPTION = APP_CONFIG.ldap_encryption
-DEFAULT_LDAP_COMPATIBILITY = APP_CONFIG.ldap_compatibility
 DEFAULT_AUTO_PTR = APP_CONFIG.auto_ptr
 DEFAULT_SMART_DAYS = APP_CONFIG.smart_days
 DEFAULT_SMART_DISABLED_DAYS = APP_CONFIG.smart_disabled_days

@@ -4,10 +4,8 @@ from typing import cast
 from rich.text import Text
 from textual.widgets import DataTable, Input, Static
 
-from sambatui.app import (
-    DnsRow,
-    SambatuiApp,
-)
+from sambatui.app import SambatuiApp
+from sambatui.core.models import DnsRow
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_view_catalog import SmartViewOptions
@@ -18,7 +16,7 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test() as pilot:
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             app.zones = ["example.com", "2.0.192.in-addr.arpa"]
             app.populate_records(
                 [
@@ -46,6 +44,7 @@ def test_details_pane_updates_for_dns_ldap_and_smart_rows() -> None:
                         name="Alice",
                         summary="alice@example.com",
                         attributes={
+                            "uSNChanged": ("17",),
                             "sAMAccountName": ("alice",),
                             "memberOf": ("CN=Staff,DC=example,DC=com",),
                         },
@@ -81,7 +80,7 @@ def test_passive_dns_findings_empty_without_zone() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.query_one("#zone", Input).value = ""
+            app.set_val("zone", "")
 
             assert (
                 app.passive_dns_findings(
@@ -98,13 +97,13 @@ def test_passive_dns_risk_does_not_infer_missing_records_in_other_zones() -> Non
         app = SambatuiApp()
         async with app.run_test():
             table = app.query_one("#records", DataTable)
-            app.query_one("#zone", Input).value = "2.0.192.in-addr.arpa"
+            app.set_val("zone", "2.0.192.in-addr.arpa")
             app.populate_records(
                 [DnsRow("10", "1", "0", "PTR", "www.example.com", "", "")]
             )
             assert table.get_row_at(0)[1] == ""
 
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             row = DnsRow("www", "1", "0", "A", "192.0.2.10", "", "")
             app.populate_records([row])
             assert table.get_row_at(0)[1] == ""
@@ -150,6 +149,7 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
                     name="Solo",
                     summary="",
                     attributes={
+                        "uSNChanged": ("17",),
                         "sAMAccountName": ("solo",),
                         "userAccountControl": ("512",),
                     },
@@ -159,10 +159,10 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
     async def run_app() -> None:
         app = DashboardApp()
         async with app.run_test():
+            app.set_connection_values(
+                {"server": "dc01.example.com", "user": "admin", "password": "secret"}
+            )
             app.zones = ["example.com", "bad.example"]
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin"
-            app.query_one("#password", Input).value = "secret"
             values = {
                 "days": "90",
                 "disabled_days": "180",
@@ -170,7 +170,6 @@ def test_full_health_dashboard_renders_summary_and_partial_failures() -> None:
                 "max_rows": "20",
                 "base_dn": "DC=example,DC=com",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
             }
 
             await app.load_full_health_dashboard(
@@ -279,7 +278,9 @@ def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
         def __init__(self, fixes: list[tuple[str, str, str]]) -> None:
             self.fixes = fixes
 
-        def disable_account(self, dn: str, user_account_control: int) -> None:
+        def disable_account(
+            self, dn: str, user_account_control: int, *, expected_revision: str
+        ) -> None:
             self.fixes.append(("disable", dn, str(user_account_control)))
 
     class LdapFixApp(SambatuiApp):
@@ -313,7 +314,7 @@ def test_smart_fix_disables_ldap_account_and_refreshes_findings() -> None:
                 fix_label="disable old",
                 fix_value="514",
                 fix_dn="CN=old,DC=example,DC=com",
-                fix_attribute="userAccountControl",
+                fix_revision="17",
             )
             app.populate_smart_view("LDAP inactive enabled users", [row])
 
@@ -349,7 +350,7 @@ def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     )
                 ]
             return [
@@ -358,7 +359,7 @@ def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
                     kind="user",
                     name="Bob",
                     summary="bob@example.com",
-                    attributes={},
+                    attributes={"uSNChanged": ("17",)},
                 )
             ]
 
@@ -368,15 +369,14 @@ def test_inline_search_ldap_queries_directory_not_loaded_rows() -> None:
     async def run_app() -> None:
         app = DirectorySearchApp()
         async with app.run_test() as pilot:
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin@example.com"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("user", "admin@example.com")
+            app.set_val("password", "secret")
             values = {
                 "kind": "users",
                 "text": "",
                 "base_dn": "DC=example,DC=com",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
                 "max_rows": "200",
             }
 
@@ -412,7 +412,7 @@ def test_inline_search_dns_reloads_full_zone_before_filtering() -> None:
     async def run_app() -> None:
         app = DnsSearchApp()
         async with app.run_test() as pilot:
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             app.zones = ["example.com"]
             app.populate_records(
                 [DnsRow("db", "1", "0", "A", "192.0.2.20", "3600", "raw")]
@@ -466,14 +466,14 @@ def test_inline_search_filters_dns_directory_and_smart_views() -> None:
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Ops,CN=Users,DC=example,DC=com",
                         kind="group",
                         name="Ops",
                         summary="ops@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )
@@ -522,14 +522,14 @@ def test_ldap_kind_header_sorts_directory_rows() -> None:
                         kind="user",
                         name="Bob",
                         summary="bob@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Ops,CN=Users,DC=example,DC=com",
                         kind="group",
                         name="Ops",
                         summary="ops@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )

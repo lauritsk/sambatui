@@ -1,11 +1,8 @@
 import asyncio
 
+from textual.widgets import DataTable
 
-from sambatui.app import (
-    SambatuiApp,
-)
-from textual.widgets import DataTable, Input
-
+from sambatui.app import SambatuiApp
 from sambatui.ui.screens import (
     ConfirmScreen,
     FormScreen,
@@ -39,7 +36,7 @@ def test_modal_key_shortcuts_open_without_key_handler_crash() -> None:
                     if not isinstance(app.screen, screen_type):
                         break
 
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("password", "secret")
             await pilot.press("P")
             for _ in range(10):
                 await pilot.pause()

@@ -6,7 +6,6 @@ from dataclasses import replace
 
 from .models import SmartViewCheckResult, SmartViewRow
 
-
 SEVERITY_ORDER = {"error": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 

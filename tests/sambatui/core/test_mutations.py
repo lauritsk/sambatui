@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import replace
 from collections.abc import Callable
 
 import pytest
@@ -37,7 +36,7 @@ def test_reservation_is_reentrant_and_freezes_connection_settings() -> None:
         host = Host()
         original = host.settings
         with host.mutations.reserve(original):
-            host.settings = replace(original, server="new.example.com")
+            host.settings = original.updated({"server": "new.example.com"})
             assert host.connection_settings() is original
             with host.mutations.reserve(host.settings):
                 assert host.connection_settings() is original

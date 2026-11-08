@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
+from textual.app import ScreenStackError
 from textual.coordinate import Coordinate
+from textual.css.query import NoMatches
 from textual.widgets import DataTable, Static
 
 from ..core.view_state import ViewMode
-from .base import AppControllerBase
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 
 SELECTION_LABELS = {
     ViewMode.DNS: ("record", "records"),
@@ -15,53 +20,55 @@ SELECTION_LABELS = {
 }
 
 
-class AppSelectionMixin(AppControllerBase):
-    def reset_render_state(self) -> None:
+class AppSelectionMixin:
+    def reset_render_state(self: SambatuiApp) -> None:
         self.views.reset_selection()
         self.refresh_selection_indicator()
 
-    def selection_count_label(self) -> str:
+    def selection_count_label(self: SambatuiApp) -> str:
         count = len(self.selected_rows_for_current_view())
         singular, plural = SELECTION_LABELS.get(
             self.views.mode, SELECTION_LABELS[ViewMode.DNS]
         )
         return f"{count} {singular if count == 1 else plural}"
 
-    def selection_status_text(self) -> str:
+    def selection_status_text(self: SambatuiApp) -> str:
         return f"{self.selection_count_label()} selected · Space toggles · Esc clears"
 
-    def refresh_selection_indicator(self) -> None:
-        with suppress(Exception):
+    def refresh_selection_indicator(self: SambatuiApp) -> None:
+        with suppress(NoMatches, ScreenStackError):
             indicator = self.query_one("#selection_state", Static)
             count = len(self.selected_rows_for_current_view())
             indicator.display = bool(count or self.views.visual_selecting)
             mode = "VISUAL · " if self.views.visual_selecting else ""
             indicator.update(f"{mode}{count} selected")
 
-    def selected_rows_for_current_view(self) -> set[int]:
+    def selected_rows_for_current_view(self: SambatuiApp) -> set[int]:
         return self.views.current.selected_rows
 
-    def current_selection_anchor(self) -> int | None:
+    def current_selection_anchor(self: SambatuiApp) -> int | None:
         return self.views.current.selection_anchor
 
-    def set_current_selection_anchor(self, row_index: int | None) -> None:
+    def set_current_selection_anchor(self: SambatuiApp, row_index: int | None) -> None:
         self.views.current.selection_anchor = row_index
 
-    def set_current_row_selected(self, row_index: int, selected: bool) -> None:
+    def set_current_row_selected(
+        self: SambatuiApp, row_index: int, selected: bool
+    ) -> None:
         self.set_row_selected(self.views.mode, row_index, selected)
 
-    def clear_current_selection(self) -> None:
+    def clear_current_selection(self: SambatuiApp) -> None:
         if self.views.table(self.views.mode) is None:
             self.views.reset_selection()
             self.refresh_selection_indicator()
         else:
             self.clear_view_selection(self.views.mode)
 
-    def select_current_range(self, start: int, end: int) -> None:
+    def select_current_range(self: SambatuiApp, start: int, end: int) -> None:
         self.select_view_range(self.views.mode, start, end)
 
     def set_row_selected(
-        self,
+        self: SambatuiApp,
         mode: ViewMode | str,
         row_index: int,
         selected: bool,
@@ -83,7 +90,7 @@ class AppSelectionMixin(AppControllerBase):
             table.refresh_row(row_index)
         self.refresh_selection_indicator()
 
-    def clear_view_selection(self, mode: ViewMode | str) -> None:
+    def clear_view_selection(self: SambatuiApp, mode: ViewMode | str) -> None:
         state = self.views.table(mode)
         if state is None:
             return
@@ -96,7 +103,12 @@ class AppSelectionMixin(AppControllerBase):
         self.refresh_selection_indicator()
 
     def select_view_range(
-        self, mode: ViewMode | str, start: int, end: int, *, clear: bool = True
+        self: SambatuiApp,
+        mode: ViewMode | str,
+        start: int,
+        end: int,
+        *,
+        clear: bool = True,
     ) -> None:
         table = self.query_one("#records", DataTable)
         state = self.views.table(mode)
@@ -115,31 +127,37 @@ class AppSelectionMixin(AppControllerBase):
         self.refresh_selection_indicator()
         self.set_status(self.selection_status_text())
 
-    def set_record_selected(self, row_index: int, selected: bool) -> None:
+    def set_record_selected(self: SambatuiApp, row_index: int, selected: bool) -> None:
         self.set_row_selected(ViewMode.DNS, row_index, selected)
 
-    def clear_record_selection(self) -> None:
+    def clear_record_selection(self: SambatuiApp) -> None:
         self.clear_view_selection(ViewMode.DNS)
 
-    def set_directory_selected(self, row_index: int, selected: bool) -> None:
+    def set_directory_selected(
+        self: SambatuiApp, row_index: int, selected: bool
+    ) -> None:
         self.set_row_selected(ViewMode.DIRECTORY, row_index, selected)
 
-    def clear_directory_selection(self) -> None:
+    def clear_directory_selection(self: SambatuiApp) -> None:
         self.clear_view_selection(ViewMode.DIRECTORY)
 
-    def set_smart_selected(self, row_index: int, selected: bool) -> None:
+    def set_smart_selected(self: SambatuiApp, row_index: int, selected: bool) -> None:
         self.set_row_selected(ViewMode.SMART, row_index, selected)
 
-    def clear_smart_selection(self) -> None:
+    def clear_smart_selection(self: SambatuiApp) -> None:
         self.clear_view_selection(ViewMode.SMART)
 
-    def select_record_range(self, start: int, end: int, *, clear: bool = True) -> None:
+    def select_record_range(
+        self: SambatuiApp, start: int, end: int, *, clear: bool = True
+    ) -> None:
         self.select_view_range(ViewMode.DNS, start, end, clear=clear)
 
     def select_directory_range(
-        self, start: int, end: int, *, clear: bool = True
+        self: SambatuiApp, start: int, end: int, *, clear: bool = True
     ) -> None:
         self.select_view_range(ViewMode.DIRECTORY, start, end, clear=clear)
 
-    def select_smart_range(self, start: int, end: int, *, clear: bool = True) -> None:
+    def select_smart_range(
+        self: SambatuiApp, start: int, end: int, *, clear: bool = True
+    ) -> None:
         self.select_view_range(ViewMode.SMART, start, end, clear=clear)

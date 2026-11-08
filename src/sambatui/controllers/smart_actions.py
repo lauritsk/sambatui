@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from textual import work
 
-from ..app_constants import (
-    DEFAULT_LDAP_COMPATIBILITY,
+from sambatui.core.config import (
     DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_SMART_DAYS,
     DEFAULT_SMART_DISABLED_DAYS,
     DEFAULT_SMART_MAX_ROWS,
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
 )
+from sambatui.ldap.client import LdapDirectoryClient
+
 from ..core.models import DnsRow
+from ..core.mutations import mutation_action
 from ..dns.names import is_ipv4_reverse_zone
 from ..dns.parsing import parse_records
 from ..dns.validation import validate_record
-from ..ldap.client import LdapDirectoryClient
+from ..ldap.errors import LdapOperationError
 from ..ldap.rows import DirectoryRow
 from ..smart_view_catalog import (
     FULL_HEALTH_DNS_VIEW_IDS,
@@ -46,7 +49,9 @@ from ..ui.screens import (
     SmartViewChoice,
     SmartViewPickerScreen,
 )
-from .base import AppControllerBase
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 from .helpers import (
     DNS_SMART_ROW_BUILDERS,
 )
@@ -57,8 +62,8 @@ LDAP_STALE_COMPUTERS_VIEW_ID = "ldap_stale_computers"
 LDAP_USERS_WITHOUT_GROUPS_VIEW_ID = "ldap_users_without_groups"
 
 
-class AppSmartActionsMixin(AppControllerBase):
-    def smart_view_choices(self) -> list[SmartViewChoice]:
+class AppSmartActionsMixin:
+    def smart_view_choices(self: SambatuiApp) -> list[SmartViewChoice]:
         return [
             (
                 view.shortcut,
@@ -70,7 +75,9 @@ class AppSmartActionsMixin(AppControllerBase):
             for view in SMART_VIEWS
         ]
 
-    def smart_threshold_fields(self, view: SmartViewDefinition) -> list[FormField]:
+    def smart_threshold_fields(
+        self: SambatuiApp, view: SmartViewDefinition
+    ) -> list[FormField]:
         threshold_fields = (
             (
                 view.needs_days,
@@ -103,14 +110,18 @@ class AppSmartActionsMixin(AppControllerBase):
         )
         return [field for enabled, field in threshold_fields if enabled]
 
-    def smart_view_fields(self, view: SmartViewDefinition) -> list[FormField]:
+    def smart_view_fields(
+        self: SambatuiApp, view: SmartViewDefinition
+    ) -> list[FormField]:
         fields = self.smart_threshold_fields(view)
         if view.needs_ldap:
             fields.extend(self.ldap_connection_fields(self.ldap_base_default()))
         fields.append(self.smart_max_rows_field())
         return fields
 
-    def smart_view_default_values(self, view: SmartViewDefinition) -> dict[str, str]:
+    def smart_view_default_values(
+        self: SambatuiApp, view: SmartViewDefinition
+    ) -> dict[str, str]:
         values = {"max_rows": self.val("smart_max_rows") or DEFAULT_SMART_MAX_ROWS}
         threshold_defaults = (
             (view.needs_days, "days", self.val("smart_days") or DEFAULT_SMART_DAYS),
@@ -134,14 +145,12 @@ class AppSmartActionsMixin(AppControllerBase):
                     "base_dn": self.ldap_base_default(),
                     "ldap_encryption": self.val("ldap_encryption")
                     or DEFAULT_LDAP_ENCRYPTION,
-                    "ldap_compatibility": self.val("ldap_compatibility")
-                    or DEFAULT_LDAP_COMPATIBILITY,
                 }
             )
         return values
 
     async def smart_view_values(
-        self, view: SmartViewDefinition
+        self: SambatuiApp, view: SmartViewDefinition
     ) -> dict[str, str] | None:
         defaults = self.smart_view_default_values(view)
         values = await self.form(
@@ -154,19 +163,19 @@ class AppSmartActionsMixin(AppControllerBase):
             return None
         return defaults | values
 
-    def dns_smart_view_needs_zone_refresh(self) -> bool:
+    def dns_smart_view_needs_zone_refresh(self: SambatuiApp) -> bool:
         if not self.zones:
             return True
         return len(self.zones) == 1 or not any(
             is_ipv4_reverse_zone(zone) for zone in self.zones
         )
 
-    async def ensure_dns_zones_for_smart_view(self) -> None:
+    async def ensure_dns_zones_for_smart_view(self: SambatuiApp) -> None:
         if self.dns_smart_view_needs_zone_refresh():
             await self.load_zones(restore_active_zone=False)
 
     async def dns_records_with_failures_for_smart_view(
-        self,
+        self: SambatuiApp,
     ) -> tuple[dict[str, list[DnsRow]], list[str]] | None:
         await self.ensure_dns_zones_for_smart_view()
         if not self.zones:
@@ -184,7 +193,9 @@ class AppSmartActionsMixin(AppControllerBase):
                 records_by_zone[zone] = parse_records(output)
         return records_by_zone, failures
 
-    async def dns_records_for_smart_view(self) -> dict[str, list[DnsRow]] | None:
+    async def dns_records_for_smart_view(
+        self: SambatuiApp,
+    ) -> dict[str, list[DnsRow]] | None:
         result = await self.dns_records_with_failures_for_smart_view()
         if result is None:
             return None
@@ -196,14 +207,16 @@ class AppSmartActionsMixin(AppControllerBase):
         return records_by_zone
 
     def dns_smart_rows(
-        self, view_id: str, records_by_zone: dict[str, list[DnsRow]]
+        self: SambatuiApp, view_id: str, records_by_zone: dict[str, list[DnsRow]]
     ) -> list[SmartViewRow]:
         builder = DNS_SMART_ROW_BUILDERS.get(view_id)
         if builder is None:
             return []
         return builder(records_by_zone)
 
-    async def refresh_current_smart_view(self) -> None:
+    async def refresh_current_smart_view(self: SambatuiApp) -> None:
+        if not self.connection_is_current():
+            return
         state = self.views.smart
         view = SMART_VIEW_BY_ID.get(state.view_id)
         values = state.values.copy()
@@ -222,18 +235,25 @@ class AppSmartActionsMixin(AppControllerBase):
             self.refresh_smart_view()
             return
 
+        if view.needs_ldap:
+            self.apply_ldap_connection_values(values)
+        revision = self.connection_revision
         rows = await self.build_smart_view_rows(
             view, values, SmartViewOptions.from_values(values)
         )
         if rows is None:
             return
-        if state.view_id != view.view_id or state.values != values:
+        if (
+            state.view_id != view.view_id
+            or state.values != values
+            or revision != self.connection_revision
+        ):
             return
         rows = self.sorted_smart_view(rows)
         self.populate_smart_view(view.label, rows[: state.max_rows])
         self.notify("Refreshed smart-view findings")
 
-    async def load_more_smart_view(self) -> bool:
+    async def load_more_smart_view(self: SambatuiApp) -> bool:
         state = self.views.smart
         if not state.values or not state.view_id:
             self.set_status("No smart view to extend. Press S to run a smart view.")
@@ -250,7 +270,7 @@ class AppSmartActionsMixin(AppControllerBase):
         await self.refresh_current_smart_view()
         return True
 
-    def selected_smart_rows_for_fix(self) -> list[SmartViewRow]:
+    def selected_smart_rows_for_fix(self: SambatuiApp) -> list[SmartViewRow]:
         if self.views.mode != "smart":
             return []
         visible_rows = self.visible_smart_view()
@@ -263,12 +283,12 @@ class AppSmartActionsMixin(AppControllerBase):
             rows = [self.visible_row_at(visible_rows, self.records_cursor_row())]
         return [row for row in rows if isinstance(row, SmartViewRow)]
 
-    def selected_smart_row(self) -> SmartViewRow | None:
+    def selected_smart_row(self: SambatuiApp) -> SmartViewRow | None:
         rows = self.selected_smart_rows_for_fix()
         return rows[0] if len(rows) == 1 else None
 
     @work
-    async def action_smart_view(self) -> None:
+    async def action_smart_view(self: SambatuiApp) -> None:
         view_id = await self.push_screen_wait(
             SmartViewPickerScreen(self.smart_view_choices())
         )
@@ -277,14 +297,14 @@ class AppSmartActionsMixin(AppControllerBase):
         await self.run_smart_view(view_id)
 
     @work
-    async def action_smart_view_shortcut(self, shortcut: str) -> None:
+    async def action_smart_view_shortcut(self: SambatuiApp, shortcut: str) -> None:
         view = SMART_VIEW_BY_SHORTCUT.get(shortcut)
         if view is None:
             return
         await self.run_smart_view(view.view_id)
 
     def apply_smart_view_options(
-        self, view: SmartViewDefinition, options: SmartViewOptions
+        self: SambatuiApp, view: SmartViewDefinition, options: SmartViewOptions
     ) -> None:
         if view.needs_days:
             self.set_val("smart_days", str(options.days))
@@ -296,7 +316,7 @@ class AppSmartActionsMixin(AppControllerBase):
         self.save_preferences()
 
     def remember_current_smart_view(
-        self,
+        self: SambatuiApp,
         view: SmartViewDefinition,
         values: dict[str, str],
         options: SmartViewOptions,
@@ -309,7 +329,7 @@ class AppSmartActionsMixin(AppControllerBase):
         state.values = values.copy()
 
     def populate_smart_view_results(
-        self, label: str, rows: list[SmartViewRow], max_rows: int
+        self: SambatuiApp, label: str, rows: list[SmartViewRow], max_rows: int
     ) -> None:
         self.set_search_text("", refresh=False)
         rows = self.sorted_smart_view(rows)
@@ -317,7 +337,7 @@ class AppSmartActionsMixin(AppControllerBase):
         self.notify(f"Loaded {min(len(rows), max_rows)} smart-view findings")
 
     async def ldap_directory_for_smart_view(
-        self, view: SmartViewDefinition, values: dict[str, str]
+        self: SambatuiApp, view: SmartViewDefinition, values: dict[str, str]
     ) -> list[DirectoryRow] | None:
         self.apply_ldap_connection_values(values)
 
@@ -331,11 +351,11 @@ class AppSmartActionsMixin(AppControllerBase):
         max_rows = SmartViewOptions.from_values(values).max_rows
         return await self.directory_search_rows(client, kind, "", max_rows)
 
-    def ldap_smart_view_kind(self, view: SmartViewDefinition) -> str:
+    def ldap_smart_view_kind(self: SambatuiApp, view: SmartViewDefinition) -> str:
         return view.directory_kind
 
     async def build_smart_view_rows(
-        self,
+        self: SambatuiApp,
         view: SmartViewDefinition,
         values: dict[str, str],
         options: SmartViewOptions,
@@ -352,7 +372,7 @@ class AppSmartActionsMixin(AppControllerBase):
         return self.ldap_smart_rows(view.view_id, directory_rows, options)
 
     def ldap_smart_rows(
-        self,
+        self: SambatuiApp,
         view_id: str,
         directory_rows: list[DirectoryRow],
         options: SmartViewOptions,
@@ -372,16 +392,16 @@ class AppSmartActionsMixin(AppControllerBase):
         return []
 
     async def dashboard_ldap_rows(
-        self, client: LdapDirectoryClient, kind: str, max_rows: int
+        self: SambatuiApp, client: LdapDirectoryClient, kind: str, max_rows: int
     ) -> tuple[list[DirectoryRow] | None, str]:
         async with self.busy():
             try:
                 return await asyncio.to_thread(client.search, kind, "", max_rows), ""
-            except ValueError as exc:
+            except (ValueError, LdapOperationError) as exc:
                 return None, str(exc)
 
     def dns_dashboard_results(
-        self,
+        self: SambatuiApp,
         records_by_zone: dict[str, list[DnsRow]],
         failures: list[str],
     ) -> list[SmartViewCheckResult]:
@@ -406,7 +426,7 @@ class AppSmartActionsMixin(AppControllerBase):
         return results
 
     def ldap_dashboard_results(
-        self,
+        self: SambatuiApp,
         user_rows: list[DirectoryRow] | None,
         user_error: str,
         computer_rows: list[DirectoryRow] | None,
@@ -435,7 +455,7 @@ class AppSmartActionsMixin(AppControllerBase):
             )
         return results
 
-    def dns_dashboard_unloaded_results(self) -> list[SmartViewCheckResult]:
+    def dns_dashboard_unloaded_results(self: SambatuiApp) -> list[SmartViewCheckResult]:
         return [
             SmartViewCheckResult(
                 view_id=view_id,
@@ -446,7 +466,9 @@ class AppSmartActionsMixin(AppControllerBase):
             for view_id in FULL_HEALTH_DNS_VIEW_IDS
         ]
 
-    async def dns_dashboard_check_results(self) -> list[SmartViewCheckResult]:
+    async def dns_dashboard_check_results(
+        self: SambatuiApp,
+    ) -> list[SmartViewCheckResult]:
         dns_result = await self.dns_records_with_failures_for_smart_view()
         if dns_result is None:
             return self.dns_dashboard_unloaded_results()
@@ -454,7 +476,7 @@ class AppSmartActionsMixin(AppControllerBase):
         return self.dns_dashboard_results(records_by_zone, failures)
 
     def ldap_dashboard_validation_results(
-        self, validation_error: str
+        self: SambatuiApp, validation_error: str
     ) -> list[SmartViewCheckResult]:
         return [
             SmartViewCheckResult(
@@ -467,7 +489,7 @@ class AppSmartActionsMixin(AppControllerBase):
         ]
 
     async def ldap_dashboard_check_results(
-        self, values: dict[str, str], options: SmartViewOptions
+        self: SambatuiApp, values: dict[str, str], options: SmartViewOptions
     ) -> list[SmartViewCheckResult]:
         self.apply_ldap_connection_values(values)
         client = self.ldap_client(values["base_dn"])
@@ -486,14 +508,18 @@ class AppSmartActionsMixin(AppControllerBase):
         )
 
     async def load_full_health_dashboard(
-        self,
+        self: SambatuiApp,
         values: dict[str, str],
         options: SmartViewOptions,
         *,
         refreshed: bool = False,
     ) -> None:
+        self.apply_ldap_connection_values(values)
+        revision, mode = self.connection_revision, self.views.mode
         results = await self.dns_dashboard_check_results()
         results.extend(await self.ldap_dashboard_check_results(values, options))
+        if revision != self.connection_revision or mode != self.views.mode:
+            return
 
         rows = full_health_dashboard_rows(results)
         self.populate_smart_view(
@@ -503,7 +529,7 @@ class AppSmartActionsMixin(AppControllerBase):
         action = "Refreshed" if refreshed else "Loaded"
         self.notify(f"{action} full health dashboard")
 
-    async def run_smart_view(self, view_id: str) -> None:
+    async def run_smart_view(self: SambatuiApp, view_id: str) -> None:
         view = SMART_VIEW_BY_ID[view_id]
         values = await self.smart_view_values(view)
         if values is None:
@@ -516,13 +542,20 @@ class AppSmartActionsMixin(AppControllerBase):
             await self.load_full_health_dashboard(values, options)
             return
 
+        if view.needs_ldap:
+            self.apply_ldap_connection_values(values)
+        revision, mode = self.connection_revision, self.views.mode
         rows = await self.build_smart_view_rows(view, values, options)
-        if rows is None:
+        if (
+            rows is None
+            or revision != self.connection_revision
+            or mode != self.views.mode
+        ):
             return
         self.remember_current_smart_view(view, values, options)
         self.populate_smart_view_results(view.label, rows, options.max_rows)
 
-    async def apply_smart_fix(self, row: SmartViewRow) -> None:
+    async def apply_smart_fix(self: SambatuiApp, row: SmartViewRow) -> None:
         match row.fix_action:
             case "dns_add_ptr":
                 await self.apply_dns_smart_fix(row)
@@ -533,7 +566,8 @@ class AppSmartActionsMixin(AppControllerBase):
                     "No guided fix is available for this finding.", severity="error"
                 )
 
-    async def apply_dns_smart_fix(self, row: SmartViewRow) -> None:
+    @mutation_action
+    async def apply_dns_smart_fix(self: SambatuiApp, row: SmartViewRow) -> None:
         error = validate_record(row.fix_name, row.fix_rtype, row.fix_value)
         if error:
             self.report_error(error)
@@ -558,7 +592,10 @@ class AppSmartActionsMixin(AppControllerBase):
         self.notify(f"Applied fix: {row.fix_label}")
         await self.refresh_current_smart_view()
 
-    async def apply_ldap_disable_smart_fix(self, row: SmartViewRow) -> None:
+    @mutation_action
+    async def apply_ldap_disable_smart_fix(
+        self: SambatuiApp, row: SmartViewRow
+    ) -> None:
         try:
             user_account_control = int(row.fix_value)
         except ValueError:
@@ -571,15 +608,19 @@ class AppSmartActionsMixin(AppControllerBase):
             "Fix smart finding?\n\n"
             "DISABLE LDAP account\n"
             f"DN: {row.fix_dn}\n"
-            f"userAccountControl -> {user_account_control}\n\n"
+            f"userAccountControl -> {user_account_control | 0x0002}\n\n"
             f"Finding: {row.finding}\n"
             f"Evidence: {row.evidence}",
             default_confirm=True,
         ):
             self.notify("Fix cancelled")
             return
+        client = self.ldap_client()
         _result, error = await self.ldap_thread_result(
-            lambda: self.ldap_client().disable_account(row.fix_dn, user_account_control)
+            lambda: client.disable_account(
+                row.fix_dn, user_account_control, expected_revision=row.fix_revision
+            ),
+            write=True,
         )
         if error:
             return
@@ -587,7 +628,8 @@ class AppSmartActionsMixin(AppControllerBase):
         await self.refresh_current_smart_view()
 
     @work
-    async def action_fix_smart(self) -> None:
+    @mutation_action
+    async def action_fix_smart(self: SambatuiApp) -> None:
         rows = self.selected_smart_rows_for_fix()
         if not rows:
             self.notify("Select a smart-view finding first.", severity="error")
