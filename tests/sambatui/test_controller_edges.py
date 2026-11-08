@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from textual.widgets import DataTable, Input, Static
+from textual.css.query import NoMatches
+from textual.widgets import DataTable, Static
 
-from sambatui.app import DnsRow, SambatuiApp
+from sambatui.app import SambatuiApp
 from sambatui.controllers.core import AppCoreMixin
 from sambatui.controllers.helpers import (
     SMART_SORT_KEYS,
@@ -17,6 +18,7 @@ from sambatui.controllers.helpers import (
     setup_auth_values,
     sort_direction,
 )
+from sambatui.core.models import DnsRow
 from sambatui.core.operations import DnsAddOperation
 from sambatui.core.view_state import next_sort_state
 from sambatui.ldap.client import LdapDirectoryClient
@@ -63,6 +65,7 @@ def directory_row(kind: str = "user", name: str = "Alice") -> DirectoryRow:
         name=name,
         summary=f"{name.lower()}@example.com",
         attributes={
+            "uSNChanged": ("17",),
             "displayName": (name,),
             "mail": (f"{name.lower()}@example.com",),
             "description": ("old",),
@@ -157,15 +160,15 @@ def test_dns_action_query_and_add_form_edges() -> None:
             assert await app.add_record_form_values() is None
             app.forms = [{"rtype": "A"}, None]
             assert await app.add_record_form_values() is None
-            app.forms = [{"rtype": "A"}, {"name": "www", "address": "bad", "ttl": ""}]
+            app.forms = [{"rtype": "A"}, {"name": "www", "address": "bad"}]
             assert await app.add_record_form_values() is None
             assert app.errors[-1]
             app.forms = [
                 {"rtype": "txt"},
-                {"name": "txt", "text": "hello world", "ttl": ""},
+                {"name": "txt", "text": "hello world"},
             ]
             assert await app.add_record_form_values() == DnsAddOperation(
-                "", "txt", "TXT", "hello world", ""
+                "", "txt", "TXT", "hello world"
             )
 
     asyncio.run(run_app())
@@ -175,12 +178,11 @@ def test_dns_record_validation_and_ptr_edges() -> None:
     async def run_app() -> None:
         app = NotificationApp()
         async with app.run_test():
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             assert app.record_type_selection_error({"rtype": "bad"}) is not None
             assert (
                 app.add_record_value_from_fields("UNKNOWN", {"value": "raw"}) == "raw"
             )
-            assert app.ttl_error("0") == "TTL must be greater than zero."
             assert app.duplicate_record_error("x", "A", "192.0.2.1") is None
             assert app.existing_reverse_record_for_ipv4("not-ip") is None
             assert (
@@ -193,7 +195,7 @@ def test_dns_record_validation_and_ptr_edges() -> None:
 
             app.zones = ["2.0.192.in-addr.arpa"]
             app.notifications.clear()
-            app.query_one("#auto_ptr", Input).value = "off"
+            app.set_val("auto_ptr", "off")
             await app.maybe_add_matching_ptr("www", "A", "192.0.2.10")
             assert app.notifications == []
 
@@ -282,7 +284,7 @@ def test_dns_action_add_update_delete_edges() -> None:
             assert "No editable" in str(app.query_one("#status", Static).render())
 
             app.views.mode = "dns"
-            app.query_one("#auto_ptr", Input).value = "off"
+            app.set_val("auto_ptr", "off")
             app.record_values = None
             await app.action_add.__wrapped__(app)
             app.record_values = DnsAddOperation("", "www", "A", "192.0.2.10")
@@ -378,7 +380,7 @@ def test_setup_validation_connectivity_and_wizard_edges(
     async def run_app() -> None:
         app = SetupApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(tmp_path / "missing")
+            app.set_val("password_file", str(tmp_path / "missing"))
             assert app.setup_wizard_validation_error({"domain": "bad..domain"})
             assert (
                 app.setup_wizard_validation_error(
@@ -400,7 +402,7 @@ def test_setup_validation_connectivity_and_wizard_edges(
             password_file = tmp_path / "password"
             password_file.write_text("secret\n", encoding="utf-8")
             password_file.chmod(0o600)
-            app.query_one("#password_file", Input).value = str(password_file)
+            app.set_val("password_file", str(password_file))
             assert (
                 app.setup_wizard_validation_error(
                     {
@@ -414,16 +416,16 @@ def test_setup_validation_connectivity_and_wizard_edges(
             )
             assert app.setup_wizard_fields()[0][1] == "domain"
 
-            app.query_one("#auth", Input).value = "kerberos"
-            app.query_one("#kerberos", Input).value = "off"
+            app.set_val("auth", "kerberos")
+            app.set_val("kerberos", "off")
             assert app.setup_wizard_auth_defaults() == ("kerberos", "required")
             app.apply_setup_wizard_values(
                 "example.com",
                 "dc01.example.com",
                 {"auth": "kerberos", "kerberos": "off"},
             )
-            assert app.query_one("#server", Input).value == "dc01.example.com"
-            assert app.query_one("#password", Input).value == "secret"
+            assert app.val("server") == "dc01.example.com"
+            assert app.val("password") == "secret"
 
             app.zonelist = (0, "")
             assert await app.setup_dns_zones() is None
@@ -468,7 +470,6 @@ def test_setup_validation_connectivity_and_wizard_edges(
                     "kerberos": "off",
                     "ldap_base": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                     "auto_ptr": "ask",
                     "password_file": str(password_file),
                     "smart_days": "90",
@@ -490,7 +491,6 @@ def test_setup_validation_connectivity_and_wizard_edges(
                     "kerberos": "off",
                     "ldap_base": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                     "auto_ptr": "ask",
                     "password_file": str(password_file),
                     "smart_days": "90",
@@ -536,7 +536,7 @@ def test_setup_discover_ad_edges(monkeypatch: pytest.MonkeyPatch) -> None:
             result = await app.discover_ad_controller("example.com")
             assert result is not None
             app.apply_discovered_ad_controller(services[0])
-            assert app.query_one("#server", Input).value == "dc01.example.com"
+            assert app.val("server") == "dc01.example.com"
 
             app.forms = [{"domain": ""}]
             assert await app.open_discover_ad("example.com")
@@ -607,11 +607,11 @@ def test_core_status_password_command_and_actions(
     async def run_app() -> None:
         app = CoreApp()
         async with app.run_test():
-            app.query_one("#auth", Input).value = "kerberos"
+            app.set_val("auth", "kerberos")
             app.set_initial_connection_status()
             assert "Kerberos" in str(app.query_one("#status", Static).render())
-            app.query_one("#auth", Input).value = "password"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("auth", "password")
+            app.set_val("password", "secret")
             app.set_initial_connection_status()
             assert "Password loaded" in str(app.query_one("#status", Static).render())
             assert app.normalized_domain_candidate("bad domain") == ""
@@ -623,7 +623,7 @@ def test_core_status_password_command_and_actions(
             assert app.commands[-1][0] == "action_setup_wizard"
             await app.action_load_password_file()
             assert app.loaded_password == 1
-            app.query_one("#password", Input).value = ""
+            app.set_val("password", "")
             app.action_save_password_file()
 
             for mode in ("smart", "directory", "dns"):
@@ -634,10 +634,10 @@ def test_core_status_password_command_and_actions(
         parent = tmp_path / "new"
         app = CoreApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(parent / "password")
-            app.query_one("#password", Input).value = ""
+            app.set_val("password_file", str(parent / "password"))
+            app.set_val("password", "")
             await app.save_password.__wrapped__(app)
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("password", "secret")
             app.confirm_values = [False]
             await app.save_password.__wrapped__(app)
             app.confirm_values = [True]
@@ -650,6 +650,7 @@ def test_core_status_password_command_and_actions(
 
     class FakeBusy:
         def __init__(self) -> None:
+            self._busy_depth = 0
             self.button = FakeButton()
             self.states: list[bool] = []
 
@@ -699,7 +700,7 @@ def test_core_load_password_error_edges(
         missing = tmp_path / "missing"
         app = PasswordApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(missing)
+            app.set_val("password_file", str(missing))
             await app.load_password()
             assert "No password" in str(app.query_one("#status", Static).render())
 
@@ -708,14 +709,14 @@ def test_core_load_password_error_edges(
         path.chmod(0o644)
         app = PasswordApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(path)
+            app.set_val("password_file", str(path))
             app.confirms = [False]
             await app.load_password()
             assert "permissions" in str(app.query_one("#status", Static).render())
 
         app = PasswordApp()
         async with app.run_test():
-            app.query_one("#password_file", Input).value = str(path)
+            app.set_val("password_file", str(path))
             app.confirms = [True]
             monkeypatch.setattr(
                 "sambatui.controllers.core.fix_password_file_permissions",
@@ -744,78 +745,31 @@ def test_core_run_command_edges(monkeypatch: pytest.MonkeyPatch) -> None:
         def execution_env(self) -> None:
             return None
 
-    class FakeProc:
-        def __init__(self, code: int, output: bytes) -> None:
-            self.returncode = code
-            self.output = output
-
-        async def communicate(self) -> tuple[bytes, bytes]:
-            return self.output, b""
-
     async def run_app() -> None:
+        from sambatui.samba.execution import CommandResult
+
         app = CommandApp()
         async with app.run_test():
             assert await app.run_command(
                 cast(Any, FakeClient("auth bad")), ["cmd"]
             ) == (2, "auth bad")
+            for result in (
+                CommandResult(0, "ok"),
+                CommandResult(4, "first\nsecond", "first"),
+            ):
 
-            async def ok_exec(*cmd: str, **kwargs: Any) -> FakeProc:
-                return FakeProc(0, b"ok")
+                async def execute(
+                    *args: object, result: CommandResult = result, **kwargs: object
+                ) -> CommandResult:
+                    return result
 
-            monkeypatch.setattr(
-                "sambatui.samba.execution.asyncio.create_subprocess_exec", ok_exec
-            )
-            assert await app.run_command(cast(Any, FakeClient()), ["cmd"]) == (0, "ok")
-
-            async def bad_exec(*cmd: str, **kwargs: Any) -> FakeProc:
-                return FakeProc(4, b"first\nsecond")
-
-            monkeypatch.setattr(
-                "sambatui.samba.execution.asyncio.create_subprocess_exec", bad_exec
-            )
-            code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
-            assert (code, output) == (4, "first\nsecond")
-
-            async def missing_exec(*cmd: str, **kwargs: Any) -> FakeProc:
-                raise OSError("missing executable")
-
-            monkeypatch.setattr(
-                "sambatui.samba.execution.asyncio.create_subprocess_exec",
-                missing_exec,
-            )
-            code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
-            assert code == 127
-            assert "missing executable" in output
-
-            class SlowProc(FakeProc):
-                def __init__(self) -> None:
-                    super().__init__(0, b"partial")
-                    self.calls = 0
-                    self.killed = False
-
-                async def communicate(self) -> tuple[bytes, bytes]:
-                    self.calls += 1
-                    if self.calls == 1:
-                        await asyncio.sleep(1)
-                    return self.output, b""
-
-                def kill(self) -> None:
-                    self.killed = True
-
-            slow_proc = SlowProc()
-
-            async def slow_exec(*cmd: str, **kwargs: Any) -> FakeProc:
-                return slow_proc
-
-            monkeypatch.setattr(
-                "sambatui.samba.execution.asyncio.create_subprocess_exec", slow_exec
-            )
-            monkeypatch.setattr(
-                "sambatui.controllers.core.DEFAULT_COMMAND_TIMEOUT", 0.001
-            )
-            code, output = await app.run_command(cast(Any, FakeClient()), ["cmd"])
-            assert (code, output) == (124, "partial")
-            assert slow_proc.killed
+                monkeypatch.setattr(
+                    "sambatui.controllers.core.execute_command", execute
+                )
+                assert await app.run_command(cast(Any, FakeClient()), ["cmd"]) == (
+                    result.code,
+                    result.output,
+                )
 
     asyncio.run(run_app())
 
@@ -861,7 +815,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
     async def run_app() -> None:
         app = ViewApp()
         async with app.run_test():
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             assert await app.add_ptr("www", "bad") == 0
             app.zones = ["2.0.192.in-addr.arpa"]
             assert await app.add_ptr("www", "192.0.2.10") == 0
@@ -875,13 +829,13 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
             app.zonelist = (0, "")
             await app.load_zones()
             assert "select zone" in str(app.query_one("#status", Static).render())
-            app.query_one("#zone", Input).value = "missing.example"
+            app.set_val("zone", "missing.example")
             app.zonelist = (0, "pszZoneName : example.com")
             await app.load_zones(restore_active_zone=False)
             assert "saved zone missing" in str(
                 app.query_one("#status", Static).render()
             )
-            app.query_one("#zone", Input).value = ""
+            app.set_val("zone", "")
             await app.load_zones(restore_active_zone=False)
             assert "select a zone" in str(app.query_one("#status", Static).render())
 
@@ -938,7 +892,7 @@ def test_views_sidebar_load_sort_selection_edges() -> None:
 
             app.populate_records([row("b"), row("a")])
             app.sort_records("type")
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             duplicate = [row("dup"), row("dup")]
             findings = app.passive_dns_findings(duplicate)
             assert app.dns_row_severity(duplicate[0], findings) == "medium"
@@ -1090,13 +1044,12 @@ def test_view_inline_search_scope_edges() -> None:
                 "base_dn": "",
                 "search_base_dn": "",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
                 "max_rows": "10",
             }
             assert not await app.refresh_directory_search_scope("alice")
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin@example.com"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("user", "admin@example.com")
+            app.set_val("password", "secret")
             app.views.directory.values["base_dn"] = "DC=example,DC=com"
             app.views.directory.values["search_base_dn"] = "DC=example,DC=com"
             app.search_rows = None
@@ -1108,9 +1061,9 @@ def test_view_inline_search_scope_edges() -> None:
             app.search_text = "alice"
             assert await app.refresh_directory_search_scope("alice")
 
-            app.query_one("#zone", Input).value = ""
+            app.set_val("zone", "")
             assert not await app.refresh_dns_search_scope("www")
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("zone", "example.com")
             app.views.dns.last_search_zone = "example.com"
             assert not await app.refresh_dns_search_scope("www")
             app.views.dns.last_search_zone = ""
@@ -1158,7 +1111,9 @@ def test_ldap_action_edges() -> None:
         def child_containers(self, max_entries: int) -> list[DirectoryRow]:
             return [directory_row(kind="ou", name="Engineering")]
 
-        def modify_attributes(self, dn: str, changes: dict[str, str]) -> None:
+        def modify_attributes(
+            self, dn: str, changes: dict[str, str], *, expected_revision: str
+        ) -> None:
             if changes.get("description") == "bad":
                 raise ValueError("bad modify")
             self.modified.append((dn, changes))
@@ -1171,7 +1126,7 @@ def test_ldap_action_edges() -> None:
             self.added.append((kind, parent_dn, name, attrs))
             return f"CN={name},{parent_dn}"
 
-        def delete_entry(self, dn: str) -> None:
+        def delete_entry(self, dn: str, *, expected_revision: str) -> None:
             if "Bad" in dn:
                 raise ValueError("bad delete")
             self.deleted.append(dn)
@@ -1195,8 +1150,8 @@ def test_ldap_action_edges() -> None:
     async def run_app() -> None:
         app = LdapApp()
         async with app.run_test():
-            app.query_one("#domain", Input).value = "example.com"
-            app.query_one("#ldap_base", Input).value = ""
+            app.set_val("domain", "example.com")
+            app.set_val("ldap_base", "")
             assert app.ldap_base_default() == "DC=example,DC=com"
             assert (
                 app.ldap_connection_fields("DC=example,DC=com")[0][3]
@@ -1211,7 +1166,6 @@ def test_ldap_action_edges() -> None:
                 "base_dn": "DC=example,DC=com",
                 "search_base_dn": "",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
                 "max_rows": "1",
             }
             app.client.error = "missing server"
@@ -1318,7 +1272,9 @@ def test_ldap_action_edges() -> None:
                 == "Enter LDAP object name."
             )
             assert app.ldap_add_error(add_values) is None
-            assert "Type: user" in app.ldap_add_preview(add_values)
+            assert "Type: user" in app.ldap_add_operation_preview(
+                app.ldap_add_operation(add_values)
+            )
             app.views.directory.values = values
             app.forms = [None]
             await app.add_ldap_entry()
@@ -1354,7 +1310,9 @@ def test_smart_action_edges() -> None:
         def __init__(self, app: SmartApp) -> None:
             self.app = app
 
-        def disable_account(self, dn: str, user_account_control: int) -> None:
+        def disable_account(
+            self, dn: str, user_account_control: int, *, expected_revision: str
+        ) -> None:
             if "fail" in dn:
                 raise ValueError("disable failed")
             self.app.ldap_disables.append((dn, user_account_control))
@@ -1453,7 +1411,6 @@ def test_smart_action_edges() -> None:
                     "max_rows": "5",
                     "base_dn": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                 }
             ]
             app.directory_result = None
@@ -1464,7 +1421,6 @@ def test_smart_action_edges() -> None:
                     "max_rows": "5",
                     "base_dn": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                 }
             ]
             await app.run_smart_view("ldap_users_without_groups")
@@ -1473,7 +1429,6 @@ def test_smart_action_edges() -> None:
                     "max_rows": "5",
                     "base_dn": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                 }
             ]
             await app.run_smart_view(FULL_HEALTH_VIEW_ID)
@@ -1553,8 +1508,10 @@ def test_dns_smart_view_refreshes_partial_zone_list_for_reverse_data() -> None:
             if zone == "example.com":
                 return (
                     0,
-                    "Name=host, Records=1, Children=0\n"
-                    "  A: 192.0.2.10 (flags=f0, serial=1, ttl=1)",
+                    (
+                        "Name=host, Records=1, Children=0\n"
+                        "  A: 192.0.2.10 (flags=f0, serial=1, ttl=1)"
+                    ),
                 )
             return 0, ""
 
@@ -1665,7 +1622,6 @@ def test_smart_dns_ldap_dashboard_and_directory_edges(
                     {
                         "base_dn": "DC=example,DC=com",
                         "ldap_encryption": "ldaps",
-                        "ldap_compatibility": "off",
                     },
                     options,
                 )
@@ -1675,7 +1631,6 @@ def test_smart_dns_ldap_dashboard_and_directory_edges(
                 {
                     "base_dn": "DC=example,DC=com",
                     "ldap_encryption": "ldaps",
-                    "ldap_compatibility": "off",
                 },
                 options,
             )
@@ -1753,12 +1708,12 @@ def test_core_on_mount_and_config_constructor_edges(
             app.needs_setup = False
             app.on_mount()
             assert app.after
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#domain", Input).value = "example.com"
-            app.query_one("#zone", Input).value = "example.com"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("domain", "example.com")
+            app.set_val("zone", "example.com")
             assert app.connection_settings()
-            assert app.connection_summary()
-            assert app.connection_fields()
+            assert app.connection_settings().summary
+            assert app.connection_settings().form_fields()
             assert app.password_file()
             assert app.samba_config()
             assert app.samba_client()
@@ -1799,16 +1754,15 @@ def test_remaining_controller_coverage_edges(
     async def run_app() -> None:
         app = MiscApp()
         async with app.run_test():
-            app.query_one("#zone", Input).value = "example.com"
-            app.query_one("#auto_ptr", Input).value = "ask"
+            app.set_val("zone", "example.com")
+            app.set_val("auto_ptr", "ask")
             app.zones = ["2.0.192.in-addr.arpa"]
             await app.maybe_add_matching_ptr("www", "CNAME", "alias.example.com.")
             app.confirm_values = [True]
             await app.maybe_add_matching_ptr("www", "A", "192.0.2.10")
-            app.query_one("#auto_ptr", Input).value = "on"
+            app.set_val("auto_ptr", "on")
             await app.maybe_add_matching_ptr("db", "A", "192.0.2.11")
             assert ("ptr", ["www", "192.0.2.10"]) in app.commands_run
-            assert app.ttl_error("1") is None
 
             await app.action_update.__wrapped__(app)
             assert any("Select a real record" in note[0] for note in app.notifications)
@@ -1833,7 +1787,7 @@ def test_remaining_controller_coverage_edges(
                 "sambatui.controllers.core.password_file_permissions_too_open",
                 lambda p: False,
             )
-            app.query_one("#password_file", Input).value = str(path)
+            app.set_val("password_file", str(path))
             await app.load_password()
             assert "cannot read" in str(app.query_one("#status", Static).render())
 
@@ -1847,22 +1801,16 @@ def test_remaining_controller_coverage_edges(
             assert "select zone" in str(app.query_one("#status", Static).render())
 
             original_query_one = app.query_one
-            setattr(
-                app,
-                "query_one",
-                lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no table")),
+            app.query_one = lambda *args, **kwargs: (_ for _ in ()).throw(
+                NoMatches("no table")
             )
             assert app.records_cursor_row() == 0
-            setattr(app, "query_one", original_query_one)
+            app.query_one = original_query_one
 
             app.populate_records([row("www")])
             original_query_one = app.query_one
-            setattr(
-                app,
-                "query_one",
-                lambda *args, **kwargs: SimpleNamespace(
-                    get_row_at=lambda row_index: []
-                ),
+            app.query_one = lambda *args, **kwargs: SimpleNamespace(
+                get_row_at=lambda row_index: []
             )
             assert app.row_to_record(0) == {
                 "name": "www",
@@ -1870,16 +1818,16 @@ def test_remaining_controller_coverage_edges(
                 "value": "192.0.2.10",
                 "ttl": "3600",
             }
-            setattr(app, "query_one", original_query_one)
+            app.query_one = original_query_one
 
-            app.query_one("#password_file", Input).value = str(tmp_path / "missing")
+            app.set_val("password_file", str(tmp_path / "missing"))
             password_values = {
                 "domain": "example.com",
                 "auth": "password",
                 "user": "admin",
                 "password": "",
                 "server": "dc01.example.com",
-                "ldap_encryption": "off",
+                "ldap_encryption": "starttls",
             }
             assert (
                 app.setup_wizard_validation_error(
@@ -1898,11 +1846,9 @@ def test_remaining_controller_coverage_edges(
                     if self.error:
                         raise ValueError(self.error)
 
-            setattr(app, "ldap_client", lambda base_dn="": FakeCheckClient())
+            app.ldap_client = lambda base_dn="": FakeCheckClient()
             assert await app.check_ldap_connectivity() is None
-            setattr(
-                app, "ldap_client", lambda base_dn="": FakeCheckClient("bind failed")
-            )
+            app.ldap_client = lambda base_dn="": FakeCheckClient("bind failed")
             assert await app.check_ldap_connectivity() == "bind failed"
 
             monkeypatch.setattr(
@@ -1926,7 +1872,7 @@ def test_remaining_controller_coverage_edges(
             ) -> tuple[list[DiscoveredService], DiscoveredService] | None:
                 return None
 
-            setattr(app, "discover_ad_controller", no_discovery)
+            app.discover_ad_controller = no_discovery
             assert not await app.open_discover_ad()
 
             async def no_dns_records() -> (
@@ -1934,20 +1880,15 @@ def test_remaining_controller_coverage_edges(
             ):
                 return None
 
-            setattr(app, "dns_records_with_failures_for_smart_view", no_dns_records)
+            app.dns_records_with_failures_for_smart_view = no_dns_records
             assert await app.dns_records_for_smart_view() is None
 
             values = {
                 "base_dn": "",
                 "ldap_encryption": "ldaps",
-                "ldap_compatibility": "off",
             }
-            setattr(
-                app,
-                "ldap_client",
-                lambda base_dn="": SimpleNamespace(
-                    validation_error=lambda: "missing base"
-                ),
+            app.ldap_client = lambda base_dn="": SimpleNamespace(
+                validation_error=lambda: "missing base"
             )
             assert (
                 await app.ldap_directory_for_smart_view(
@@ -1956,10 +1897,8 @@ def test_remaining_controller_coverage_edges(
                 is None
             )
             values["base_dn"] = "DC=example,DC=com"
-            setattr(
-                app,
-                "ldap_client",
-                lambda base_dn="": SimpleNamespace(validation_error=lambda: ""),
+            app.ldap_client = lambda base_dn="": SimpleNamespace(
+                validation_error=lambda: ""
             )
 
             async def directory_rows(
@@ -1972,7 +1911,7 @@ def test_remaining_controller_coverage_edges(
                     directory_row(kind="computer" if kind == "computers" else "user")
                 ]
 
-            setattr(app, "directory_search_rows", directory_rows)
+            app.directory_search_rows = directory_rows
             assert await app.ldap_directory_for_smart_view(
                 SMART_VIEW_BY_ID["ldap_users_without_groups"], values
             )

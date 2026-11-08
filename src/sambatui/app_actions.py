@@ -167,29 +167,81 @@ ACTIONS: tuple[ActionDefinition, ...] = (
         "Delete selected DNS records or LDAP entries",
         "Delete selected DNS records or LDAP entries after confirmation.",
     ),
-    ActionDefinition("toggle_select", "action_toggle_select", "space", " ", "Toggle select"),
-    ActionDefinition("toggle_select_ctrl", "action_toggle_select", "ctrl+space", binding_label="Toggle select"),
-    ActionDefinition("visual_select", "action_visual_select", "v", "v", "Visual select"),
+    ActionDefinition(
+        "toggle_select", "action_toggle_select", "space", " ", "Toggle select"
+    ),
+    ActionDefinition(
+        "toggle_select_ctrl",
+        "action_toggle_select",
+        "ctrl+space",
+        binding_label="Toggle select",
+    ),
+    ActionDefinition(
+        "visual_select", "action_visual_select", "v", "v", "Visual select"
+    ),
     ActionDefinition("select_range", "action_select_range", "V", "V", "Select range"),
-    ActionDefinition("clear", "action_clear_navigation_state", "escape", binding_label="Clear"),
-    ActionDefinition("extend_up", "action_extend_up", "shift+up", binding_label="Extend up"),
-    ActionDefinition("extend_down", "action_extend_down", "shift+down", binding_label="Extend down"),
-    ActionDefinition("next_table", "action_next_table", "tab", binding_label="Next table"),
-    ActionDefinition("previous_table", "action_previous_table", "shift+tab", binding_label="Previous table"),
-    ActionDefinition("next_side_tab", "action_next_side_tab", "]", "]", "Next DNS/LDAP tab"),
-    ActionDefinition("previous_side_tab", "action_previous_side_tab", "[", "[", "Previous DNS/LDAP tab"),
+    ActionDefinition(
+        "clear", "action_clear_navigation_state", "escape", binding_label="Clear"
+    ),
+    ActionDefinition(
+        "extend_up", "action_extend_up", "shift+up", binding_label="Extend up"
+    ),
+    ActionDefinition(
+        "extend_down", "action_extend_down", "shift+down", binding_label="Extend down"
+    ),
+    ActionDefinition(
+        "next_table", "action_next_table", "tab", binding_label="Next table"
+    ),
+    ActionDefinition(
+        "previous_table",
+        "action_previous_table",
+        "shift+tab",
+        binding_label="Previous table",
+    ),
+    ActionDefinition(
+        "next_side_tab", "action_next_side_tab", "]", "]", "Next DNS/LDAP tab"
+    ),
+    ActionDefinition(
+        "previous_side_tab",
+        "action_previous_side_tab",
+        "[",
+        "[",
+        "Previous DNS/LDAP tab",
+    ),
     ActionDefinition("focus_zones", "action_focus_zones", "h", "h", "Focus zones"),
-    ActionDefinition("focus_records", "action_focus_records", "l", "l", "Focus records"),
+    ActionDefinition(
+        "focus_records", "action_focus_records", "l", "l", "Focus records"
+    ),
     ActionDefinition("cursor_down", "action_cursor_down", "j", "j", "Down"),
     ActionDefinition("cursor_up", "action_cursor_up", "k", "k", "Up"),
-    ActionDefinition("half_page_down", "action_cursor_half_page_down", "ctrl+d", binding_label="Half page down"),
-    ActionDefinition("half_page_up", "action_cursor_half_page_up", "ctrl+u", binding_label="Half page up"),
-    ActionDefinition("page_down", "action_cursor_page_down", "pagedown", binding_label="Page down"),
-    ActionDefinition("page_up", "action_cursor_page_up", "pageup", binding_label="Page up"),
+    ActionDefinition(
+        "half_page_down",
+        "action_cursor_half_page_down",
+        "ctrl+d",
+        binding_label="Half page down",
+    ),
+    ActionDefinition(
+        "half_page_up",
+        "action_cursor_half_page_up",
+        "ctrl+u",
+        binding_label="Half page up",
+    ),
+    ActionDefinition(
+        "page_down", "action_cursor_page_down", "pagedown", binding_label="Page down"
+    ),
+    ActionDefinition(
+        "page_up", "action_cursor_page_up", "pageup", binding_label="Page up"
+    ),
     ActionDefinition("cursor_top", "action_cursor_top", "home", binding_label="Top"),
-    ActionDefinition("cursor_bottom", "action_cursor_bottom", "end", binding_label="Bottom"),
-    ActionDefinition("cursor_bottom_g", "action_cursor_bottom", "G", binding_label="Bottom"),
-    ActionDefinition("activate", "action_activate_row", "enter", binding_label="Activate"),
+    ActionDefinition(
+        "cursor_bottom", "action_cursor_bottom", "end", binding_label="Bottom"
+    ),
+    ActionDefinition(
+        "cursor_bottom_g", "action_cursor_bottom", "G", binding_label="Bottom"
+    ),
+    ActionDefinition(
+        "activate", "action_activate_row", "enter", binding_label="Activate"
+    ),
     ActionDefinition(
         "fix_smart",
         "action_fix_smart",

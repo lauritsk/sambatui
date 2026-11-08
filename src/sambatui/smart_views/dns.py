@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import ipaddress
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-import ipaddress
 
 import dns.exception
 import dns.name
 import dns.reversename
 
+from ..core.models import DnsRow
 from ..dns.names import is_ipv4_reverse_zone, normalize_dns_name, normalize_dns_value
 from ..dns.ptr import reverse_record_for_ipv4
-from ..core.models import DnsRow
 from .models import SmartViewRow
 
 

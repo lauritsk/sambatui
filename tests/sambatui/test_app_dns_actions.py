@@ -5,21 +5,17 @@ from hypothesis import given
 from hypothesis import strategies as st
 from textual.widgets import Button, Input, Static
 
-from sambatui.app import (
-    DnsRow,
-    SambatuiApp,
-    parse_records,
-    parse_zones,
-    validate_record,
-)
+from sambatui.app import SambatuiApp
+from sambatui.core.models import DnsRow
+from sambatui.core.operations import DnsAddOperation
+from sambatui.dns.parsing import parse_records, parse_zones
 from sambatui.dns.ptr import ptr_target_for_name, reverse_record_for_ipv4
 from sambatui.dns.record_types import (
     DNS_RECORD_TYPE_SPECS,
     SUPPORTED_DNS_RECORD_TYPES,
-    SUPPORTED_DNS_RECORD_TYPES_TEXT,
     dns_record_type_spec,
 )
-from sambatui.dns.validation import valid_dns_name
+from sambatui.dns.validation import valid_dns_name, validate_record
 from sambatui.ui.screens import (
     FormScreen,
 )
@@ -102,7 +98,7 @@ def test_validate_record_accepts_documentation_examples(
         [
             (
                 rtype,
-                {"name", "ttl"} | {field_id for _, field_id, _, _ in spec.fields},
+                {"name"} | {field_id for _, field_id, _, _ in spec.fields},
             )
             for rtype, spec in DNS_RECORD_TYPE_SPECS.items()
         ]
@@ -150,26 +146,19 @@ def test_update_record_keeps_selected_record_identity_fixed() -> None:
     assert app.update_record_error(selected, {"value": "192.0.2.11"}) is None
 
 
-def test_guided_add_record_error_validates_ttl_and_duplicates() -> None:
+def test_guided_add_record_error_validates_values_and_duplicates() -> None:
     app = SambatuiApp()
     app.views.dns.rows = [DnsRow("www", "1", "0", "A", "192.0.2.10", "3600", "raw")]
 
     assert (
-        app.guided_add_record_error(
-            "A", {"name": "www", "address": "192.0.2.10", "ttl": ""}
-        )
+        app.guided_add_record_error("A", {"name": "www", "address": "192.0.2.10"})
         == "Duplicate record already exists in the loaded zone view."
     )
-    assert (
-        app.guided_add_record_error(
-            "A", {"name": "www", "address": "192.0.2.11", "ttl": "bad"}
-        )
-        == "TTL must be whole seconds, e.g. 3600."
-    )
+    assert app.guided_add_record_error("A", {"name": "www", "address": "bad"})
     assert (
         app.guided_add_record_error(
             "MX",
-            {"name": "@", "priority": "10", "target": "mail.example.com.", "ttl": ""},
+            {"name": "@", "priority": "10", "target": "mail.example.com."},
         )
         is None
     )
@@ -179,17 +168,22 @@ def test_guided_add_preview_includes_command_and_ptr_suggestion() -> None:
     async def run_app() -> None:
         app = SambatuiApp()
         async with app.run_test():
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#zone", Input).value = "example.com"
-            app.query_one("#user", Input).value = "admin"
-            app.query_one("#password", Input).value = "secret"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("zone", "example.com")
+            app.set_val("user", "admin")
+            app.set_val("password", "secret")
             app.zones = ["example.com", "2.0.192.in-addr.arpa"]
 
-            preview = app.add_record_preview("www", "A", "192.0.2.10", "300")
+            preview = app.add_operation_preview(
+                DnsAddOperation(app.val("zone"), "www", "A", "192.0.2.10")
+            )
 
             assert "Record: www A 192.0.2.10" in preview
             assert "2.0.192.in-addr.arpa: 10 PTR www.example.com" in preview
-            assert "dns add dc01.example.com" in preview
+            assert "dns add -U admin" in preview
+            assert " -- dc01.example.com example.com www A 192.0.2.10" in preview
+            assert "TTL: Samba default" in preview
+            assert "--ttl" not in preview
             assert "-U admin" in preview
             assert "secret" not in preview
 
@@ -250,19 +244,19 @@ def test_setup_form_suggests_upn_domain_suffix() -> None:
 
             user.value = "alice"
             await pilot.pause()
-            assert getattr(user, "_suggestion") == "alice@example.com"
+            assert user._suggestion == "alice@example.com"
             assert form.form_values()["user"] == "alice@example.com"
 
             await pilot.press("tab")
             await pilot.pause()
             assert user.value == "alice@example.com"
-            assert getattr(user, "_suggestion") == ""
+            assert user._suggestion == ""
 
             user.focus()
             user.value = "alice"
             domain.value = "ad.example."
             await pilot.pause()
-            assert getattr(user, "_suggestion") == "alice@ad.example"
+            assert user._suggestion == "alice@ad.example"
             assert form.form_values()["user"] == "alice@ad.example"
 
             user.value = "alice@other.example"

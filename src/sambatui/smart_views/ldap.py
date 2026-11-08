@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from ..ldap.client import first_attr
+from sambatui.ldap.entries import first_attr
+
 from ..ldap.rows import DirectoryRow
 from .models import SmartViewRow
-
 
 ACCOUNTDISABLE = 0x0002
 
@@ -198,14 +198,14 @@ def ldap_users_without_groups(rows: Sequence[DirectoryRow]) -> list[SmartViewRow
 
 def ldap_disable_fix(row: DirectoryRow) -> dict[str, str]:
     user_account_control = ldap_user_account_control(row)
-    if user_account_control is None:
+    if user_account_control is None or not row.revision:
         return {}
     return {
         "fix_action": "ldap_disable_account",
         "fix_label": f"disable {directory_object_name(row)}",
         "fix_dn": row.dn,
-        "fix_attribute": "userAccountControl",
-        "fix_value": str(user_account_control | ACCOUNTDISABLE),
+        "fix_revision": row.revision,
+        "fix_value": str(user_account_control),
     }
 
 

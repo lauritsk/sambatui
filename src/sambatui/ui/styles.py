@@ -4,7 +4,6 @@ Screen {
     background: $background;
 }
 
-#connection_state { display: none; }
 
 #main {
     height: 1fr;

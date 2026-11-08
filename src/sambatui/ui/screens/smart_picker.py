@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from typing import TypeAlias
-
 from textual.app import ComposeResult
-from textual.events import Key
 from textual.containers import Horizontal, Vertical
+from textual.events import Key
 from textual.widgets import Button, DataTable, Static
 
 from sambatui.smart_view_catalog import all_smart_view_shortcut_range
 
 from .base import FocusedModalScreen
 
-
-SmartViewChoice: TypeAlias = tuple[str, str, str, str, str]
+type SmartViewChoice = tuple[str, str, str, str, str]
 
 
 class SmartViewPickerScreen(FocusedModalScreen[str | None]):

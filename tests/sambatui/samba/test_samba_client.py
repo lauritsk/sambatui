@@ -28,13 +28,14 @@ def test_password_auth_builds_existing_samba_tool_command() -> None:
         "samba-tool",
         "dns",
         "query",
+        "-U",
+        "EXAMPLE\\administrator",
+        "--use-kerberos=off",
+        "--",
         "dc01.example.com",
         "example.com",
         "@",
         "ALL",
-        "-U",
-        "EXAMPLE\\administrator",
-        "--use-kerberos=off",
     ]
     env = client.execution_env()
     assert env is not None
@@ -58,11 +59,12 @@ def test_kerberos_auth_does_not_require_or_embed_password() -> None:
         "samba-tool",
         "dns",
         "zonelist",
-        "dc01.example.com",
         "-U",
         "EXAMPLE\\administrator",
         "--use-kerberos=required",
         "--use-krb5-ccache=/tmp/krb5cc_test",
+        "--",
+        "dc01.example.com",
     ]
 
 
@@ -138,6 +140,13 @@ def test_dns_command_preserves_generated_command_parts(
 
     command = client.dns_command(action, zone, args)
 
-    assert command[:5] == ["samba-tool", "dns", action, server, zone]
-    assert command[5 : 5 + len(args)] == args
-    assert command[-3:] == ["-U", "admin", "--use-kerberos=off"]
+    assert command[:7] == [
+        "samba-tool",
+        "dns",
+        action,
+        "-U",
+        "admin",
+        "--use-kerberos=off",
+        "--",
+    ]
+    assert command[7:] == [server, zone, *args]

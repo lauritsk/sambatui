@@ -94,6 +94,13 @@ class AppViewState:
         table = self.table(self.mode)
         return self.dns if table is None else table
 
+    def invalidate(self) -> None:
+        """Loaded rows are unusable after their target or credentials change."""
+        for table in (self.dns, self.directory, self.smart):
+            table.rows = []
+        self.dns.last_search_zone = ""
+        self.reset_selection()
+
     def reset_selection(self) -> None:
         for table in (self.dns, self.directory, self.smart):
             table.clear_selection()

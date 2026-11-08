@@ -1,24 +1,30 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from textual import work
 
-from ..app_constants import (
-    DEFAULT_AUTO_PTR,
+from sambatui.app_constants import (
     GUIDED_RECORD_TYPE_FIELDS,
     GUIDED_RECORD_TYPES,
     GUIDED_RECORD_VALUE_FIELDS,
 )
+from sambatui.core.config import DEFAULT_AUTO_PTR
+
+from ..core.mutations import mutation_action
 from ..core.operations import DnsAddOperation, DnsDeleteOperation, DnsUpdateOperation
 from ..dns.record_types import SUPPORTED_DNS_RECORD_TYPES_TEXT
 from ..ui.screens import (
     FormField,
 )
-from .base import AppControllerBase
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 
 
-class AppDnsActionsMixin(AppControllerBase):
+class AppDnsActionsMixin:
     @work
-    async def action_query(self) -> None:
+    async def action_query(self: SambatuiApp) -> None:
         values = await self.form(
             "Query DNS",
             "Query one name/type in the currently selected zone.",
@@ -34,7 +40,9 @@ class AppDnsActionsMixin(AppControllerBase):
         rtype = (values["rtype"] or "ALL").upper()
         await self.do_command("query", [name, rtype], update_table=True)
 
-    async def maybe_add_matching_ptr(self, name: str, rtype: str, value: str) -> None:
+    async def maybe_add_matching_ptr(
+        self: SambatuiApp, name: str, rtype: str, value: str
+    ) -> None:
         if rtype != "A":
             return
         reverse = self.reverse_record_for_ipv4(value)
@@ -50,20 +58,23 @@ class AppDnsActionsMixin(AppControllerBase):
         ):
             await self.add_ptr(name, value)
 
-    def record_type_selection_error(self, values: dict[str, str]) -> str | None:
+    def record_type_selection_error(
+        self: SambatuiApp, values: dict[str, str]
+    ) -> str | None:
         rtype = (values.get("rtype") or "").upper()
         if rtype in GUIDED_RECORD_TYPES:
             return None
         return f"Choose one of: {', '.join(GUIDED_RECORD_TYPES)}."
 
-    def add_record_type_fields(self, rtype: str) -> list[FormField]:
+    def add_record_type_fields(self: SambatuiApp, rtype: str) -> list[FormField]:
         return [
             ("Record name", "name", "name, @ for zone root", ""),
             *GUIDED_RECORD_TYPE_FIELDS.get(rtype.upper(), ()),
-            ("TTL", "ttl", "optional seconds, e.g. 3600", ""),
         ]
 
-    def add_record_value_from_fields(self, rtype: str, values: dict[str, str]) -> str:
+    def add_record_value_from_fields(
+        self: SambatuiApp, rtype: str, values: dict[str, str]
+    ) -> str:
         value_fields = GUIDED_RECORD_VALUE_FIELDS.get(rtype.upper())
         if value_fields is None:
             return values.get("value", "")
@@ -71,25 +82,27 @@ class AppDnsActionsMixin(AppControllerBase):
             return values.get(value_fields[0], "")
         return " ".join(values.get(key, "") for key in value_fields).strip()
 
-    def ttl_error(self, ttl: str) -> str | None:
-        return DnsAddOperation.ttl_validation_error(ttl)
-
-    def duplicate_record_error(self, name: str, rtype: str, value: str) -> str | None:
+    def duplicate_record_error(
+        self: SambatuiApp, name: str, rtype: str, value: str
+    ) -> str | None:
         for row in self.views.dns.rows:
             if row.name == name and row.rtype == rtype and row.value == value:
                 return "Duplicate record already exists in the loaded zone view."
         return None
 
-    def guided_add_record_error(self, rtype: str, values: dict[str, str]) -> str | None:
+    def guided_add_record_error(
+        self: SambatuiApp, rtype: str, values: dict[str, str]
+    ) -> str | None:
         name = values.get("name", "")
         value = self.add_record_value_from_fields(rtype, values)
-        ttl = values.get("ttl", "")
-        operation = DnsAddOperation("", name, rtype, value, ttl)
+        operation = DnsAddOperation("", name, rtype, value)
         return operation.validation_error() or self.duplicate_record_error(
             name, rtype.upper(), value
         )
 
-    def existing_reverse_record_for_ipv4(self, ip_value: str) -> tuple[str, str] | None:
+    def existing_reverse_record_for_ipv4(
+        self: SambatuiApp, ip_value: str
+    ) -> tuple[str, str] | None:
         reverse = self.reverse_record_for_ipv4(ip_value)
         if reverse is None:
             return None
@@ -98,7 +111,7 @@ class AppDnsActionsMixin(AppControllerBase):
             return None
         return ptr_zone, ptr_name
 
-    def ptr_preview_text(self, name: str, rtype: str, value: str) -> str:
+    def ptr_preview_text(self: SambatuiApp, name: str, rtype: str, value: str) -> str:
         if rtype != "A":
             return "PTR suggestion: not applicable."
         reverse = self.existing_reverse_record_for_ipv4(value)
@@ -108,28 +121,23 @@ class AppDnsActionsMixin(AppControllerBase):
         ptr_target = self.ptr_target_for_name(name)
         return f"PTR suggestion: reverse zone exists; {ptr_zone}: {ptr_name} PTR {ptr_target}"
 
-    def add_operation_preview(self, operation: DnsAddOperation) -> str:
+    def add_operation_preview(self: SambatuiApp, operation: DnsAddOperation) -> str:
         client = self.samba_client()
         command = " ".join(
             client.redact_command(
-                client.dns_command("add", operation.zone, list(operation.command_args))
+                client.dns_command("add", operation.zone, operation.command_args)
             )
         )
         return (
             "Add DNS record?\n\n"
             f"Zone: {operation.zone}\n"
             f"Record: {operation.name} {operation.rtype} {operation.value}\n"
-            f"TTL: {operation.ttl or 'default'}\n"
+            "TTL: Samba default\n"
             f"{self.ptr_preview_text(operation.name, operation.rtype, operation.value)}\n\n"
             f"Command preview: {command}"
         )
 
-    def add_record_preview(self, name: str, rtype: str, value: str, ttl: str) -> str:
-        return self.add_operation_preview(
-            DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
-        )
-
-    async def add_record_form_values(self) -> DnsAddOperation | None:
+    async def add_record_form_values(self: SambatuiApp) -> DnsAddOperation | None:
         type_values = await self.form(
             "Add DNS record — choose type",
             f"Zone: {self.val('zone')}. Guided flow shows fields for one record type.",
@@ -160,15 +168,15 @@ class AppDnsActionsMixin(AppControllerBase):
 
         name = values["name"]
         value = self.add_record_value_from_fields(rtype, values)
-        ttl = values["ttl"]
         error = self.guided_add_record_error(rtype, values)
         if error:
             self.report_error(error)
             return None
-        return DnsAddOperation(self.val("zone"), name, rtype, value, ttl)
+        return DnsAddOperation(self.val("zone"), name, rtype, value)
 
     @work
-    async def action_add(self) -> None:
+    @mutation_action
+    async def action_add(self: SambatuiApp) -> None:
         match self.views.mode:
             case "directory":
                 await self.add_ldap_entry()
@@ -202,7 +210,7 @@ class AppDnsActionsMixin(AppControllerBase):
             )
             await self.refresh_current_zone()
 
-    def selected_record_for_update(self) -> dict[str, str] | None:
+    def selected_record_for_update(self: SambatuiApp) -> dict[str, str] | None:
         records = self.selected_records()
         if len(records) > 1:
             self.notify(
@@ -217,11 +225,13 @@ class AppDnsActionsMixin(AppControllerBase):
         )
         return None
 
-    def update_record_fields(self, selected: dict[str, str]) -> list[FormField]:
+    def update_record_fields(
+        self: SambatuiApp, selected: dict[str, str]
+    ) -> list[FormField]:
         return [("New DNS value", "value", "new value", selected["value"])]
 
     def update_record_error(
-        self, selected: dict[str, str], values: dict[str, str]
+        self: SambatuiApp, selected: dict[str, str], values: dict[str, str]
     ) -> str | None:
         operation = DnsUpdateOperation(
             "",
@@ -232,7 +242,10 @@ class AppDnsActionsMixin(AppControllerBase):
         )
         return operation.validation_error()
 
-    async def apply_dns_update(self, operation: DnsUpdateOperation) -> None:
+    @mutation_action
+    async def apply_dns_update(
+        self: SambatuiApp, operation: DnsUpdateOperation
+    ) -> None:
         if not await self.confirm(
             "Update DNS record?\n\n"
             f"Zone: {operation.zone}\n"
@@ -251,14 +264,15 @@ class AppDnsActionsMixin(AppControllerBase):
             await self.refresh_current_zone()
 
     async def update_record_value(
-        self, name: str, rtype: str, old_value: str, value: str
+        self: SambatuiApp, name: str, rtype: str, old_value: str, value: str
     ) -> None:
         await self.apply_dns_update(
             DnsUpdateOperation(self.val("zone"), name, rtype, old_value, value)
         )
 
     @work
-    async def action_update(self) -> None:
+    @mutation_action
+    async def action_update(self: SambatuiApp) -> None:
         match self.views.mode:
             case "directory":
                 await self.update_ldap_entry()
@@ -302,7 +316,8 @@ class AppDnsActionsMixin(AppControllerBase):
         )
 
     @work
-    async def action_delete(self) -> None:
+    @mutation_action
+    async def action_delete(self: SambatuiApp) -> None:
         match self.views.mode:
             case "directory":
                 await self.delete_ldap_entry()

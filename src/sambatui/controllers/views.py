@@ -2,17 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
 from rich.text import Text
-from textual.widgets import DataTable, Input, Label, Static, TabbedContent
+from textual.app import ScreenStackError
+from textual.css.query import NoMatches
+from textual.widgets import DataTable, Label, Static, TabbedContent
 
-from ..app_constants import (
-    DEFAULT_LDAP_COMPATIBILITY,
-    DEFAULT_LDAP_ENCRYPTION,
+from sambatui.app_constants import (
     DIRECTORY_SORT_KEYS,
     LDAP_DEFAULT_MAX_ROWS,
     RECORD_SORT_KEYS,
 )
+from sambatui.core.config import DEFAULT_LDAP_ENCRYPTION
+
 from ..core.models import DnsRow
 from ..core.view_state import ViewMode
 from ..ldap.rows import DirectoryRow
@@ -68,6 +71,9 @@ from .helpers import (
     sort_direction,
 )
 from .selection import AppSelectionMixin
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 from .view_data import AppViewDataMixin
 
 RESULT_COLUMNS = {
@@ -79,42 +85,46 @@ RESULT_COLUMNS = {
 
 class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
     def populate_sidebar_table(
-        self, table_id: str, items: Sequence[SidebarItem]
+        self: SambatuiApp, table_id: str, items: Sequence[SidebarItem]
     ) -> None:
         table = self.query_one(f"#{table_id}", DataTable)
         self.sidebar_items[table_id] = list(items)
         table.clear()
         for item in items:
-            table.add_row(item.label)
+            table.add_row(Text(item.label))
 
-    def sidebar_item_at(self, table_id: str, row_index: int) -> SidebarItem | None:
+    def sidebar_item_at(
+        self: SambatuiApp, table_id: str, row_index: int
+    ) -> SidebarItem | None:
         items = self.sidebar_items.get(table_id, [])
         if 0 <= row_index < len(items):
             return items[row_index]
         return None
 
-    def select_sidebar_cursor(self, table_id: str, target: SidebarItem) -> bool:
+    def select_sidebar_cursor(
+        self: SambatuiApp, table_id: str, target: SidebarItem
+    ) -> bool:
         table = self.query_one(f"#{table_id}", DataTable)
         for row_index, item in enumerate(self.sidebar_items.get(table_id, [])):
             if item.action == target.action and item.value == target.value:
-                with suppress(Exception):
+                with suppress(NoMatches, ScreenStackError):
                     table.move_cursor(row=row_index)
                 return True
         return False
 
-    def populate_zones(self, zones: list[str]) -> None:
+    def populate_zones(self: SambatuiApp, zones: list[str]) -> None:
         items = [SidebarItem(zone, zone, "dns_zone") for zone in zones] or [
             SidebarItem("No zones loaded — press z to load zones", "", "empty")
         ]
         self.populate_sidebar_table("zones", items)
         self.select_zone_cursor(self.val("zone"))
 
-    def populate_smart_views_sidebar(self) -> None:
+    def populate_smart_views_sidebar(self: SambatuiApp) -> None:
         self.populate_finding_sidebar("dns_findings", "DNS")
         self.populate_finding_sidebar("ldap_findings", "LDAP")
         self.select_smart_view_cursor()
 
-    def populate_finding_sidebar(self, table_id: str, source: str) -> None:
+    def populate_finding_sidebar(self: SambatuiApp, table_id: str, source: str) -> None:
         self.populate_sidebar_table(
             table_id,
             [
@@ -125,28 +135,32 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             ],
         )
 
-    def ldap_sidebar_items(self, rows: Sequence[DirectoryRow]) -> list[SidebarItem]:
+    def ldap_sidebar_items(
+        self: SambatuiApp, rows: Sequence[DirectoryRow]
+    ) -> list[SidebarItem]:
         return ldap_sidebar_items(rows, self.ldap_base_default())
 
-    def active_ldap_sidebar_item(self) -> SidebarItem | None:
+    def active_ldap_sidebar_item(self: SambatuiApp) -> SidebarItem | None:
         return active_ldap_sidebar_item(
             self.views.directory.values, self.ldap_base_default()
         )
 
-    def select_ldap_sidebar_cursor(self) -> None:
+    def select_ldap_sidebar_cursor(self: SambatuiApp) -> None:
         active_item = self.active_ldap_sidebar_item()
         if active_item is not None:
             self.select_sidebar_cursor("ldap_structure", active_item)
 
-    def populate_ldap_structure(self, rows: Sequence[DirectoryRow]) -> None:
+    def populate_ldap_structure(
+        self: SambatuiApp, rows: Sequence[DirectoryRow]
+    ) -> None:
         self.populate_sidebar_table("ldap_structure", self.ldap_sidebar_items(rows))
         self.select_ldap_sidebar_cursor()
 
-    def select_zone_cursor(self, zone: str) -> None:
+    def select_zone_cursor(self: SambatuiApp, zone: str) -> None:
         if zone:
             self.select_sidebar_cursor("zones", SidebarItem("", zone, "dns_zone"))
 
-    def select_smart_view_cursor(self) -> None:
+    def select_smart_view_cursor(self: SambatuiApp) -> None:
         view_id = self.views.smart.view_id
         if view_id:
             for table_id in ("dns_findings", "ldap_findings"):
@@ -154,7 +168,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
                     table_id, SidebarItem("", view_id, "smart_view")
                 )
 
-    async def restore_active_zone_records(self) -> bool:
+    async def restore_active_zone_records(self: SambatuiApp) -> bool:
         zone = self.val("zone")
         if not zone or zone not in self.zones:
             return False
@@ -162,30 +176,30 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         await self.activate_zone(zone, save=False)
         return True
 
-    def dns_title(self) -> str:
+    def dns_title(self: SambatuiApp) -> str:
         zone = self.val("zone")
         return f"Records — {zone}" if zone else "Records"
 
-    def records_title(self) -> str:
+    def records_title(self: SambatuiApp) -> str:
         suffix = self.active_smart_filter_suffix()
         base = self.dns_title()
         return f"{base} {suffix}" if suffix else base
 
-    def active_smart_filter_suffix(self) -> str:
+    def active_smart_filter_suffix(self: SambatuiApp) -> str:
         view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         if view is None or view.view_id == FULL_HEALTH_VIEW_ID:
             return ""
         label = view.label.removeprefix(f"{view.source_label} ")
         return f"— {label}"
 
-    def update_records_title(self) -> None:
+    def update_records_title(self: SambatuiApp) -> None:
         self.query_one("#records_title", Label).update(self.records_title())
 
-    async def activate_zone(self, zone: str, *, save: bool = True) -> bool:
+    async def activate_zone(self: SambatuiApp, zone: str, *, save: bool = True) -> bool:
         if zone not in self.zones:
             self.set_status(DNS_EMPTY_STATE[1])
             return False
-        self.query_one("#zone", Input).value = zone
+        self.set_val("zone", zone)
         self.refresh_connection_summary()
         self.update_records_title()
         if save:
@@ -195,7 +209,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         return True
 
     def ldap_sidebar_values(
-        self, kind: str, text: str = "", search_base_dn: str = ""
+        self: SambatuiApp, kind: str, text: str = "", search_base_dn: str = ""
     ) -> dict[str, str]:
         base_dn = self.ldap_base_default()
         return {
@@ -204,15 +218,13 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             "base_dn": base_dn,
             "search_base_dn": search_base_dn or base_dn,
             "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            "ldap_compatibility": self.val("ldap_compatibility")
-            or DEFAULT_LDAP_COMPATIBILITY,
             "max_rows": str(LDAP_DEFAULT_MAX_ROWS),
         }
 
     async def activate_ldap_sidebar(
-        self, kind: str, text: str = "", search_base_dn: str = ""
+        self: SambatuiApp, kind: str, text: str = "", search_base_dn: str = ""
     ) -> bool:
-        with suppress(Exception):
+        with suppress(NoMatches, ScreenStackError):
             self.query_one("#side_tabs", TabbedContent).active = "ldap_tab"
             self.refresh_key_hints()
         label = search_base_dn or text or kind
@@ -223,7 +235,9 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             action="Loaded",
         )
 
-    async def activate_sidebar_item(self, item: SidebarItem | None) -> bool:
+    async def activate_sidebar_item(
+        self: SambatuiApp, item: SidebarItem | None
+    ) -> bool:
         if item is None or item.action == "empty":
             return False
         if item.action == "dns_zone":
@@ -237,12 +251,12 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             return True
         return False
 
-    async def activate_sidebar_selection(self, table: DataTable) -> bool:
+    async def activate_sidebar_selection(self: SambatuiApp, table: DataTable) -> bool:
         return await self.activate_sidebar_item(
             self.sidebar_item_at(str(table.id or ""), table.cursor_row)
         )
 
-    def set_records_columns(self, columns: tuple[str, ...]) -> None:
+    def set_records_columns(self: SambatuiApp, columns: tuple[str, ...]) -> None:
         if self.records_columns == columns:
             return
         table = self.query_one("#records", DataTable)
@@ -250,12 +264,12 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         table.add_columns(*columns)
         self.records_columns = columns
 
-    def activate_results_view(self, mode: ViewMode, title: str) -> None:
+    def activate_results_view(self: SambatuiApp, mode: ViewMode, title: str) -> None:
         self.views.activate(mode)
         self.set_records_columns(RESULT_COLUMNS[mode])
         self.query_one("#records_title", Label).update(title)
 
-    def populate_records(self, rows: list[DnsRow]) -> None:
+    def populate_records(self: SambatuiApp, rows: list[DnsRow]) -> None:
         self.activate_results_view(ViewMode.DNS, self.dns_title())
         self.views.dns.rows = self.sorted_records(rows)
         self.refresh_record_view()
@@ -263,13 +277,15 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             f"Loaded {len(rows)} records from {self.val('zone')}; sorted by {self.views.dns.sort_field}"
         )
 
-    def remember_ldap_structure_rows(self, rows: Sequence[DirectoryRow]) -> None:
+    def remember_ldap_structure_rows(
+        self: SambatuiApp, rows: Sequence[DirectoryRow]
+    ) -> None:
         by_dn = {row.dn.casefold(): row for row in self.ldap_structure_rows}
         for row in rows:
             by_dn.setdefault(row.dn.casefold(), row)
         self.ldap_structure_rows = list(by_dn.values())
 
-    def populate_directory(self, rows: list[DirectoryRow]) -> None:
+    def populate_directory(self: SambatuiApp, rows: list[DirectoryRow]) -> None:
         self.activate_results_view(ViewMode.DIRECTORY, "Directory (LDAP)")
         self.views.directory.rows = self.sorted_directory(rows)
         self.remember_ldap_structure_rows(rows)
@@ -277,12 +293,14 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         self.refresh_directory_view()
         self.set_status(f"Loaded {len(rows)} LDAP entries")
 
-    def populate_smart_view(self, title: str, rows: list[SmartViewRow]) -> None:
+    def populate_smart_view(
+        self: SambatuiApp, title: str, rows: list[SmartViewRow]
+    ) -> None:
         self.activate_results_view(ViewMode.SMART, title)
         view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         source = view.source.sidebar_source if view is not None else None
         tab_id = "ldap_tab" if source is SmartViewSource.LDAP else "dns_tab"
-        with suppress(Exception):
+        with suppress(NoMatches, ScreenStackError):
             self.query_one("#side_tabs", TabbedContent).active = tab_id
             self.refresh_key_hints()
         self.views.smart.rows = self.sorted_smart_view(rows)
@@ -290,7 +308,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         self.refresh_smart_view()
         self.set_status(f"Loaded {len(rows)} smart-view findings")
 
-    def smart_options_for_passive_findings(self) -> tuple[int, int, int]:
+    def smart_options_for_passive_findings(self: SambatuiApp) -> tuple[int, int, int]:
         options = SmartViewOptions.from_values(
             {
                 "smart_days": self.val("smart_days"),
@@ -300,7 +318,9 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         )
         return options.days, options.disabled_days, options.never_logged_days
 
-    def passive_dns_findings(self, rows: Sequence[DnsRow]) -> list[SmartViewRow]:
+    def passive_dns_findings(
+        self: SambatuiApp, rows: Sequence[DnsRow]
+    ) -> list[SmartViewRow]:
         zone = self.val("zone")
         if not zone:
             return []
@@ -309,7 +329,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         return dns_duplicate_records({zone: rows})
 
     def passive_directory_findings(
-        self, rows: Sequence[DirectoryRow]
+        self: SambatuiApp, rows: Sequence[DirectoryRow]
     ) -> list[SmartViewRow]:
         days, disabled_days, never_logged_days = (
             self.smart_options_for_passive_findings()
@@ -325,7 +345,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             *ldap_users_without_groups(rows),
         ]
 
-    def highest_severity(self, severities: Iterable[str]) -> str:
+    def highest_severity(self: SambatuiApp, severities: Iterable[str]) -> str:
         order = {"critical": 0, "error": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
         return min(
             severities,
@@ -333,7 +353,9 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             default="",
         )
 
-    def dns_row_severity(self, row: DnsRow, findings: Sequence[SmartViewRow]) -> str:
+    def dns_row_severity(
+        self: SambatuiApp, row: DnsRow, findings: Sequence[SmartViewRow]
+    ) -> str:
         zone_prefix = f"{self.val('zone')}:"
         exact = f"{zone_prefix}{row.name}".casefold()
         fqdn = f"{row.name}.{self.val('zone')}".casefold()
@@ -344,7 +366,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         )
 
     def directory_row_severity(
-        self, row: DirectoryRow, findings: Sequence[SmartViewRow]
+        self: SambatuiApp, row: DirectoryRow, findings: Sequence[SmartViewRow]
     ) -> str:
         object_names = {
             row.name.casefold(),
@@ -358,7 +380,9 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             or finding.fix_dn.casefold() == row.dn.casefold()
         )
 
-    def severity_marker(self, severity: str, *, quiet: bool = False) -> Text | str:
+    def severity_marker(
+        self: SambatuiApp, severity: str, *, quiet: bool = False
+    ) -> Text | str:
         if not severity:
             return ""
         styles = {
@@ -372,11 +396,11 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         marker = "•" if quiet else "▌"
         return Text(marker, style=styles.get(severity.casefold(), "grey54"))
 
-    def smart_row_marker(self, row: SmartViewRow) -> Text | str:
+    def smart_row_marker(self: SambatuiApp, row: SmartViewRow) -> Text | str:
         return self.severity_marker(row.severity, quiet=True)
 
     def render_result_rows(
-        self,
+        self: SambatuiApp,
         rows: list[TableRow],
         view_mode: str,
         row_values: Callable[[TableRow], RowValues],
@@ -387,7 +411,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         table.clear()
         if rows:
             for row in rows:
-                values = row_values(row)
+                values = tuple(Text(value) for value in row_values(row))
                 if marker is None:
                     table.add_row("", *values)
                 else:
@@ -399,11 +423,11 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
                 "directory": ("", "", title, "-", hint),
                 "smart": ("", "-", title, hint),
             }
-            table.add_row(*empty_values[view_mode])
+            table.add_row(*(Text(value) for value in empty_values[view_mode]))
         table.move_cursor(row=0)
         self.update_details_pane()
 
-    def render_records(self, rows: list[DnsRow]) -> None:
+    def render_records(self: SambatuiApp, rows: list[DnsRow]) -> None:
         findings = self.passive_dns_findings(rows)
         self.render_result_rows(
             rows,
@@ -412,7 +436,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             lambda row: self.severity_marker(self.dns_row_severity(row, findings)),
         )
 
-    def render_directory(self, rows: list[DirectoryRow]) -> None:
+    def render_directory(self: SambatuiApp, rows: list[DirectoryRow]) -> None:
         findings = self.passive_directory_findings(rows)
         self.render_result_rows(
             rows,
@@ -423,23 +447,25 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             ),
         )
 
-    def render_smart_view(self, rows: list[SmartViewRow]) -> None:
+    def render_smart_view(self: SambatuiApp, rows: list[SmartViewRow]) -> None:
         self.render_result_rows(rows, "smart", smart_result_values)
 
-    def details_empty_text(self) -> str:
+    def details_empty_text(self: SambatuiApp) -> str:
         return details_empty_text(self.empty_state_text(self.views.mode))
 
-    def records_cursor_row(self) -> int:
-        with suppress(Exception):
+    def records_cursor_row(self: SambatuiApp) -> int:
+        with suppress(NoMatches, ScreenStackError):
             return self.query_one("#records", DataTable).cursor_row
         return 0
 
-    def visible_row_at(self, rows: list[TableRow], row_index: int) -> TableRow | None:
+    def visible_row_at(
+        self: SambatuiApp, rows: list[TableRow], row_index: int
+    ) -> TableRow | None:
         if 0 <= row_index < len(rows):
             return rows[row_index]
         return None
 
-    def dns_details_text(self, row_index: int) -> str:
+    def dns_details_text(self: SambatuiApp, row_index: int) -> str:
         row = self.visible_row_at(self.visible_records(), row_index)
         if row is None:
             return self.details_empty_text()
@@ -451,15 +477,15 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         )
         return dns_details_text(row, zone=self.val("zone"), ptr_status=ptr_status)
 
-    def directory_details_text(self, row_index: int) -> str:
+    def directory_details_text(self: SambatuiApp, row_index: int) -> str:
         row = self.visible_row_at(self.visible_directory(), row_index)
         return self.details_empty_text() if row is None else directory_details_text(row)
 
-    def smart_details_text(self, row_index: int) -> str:
+    def smart_details_text(self: SambatuiApp, row_index: int) -> str:
         row = self.visible_row_at(self.visible_smart_view(), row_index)
         return self.details_empty_text() if row is None else smart_details_text(row)
 
-    def current_details_text(self) -> str:
+    def current_details_text(self: SambatuiApp) -> str:
         getter = {
             ViewMode.DNS: self.dns_details_text,
             ViewMode.DIRECTORY: self.directory_details_text,
@@ -471,24 +497,24 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             else getter(self.records_cursor_row())
         )
 
-    def update_details_pane(self) -> None:
-        with suppress(Exception):
+    def update_details_pane(self: SambatuiApp) -> None:
+        with suppress(NoMatches, ScreenStackError):
             self.query_one("#record_details", Static).update(
                 self.current_details_text()
             )
 
-    def empty_state_text(self, view_mode: str) -> tuple[str, str]:
+    def empty_state_text(self: SambatuiApp, view_mode: str) -> tuple[str, str]:
         return empty_state_text(view_mode, self.search_text)
 
-    def empty_state_status(self, view_mode: str) -> str:
+    def empty_state_status(self: SambatuiApp, view_mode: str) -> str:
         title, hint = self.empty_state_text(view_mode)
         return f"{title}. {hint}"
 
-    def matches_search(self, values: Iterable[str]) -> bool:
+    def matches_search(self: SambatuiApp, values: Iterable[str]) -> bool:
         return matches_search(values, self.search_text)
 
     def visible_rows(
-        self,
+        self: SambatuiApp,
         rows: list[TableRow],
         search_values: Callable[[TableRow], Iterable[str]],
     ) -> list[TableRow]:
@@ -496,17 +522,17 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             return rows
         return [row for row in rows if self.matches_search(search_values(row))]
 
-    def visible_records(self) -> list[DnsRow]:
+    def visible_records(self: SambatuiApp) -> list[DnsRow]:
         return self.visible_rows(self.views.dns.rows, dns_search_values)
 
-    def visible_directory(self) -> list[DirectoryRow]:
+    def visible_directory(self: SambatuiApp) -> list[DirectoryRow]:
         return self.visible_rows(self.views.directory.rows, directory_search_values)
 
-    def visible_smart_view(self) -> list[SmartViewRow]:
+    def visible_smart_view(self: SambatuiApp) -> list[SmartViewRow]:
         return self.visible_rows(self.views.smart.rows, smart_search_values)
 
     def visible_rows_for_mode(
-        self, mode: ViewMode | str
+        self: SambatuiApp, mode: ViewMode | str
     ) -> list[DnsRow] | list[DirectoryRow] | list[SmartViewRow]:
         getter = {
             ViewMode.DNS: self.visible_records,
@@ -516,7 +542,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         return [] if getter is None else getter()
 
     def set_visible_status(
-        self, shown: int, total: int, label: str, view_mode: str
+        self: SambatuiApp, shown: int, total: int, label: str, view_mode: str
     ) -> None:
         if not shown:
             self.set_status(self.empty_state_status(view_mode))
@@ -524,26 +550,26 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         extra = f" matching /{self.search_text}/" if self.search_text else ""
         self.set_status(f"Showing {shown} of {total} {label}{extra}")
 
-    def refresh_record_view(self) -> None:
+    def refresh_record_view(self: SambatuiApp) -> None:
         rows = self.visible_records()
         self.render_records(rows)
         self.set_visible_status(len(rows), len(self.views.dns.rows), "records", "dns")
 
-    def refresh_directory_view(self) -> None:
+    def refresh_directory_view(self: SambatuiApp) -> None:
         rows = self.visible_directory()
         self.render_directory(rows)
         self.set_visible_status(
             len(rows), len(self.views.directory.rows), "LDAP entries", "directory"
         )
 
-    def refresh_smart_view(self) -> None:
+    def refresh_smart_view(self: SambatuiApp) -> None:
         rows = self.visible_smart_view()
         self.render_smart_view(rows)
         self.set_visible_status(
             len(rows), len(self.views.smart.rows), "smart-view findings", "smart"
         )
 
-    def clear_current_smart_view(self) -> None:
+    def clear_current_smart_view(self: SambatuiApp) -> None:
         view = SMART_VIEW_BY_ID.get(self.views.smart.view_id)
         if view is not None and view.source is SmartViewSource.LDAP:
             self.activate_results_view(ViewMode.DIRECTORY, "Directory (LDAP)")
@@ -552,7 +578,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         self.refresh_current_view()
         self.set_status("Finding filter cleared")
 
-    def refresh_current_view(self) -> None:
+    def refresh_current_view(self: SambatuiApp) -> None:
         refresh = {
             ViewMode.DNS: self.refresh_record_view,
             ViewMode.DIRECTORY: self.refresh_directory_view,
@@ -563,13 +589,15 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         else:
             refresh()
 
-    def sorted_records(self, rows: list[DnsRow]) -> list[DnsRow]:
+    def sorted_records(self: SambatuiApp, rows: list[DnsRow]) -> list[DnsRow]:
         state = self.views.dns
         return sorted(
             rows, key=RECORD_SORT_KEYS[state.sort_field], reverse=state.sort_reverse
         )
 
-    def sorted_directory(self, rows: list[DirectoryRow]) -> list[DirectoryRow]:
+    def sorted_directory(
+        self: SambatuiApp, rows: list[DirectoryRow]
+    ) -> list[DirectoryRow]:
         state = self.views.directory
         if not state.sort_field:
             return rows
@@ -577,19 +605,21 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             rows, key=DIRECTORY_SORT_KEYS[state.sort_field], reverse=state.sort_reverse
         )
 
-    def smart_sort_state(self) -> tuple[str, bool]:
+    def smart_sort_state(self: SambatuiApp) -> tuple[str, bool]:
         state = self.views.smart
         if state.sort_field:
             return state.sort_field, state.sort_reverse
         return SMART_DEFAULT_SORTS.get(state.view_id, ("", False))
 
-    def sorted_smart_view(self, rows: list[SmartViewRow]) -> list[SmartViewRow]:
+    def sorted_smart_view(
+        self: SambatuiApp, rows: list[SmartViewRow]
+    ) -> list[SmartViewRow]:
         field, reverse = self.smart_sort_state()
         if not field:
             return rows
         return sorted(rows, key=SMART_SORT_KEYS[field], reverse=reverse)
 
-    def sort_smart_view(self, field: str) -> None:
+    def sort_smart_view(self: SambatuiApp, field: str) -> None:
         if field not in SMART_SORT_KEYS:
             return
         state = self.views.smart
@@ -599,7 +629,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
         direction = sort_direction(state.sort_reverse)
         self.set_status(f"Sorted smart view by {smart_sort_label(field)} ({direction})")
 
-    def sort_directory(self, field: str) -> None:
+    def sort_directory(self: SambatuiApp, field: str) -> None:
         if field not in DIRECTORY_SORT_KEYS:
             return
         state = self.views.directory
@@ -611,7 +641,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             f"Sorted LDAP by {directory_sort_label(field)} ({direction}); selection cleared"
         )
 
-    def sort_records(self, field: str) -> None:
+    def sort_records(self: SambatuiApp, field: str) -> None:
         match self.views.mode:
             case "dns":
                 if field not in RECORD_SORT_KEYS:
@@ -629,7 +659,7 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             case _:
                 self.set_status(self.empty_state_status(self.views.mode))
 
-    def row_to_record(self, row_index: int) -> dict[str, str] | None:
+    def row_to_record(self: SambatuiApp, row_index: int) -> dict[str, str] | None:
         if self.views.mode != "dns":
             return None
         row = self.visible_row_at(self.visible_records(), row_index)
@@ -642,13 +672,13 @@ class AppViewsMixin(AppViewDataMixin, AppSelectionMixin):
             "ttl": row.ttl,
         }
 
-    def selected_records(self) -> list[dict[str, str]]:
+    def selected_records(self: SambatuiApp) -> list[dict[str, str]]:
         row_indices = sorted(self.views.dns.selected_rows) or [
             self.records_cursor_row()
         ]
         records = [self.row_to_record(row_index) for row_index in row_indices]
         return [record for record in records if record]
 
-    def selected_record(self) -> dict[str, str] | None:
+    def selected_record(self: SambatuiApp) -> dict[str, str] | None:
         records = self.selected_records()
         return records[0] if len(records) == 1 else None

@@ -29,7 +29,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 FROM base AS dev
 # uv's Python stays separate from Debian's Samba interpreter.
-ENV UV_CACHE_DIR=/root/.cache/uv \
+ENV SAMBA_INTEGRATION_REQUIRED=1 \
+    UV_CACHE_DIR=/root/.cache/uv \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_PYTHON_INSTALL_DIR=/opt/python \
@@ -37,7 +38,8 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends gcc libc6-dev libkrb5-dev
+    && apt-get install -y --no-install-recommends \
+        gcc libc6-dev libkrb5-dev samba-ad-dc samba-ad-provision samba-vfs-modules
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=proxy_ca \

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TypeAlias
 
-from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_view_catalog import all_smart_view_shortcut_range
 from sambatui.smart_views import SmartViewRow
 
@@ -12,7 +11,7 @@ DNS_COLUMNS = ("Select", "Risk", "Name", "Type", "Value", "TTL")
 DIRECTORY_COLUMNS = ("Select", "Risk", "Name", "Kind", "Summary")
 SMART_COLUMNS = ("Select", "Severity", "Object", "Finding")
 
-RowValues: TypeAlias = tuple[str, ...]
+type RowValues = tuple[str, ...]
 
 DNS_EMPTY_STATE = (
     "No DNS records shown",

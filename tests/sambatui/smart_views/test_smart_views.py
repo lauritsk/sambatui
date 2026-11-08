@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_view_catalog import (
     SMART_DEFAULT_SORTS,
     SMART_ROW_LIMIT_DEFAULT,
@@ -69,7 +69,7 @@ def directory_row(
         kind=kind,
         name=name,
         summary="",
-        attributes=attrs,
+        attributes={"uSNChanged": ("17",), **attrs},
     )
 
 
@@ -292,8 +292,8 @@ def test_ldap_inactive_users_ignores_disabled_and_recent_users() -> None:
     assert [finding.object for finding in findings] == ["old"]
     assert findings[0].fix_action == "ldap_disable_account"
     assert findings[0].fix_dn == "CN=Alice,DC=example,DC=com"
-    assert findings[0].fix_attribute == "userAccountControl"
-    assert findings[0].fix_value == str(512 | ACCOUNTDISABLE)
+    assert findings[0].fix_revision == "17"
+    assert findings[0].fix_value == "512"
 
 
 def test_ldap_delete_candidate_users_flags_disabled_old_and_never_logged_in() -> None:
@@ -326,7 +326,7 @@ def test_ldap_delete_candidate_users_flags_disabled_old_and_never_logged_in() ->
     assert findings[0].fix_action == ""
     assert "directory view" in findings[0].suggested_action
     assert findings[1].fix_action == "ldap_disable_account"
-    assert findings[1].fix_value == str(512 | ACCOUNTDISABLE)
+    assert findings[1].fix_value == "512"
 
 
 def test_ldap_stale_computers_flags_old_logon() -> None:
@@ -349,7 +349,7 @@ def test_ldap_stale_computers_flags_old_logon() -> None:
     assert findings[0].object == "host.example.com"
     assert findings[0].finding == "Stale computer account"
     assert findings[0].fix_action == "ldap_disable_account"
-    assert findings[0].fix_value == str(4096 | ACCOUNTDISABLE)
+    assert findings[0].fix_value == "4096"
 
 
 def test_ldap_users_without_groups_flags_empty_memberof() -> None:

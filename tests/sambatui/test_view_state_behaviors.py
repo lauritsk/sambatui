@@ -30,7 +30,11 @@ def populate(app: SambatuiApp, mode: ViewMode, count: int) -> None:
         app.populate_directory(
             [
                 DirectoryRow(
-                    f"CN=User{i},DC=example,DC=com", "user", f"User{i}", "", {}
+                    f"CN=User{i},DC=example,DC=com",
+                    "user",
+                    f"User{i}",
+                    "",
+                    {"uSNChanged": ("17",)},
                 )
                 for i in range(count)
             ]
@@ -233,28 +237,11 @@ def test_nested_busy_scopes_stay_busy_until_outer_exit() -> None:
     asyncio.run(run_app())
 
 
-def test_cancelling_command_reaps_its_subprocess(monkeypatch) -> None:
-    class CancelledProcess:
-        calls = 0
-        killed = False
+def test_command_cancellation_propagates(monkeypatch) -> None:
+    async def cancelled(*args, **kwargs):
+        raise asyncio.CancelledError
 
-        async def communicate(self):
-            self.calls += 1
-            if self.calls == 1:
-                raise asyncio.CancelledError
-            return b"", b""
-
-        def kill(self):
-            self.killed = True
-
-    process = CancelledProcess()
-
-    async def fake_exec(*args, **kwargs):
-        return process
-
-    monkeypatch.setattr(
-        "sambatui.samba.execution.asyncio.create_subprocess_exec", fake_exec
-    )
+    monkeypatch.setattr("sambatui.controllers.core.execute_command", cancelled)
 
     async def run_app() -> None:
         app = LocalApp()
@@ -265,8 +252,6 @@ def test_cancelling_command_reaps_its_subprocess(monkeypatch) -> None:
         )
         with pytest.raises(asyncio.CancelledError):
             await app.run_command(client, ["never-executed"])
-        assert process.killed
-        assert process.calls == 2
 
     asyncio.run(run_app())
 

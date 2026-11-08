@@ -1,28 +1,22 @@
 import ssl
 from collections.abc import Callable
+from typing import ClassVar
 from urllib.parse import urlsplit
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from ldap3 import GSSAPI, LEVEL, MODIFY_DELETE, MODIFY_REPLACE, NONE, SASL
+from ldap3 import ALL, GSSAPI, LEVEL, MODIFY_DELETE, MODIFY_REPLACE, SASL
 from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
 
-from sambatui.ldap.client import (
-    LdapDirectoryClient,
-    LdapSearchConfig,
-    build_add_entry,
-    build_directory_filter,
-    domain_to_base_dn,
-    entry_to_directory_row,
-    gssapi_cred_store,
-    ldap_connection_kwargs,
-    ldap_dn_in_scope,
-    ldap_server_get_info,
-    ldap_server_tls,
-    parse_ldap_server,
-)
-
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.config import domain_to_base_dn, gssapi_cred_store, parse_ldap_server
+from sambatui.ldap.connection import ldap_connection_kwargs
+from sambatui.ldap.dn import build_add_entry, ldap_dn_in_scope
+from sambatui.ldap.entries import entry_to_directory_row
+from sambatui.ldap.errors import LdapOperationError
+from sambatui.ldap.filters import build_directory_filter
+from sambatui.ldap.types import LdapSearchConfig
 
 DNS_LABEL = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"))
@@ -39,7 +33,7 @@ EDITABLE_ATTRS = st.sampled_from(
 
 class FakeEntry:
     entry_dn = "CN=Alice Example,CN=Users,DC=example,DC=com"
-    entry_attributes_as_dict = {
+    entry_attributes_as_dict: ClassVar[dict[str, object]] = {
         "displayName": ["Alice Example"],
         "sAMAccountName": ["alice"],
         "userPrincipalName": ["alice@example.com"],
@@ -92,39 +86,21 @@ def test_search_config_accepts_kerberos_without_password() -> None:
         LdapSearchConfig(
             server="ldap://dc01.example.com",
             base_dn="DC=example,DC=com",
-            encryption="off",
+            encryption="starttls",
             auth_mode="kerberos",
         ).validation_error()
         is None
     )
 
 
-@pytest.mark.parametrize("encryption", ["ldaps", "starttls"])
-def test_normal_ldap_tls_requires_certificate_verification(encryption: str) -> None:
-    tls = ldap_server_tls(LdapSearchConfig(server="dc", encryption=encryption))
-    assert tls is not None
-    assert tls.validate == ssl.CERT_REQUIRED
-    assert tls.version == ssl.PROTOCOL_TLS_CLIENT
-
-
-def test_search_config_accepts_ldap_compatibility_on() -> None:
-    config = LdapSearchConfig(
-        server="dc01.example.com",
-        user="EXAMPLE\\admin",
-        password="secret",
-        base_dn="DC=example,DC=com",
-        compatibility="on",
-    )
-
-    assert config.validation_error() is None
-    assert config.compatibility_enabled
-    assert ldap_server_get_info(config) == NONE
-    tls = ldap_server_tls(config)
-    assert tls is not None
-    assert tls.validate == ssl.CERT_NONE
-
-
 def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
+    for auth_mode in ("password", "kerberos"):
+        assert (
+            LdapSearchConfig(
+                "dc", auth_mode=auth_mode, encryption="off"
+            ).validation_error()
+            == "LDAP encryption must be ldaps or starttls."
+        )
     assert (
         LdapSearchConfig(
             server="dc01.example.com",
@@ -133,7 +109,7 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
             base_dn="DC=example,DC=com",
             encryption="plain",
         ).validation_error()
-        == "LDAP encryption must be off, ldaps, or starttls."
+        == "LDAP encryption must be ldaps or starttls."
     )
     assert (
         LdapSearchConfig(
@@ -151,17 +127,7 @@ def test_search_config_rejects_insecure_or_passwordless_bind() -> None:
             base_dn="DC=example,DC=com",
             encryption="ldaps",
         ).validation_error()
-        == "ldap:// server URLs require LDAP encryption starttls or off."
-    )
-    assert (
-        LdapSearchConfig(
-            server="dc01.example.com",
-            user="EXAMPLE\\admin",
-            password="secret",
-            base_dn="DC=example,DC=com",
-            compatibility="maybe",
-        ).validation_error()
-        == "LDAP compatibility must be on or off."
+        == "ldap:// server URLs require LDAP encryption starttls."
     )
 
 
@@ -172,7 +138,19 @@ def test_client_search_raises_validation_error_before_connecting() -> None:
         client.search("users")
 
 
-def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
+def test_ldap_connection_kwargs_uses_selected_cache_identity_for_kerberos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential = object()
+
+    def acquire(**kwargs: object) -> object:
+        assert kwargs == {
+            "usage": "initiate",
+            "store": {"ccache": "FILE:/tmp/krb5cc_test"},
+        }
+        return credential
+
+    monkeypatch.setattr("sambatui.ldap.connection.Credentials", acquire)
     kwargs = ldap_connection_kwargs(
         LdapSearchConfig(
             server="dc01.example.com",
@@ -185,19 +163,29 @@ def test_ldap_connection_kwargs_uses_sasl_gssapi_for_kerberos() -> None:
     assert kwargs["authentication"] == SASL
     assert kwargs["sasl_mechanism"] == GSSAPI
     assert "password" not in kwargs
-    assert kwargs["cred_store"] == {"ccache": "FILE:/tmp/krb5cc_test"}
+    assert kwargs["sasl_credentials"] == (False, None, credential)
+    assert kwargs["user"] is None
+    assert kwargs["auto_referrals"] is False
 
 
-def test_search_passes_compatibility_tls_to_ldap_server(
+@pytest.mark.parametrize("encryption", ["ldaps", "starttls"])
+def test_search_passes_verified_tls_to_ldap_server(
     monkeypatch: pytest.MonkeyPatch,
+    encryption: str,
 ) -> None:
     captured: dict[str, object] = {}
 
     class FakeConnection:
-        result = {"description": "invalidCredentials", "message": "nope"}
+        result: ClassVar[dict[str, object]] = {
+            "description": "invalidCredentials",
+            "message": "nope",
+        }
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
+
+        def start_tls(self) -> bool:
+            return True
 
         def bind(self) -> bool:
             return False
@@ -218,15 +206,18 @@ def test_search_passes_compatibility_tls_to_ldap_server(
             user="EXAMPLE\\admin",
             password="secret",
             base_dn="DC=example,DC=com",
-            compatibility="on",
+            encryption=encryption,
         )
     )
 
-    with pytest.raises(ValueError, match="LDAP bind failed"):
+    with pytest.raises(LdapOperationError, match="LDAP bind failed"):
         client.search("users")
 
-    assert captured["get_info"] == NONE
-    assert captured["tls"] is not None
+    assert captured["get_info"] == ALL
+    assert captured["use_ssl"] is (encryption == "ldaps")
+    tls = captured["tls"]
+    assert tls.validate == ssl.CERT_REQUIRED
+    assert tls.version == ssl.PROTOCOL_TLS_CLIENT
 
 
 def test_check_connection_binds_without_search(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,14 +262,14 @@ def test_child_containers_searches_one_level(
 
     class ContainerEntry:
         entry_dn = "CN=Users,DC=example,DC=com"
-        entry_attributes_as_dict = {
+        entry_attributes_as_dict: ClassVar[dict[str, object]] = {
             "cn": ["Users"],
             "objectClass": ["top", "container"],
         }
 
     class FakeConnection:
-        entries = [ContainerEntry()]
-        result = {}
+        entries: ClassVar[list[object]] = [ContainerEntry()]
+        result: ClassVar[dict[str, object]] = {}
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
@@ -323,7 +314,7 @@ def test_modify_attributes_replaces_and_deletes_allowed_attributes(
     connections = []
 
     class FakeConnection:
-        result = {}
+        result: ClassVar[dict[str, object]] = {}
 
         def __init__(self, *_args: object, **kwargs: object) -> None:
             self.kwargs = kwargs
@@ -333,7 +324,7 @@ def test_modify_attributes_replaces_and_deletes_allowed_attributes(
         def bind(self) -> bool:
             return True
 
-        def modify(self, dn: str, changes: object) -> bool:
+        def modify(self, dn: str, changes: object, *, controls: object = None) -> bool:
             self.modified = (dn, changes)
             return True
 
@@ -353,7 +344,9 @@ def test_modify_attributes_replaces_and_deletes_allowed_attributes(
     )
 
     client.modify_attributes(
-        "CN=Alice,DC=example,DC=com", {"displayName": "Alice A", "mail": ""}
+        "CN=Alice,DC=example,DC=com",
+        {"displayName": "Alice A", "mail": ""},
+        expected_revision="17",
     )
 
     assert connections[0].kwargs["read_only"] is False
@@ -389,7 +382,7 @@ def test_add_entry_calls_ldap_add_writable_connection(
     connections = []
 
     class FakeConnection:
-        result = {}
+        result: ClassVar[dict[str, object]] = {}
 
         def __init__(self, *_args: object, **kwargs: object) -> None:
             self.kwargs = kwargs
@@ -461,7 +454,7 @@ def test_delete_entry_rejects_base_dn(dn: str) -> None:
     )
 
     with pytest.raises(ValueError, match="Refusing to delete LDAP base DN"):
-        client.delete_entry(dn)
+        client.delete_entry(dn, expected_revision="17")
 
 
 @pytest.mark.parametrize(
@@ -472,17 +465,23 @@ def test_delete_entry_rejects_base_dn(dn: str) -> None:
             "LDAP add parent",
         ),
         (
-            lambda client: client.delete_entry("CN=Alice,DC=other,DC=com"),
+            lambda client: client.delete_entry(
+                "CN=Alice,DC=other,DC=com", expected_revision="17"
+            ),
             "LDAP delete target",
         ),
         (
             lambda client: client.modify_attributes(
-                "CN=Alice,DC=other,DC=com", {"description": "changed"}
+                "CN=Alice,DC=other,DC=com",
+                {"description": "changed"},
+                expected_revision="17",
             ),
             "LDAP modify target",
         ),
         (
-            lambda client: client.disable_account("CN=Alice,DC=other,DC=com", 512),
+            lambda client: client.disable_account(
+                "CN=Alice,DC=other,DC=com", 512, expected_revision="17"
+            ),
             "LDAP disable target",
         ),
     ],
@@ -507,7 +506,7 @@ def test_delete_entry_calls_ldap_delete(monkeypatch: pytest.MonkeyPatch) -> None
     connections = []
 
     class FakeConnection:
-        result = {}
+        result: ClassVar[dict[str, object]] = {}
 
         def __init__(self, *_args: object, **kwargs: object) -> None:
             self.kwargs = kwargs
@@ -517,7 +516,7 @@ def test_delete_entry_calls_ldap_delete(monkeypatch: pytest.MonkeyPatch) -> None
         def bind(self) -> bool:
             return True
 
-        def delete(self, dn: str) -> bool:
+        def delete(self, dn: str, *, controls: object = None) -> bool:
             self.deleted = dn
             return True
 
@@ -536,7 +535,7 @@ def test_delete_entry_calls_ldap_delete(monkeypatch: pytest.MonkeyPatch) -> None
         )
     )
 
-    client.delete_entry("CN=Alice,DC=example,DC=com")
+    client.delete_entry("CN=Alice,DC=example,DC=com", expected_revision="17")
 
     assert connections[0].kwargs["read_only"] is False
     assert connections[0].deleted == "CN=Alice,DC=example,DC=com"
@@ -553,7 +552,9 @@ def test_modify_attributes_rejects_unlisted_attributes() -> None:
     )
 
     with pytest.raises(ValueError, match="LDAP attribute is not editable: memberOf"):
-        client.modify_attributes("CN=Alice,DC=example,DC=com", {"memberOf": "x"})
+        client.modify_attributes(
+            "CN=Alice,DC=example,DC=com", {"memberOf": "x"}, expected_revision="17"
+        )
 
 
 def test_search_follows_paged_results_until_limit(
@@ -644,7 +645,7 @@ def test_search_wraps_ldap_session_termination(
     )
 
     with pytest.raises(
-        ValueError,
+        LdapOperationError,
         match="LDAP bind failed: session terminated by server",
     ):
         client.search("users")

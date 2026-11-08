@@ -14,8 +14,8 @@ from .dns import (
     DnsRecordRef,
     bucket_dns_records,
     cname_conflict_findings,
-    dns_duplicate_records,
     dns_a_without_ptr,
+    dns_duplicate_records,
     dns_fqdn,
     dns_ptr_without_a,
     dns_record_identity,
@@ -54,7 +54,6 @@ from .ldap import (
     stale_computer_finding,
 )
 from .models import SmartViewCheckResult, SmartViewRow
-
 
 __all__ = [
     "ACCOUNTDISABLE",

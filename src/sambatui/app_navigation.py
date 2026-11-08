@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from textual.app import App
+from textual.app import ScreenStackError
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.widgets import Button, DataTable, Input, TabbedContent
 
-from .app_constants import (
+from sambatui.app_actions import (
     CASE_SENSITIVE_ACTION_NAMES,
     CHAR_ACTION_NAMES,
     KEY_ACTION_NAMES,
-    SIDE_TAB_IDS,
 )
-from .core.view_state import AppViewState
+from sambatui.app_constants import SIDE_TAB_IDS
+
 from .smart_view_catalog import SMART_VIEW_BY_SHORTCUT
+
+if TYPE_CHECKING:
+    from .app import SambatuiApp
 
 DNS_HEADER_SORT_FIELDS = {2: "name", 3: "type", 4: "value"}
 DIRECTORY_HEADER_SORT_FIELDS = {2: "name", 3: "type", 4: "value"}
@@ -40,58 +43,9 @@ DEFAULT_PAGE_ROWS = 10
 TABLE_CHROME_ROWS = 3
 
 
-class AppNavigationMixin(App):
-    if TYPE_CHECKING:
-        _syncing_search_input: bool
-        pending_g: bool
-        search_text: str
-        views: AppViewState
-        zones: list[str]
-
-        def action_fix_smart(self) -> object: ...
-
-        def action_smart_view_shortcut(self, shortcut: str) -> object: ...
-
-        async def activate_sidebar_selection(self, table: DataTable) -> bool: ...
-
-        def clear_current_selection(self) -> None: ...
-
-        def clear_current_smart_view(self) -> None: ...
-
-        def refresh_current_view(self) -> None: ...
-
-        def refresh_key_hints(self) -> None: ...
-
-        def refresh_selection_indicator(self) -> None: ...
-
-        def refresh_inline_search_scope(
-            self, search_text: str, view_mode: str
-        ) -> object: ...
-
-        def current_selection_anchor(self) -> int | None: ...
-
-        def select_current_range(self, start: int, end: int) -> None: ...
-
-        def selected_rows_for_current_view(self) -> set[int]: ...
-
-        def selection_count_label(self) -> str: ...
-
-        def selection_status_text(self) -> str: ...
-
-        def set_current_row_selected(self, row_index: int, selected: bool) -> None: ...
-
-        def set_current_selection_anchor(self, row_index: int | None) -> None: ...
-
-        def set_status(self, message: str) -> None: ...
-
-        def sort_records(self, field: str) -> None: ...
-
-        def update_details_pane(self) -> None: ...
-
-        def visible_rows_for_mode(self, mode: str) -> Sequence[object]: ...
-
-    def sync_inline_search_input(self) -> None:
-        with suppress(Exception):
+class AppNavigationMixin:
+    def sync_inline_search_input(self: SambatuiApp) -> None:
+        with suppress(NoMatches, ScreenStackError):
             search = self.query_one("#inline_search", Input)
             if search.value == self.search_text:
                 return
@@ -101,13 +55,13 @@ class AppNavigationMixin(App):
             finally:
                 self._syncing_search_input = False
 
-    def set_search_text(self, text: str, *, refresh: bool = True) -> None:
+    def set_search_text(self: SambatuiApp, text: str, *, refresh: bool = True) -> None:
         self.search_text = text
         self.sync_inline_search_input()
         if refresh:
             self.refresh_current_view()
 
-    def action_search(self) -> None:
+    def action_search(self: SambatuiApp) -> None:
         self.pending_g = False
         search = self.query_one("#inline_search", Input)
         search.focus()
@@ -115,43 +69,43 @@ class AppNavigationMixin(App):
             "Inline search: LDAP/DNS searches source data; smart views filter loaded findings"
         )
 
-    def focused_table(self) -> DataTable | None:
+    def focused_table(self: SambatuiApp) -> DataTable | None:
         focused = self.focused
         return focused if isinstance(focused, DataTable) else None
 
-    def sidebar_table_id(self) -> str:
+    def sidebar_table_id(self: SambatuiApp) -> str:
         active = "dns_tab"
-        with suppress(Exception):
+        with suppress(NoMatches, ScreenStackError):
             active = self.query_one("#side_tabs", TabbedContent).active or "dns_tab"
         if active == "ldap_tab":
             return "ldap_structure"
         return "zones"
 
-    def action_focus_zones(self) -> None:
+    def action_focus_zones(self: SambatuiApp) -> None:
         self.pending_g = False
         self.query_one(f"#{self.sidebar_table_id()}", DataTable).focus()
 
-    def records_table(self) -> DataTable:
+    def records_table(self: SambatuiApp) -> DataTable:
         return self.query_one("#records", DataTable)
 
-    def focus_records_table(self) -> DataTable:
+    def focus_records_table(self: SambatuiApp) -> DataTable:
         table = self.records_table()
         table.focus()
         return table
 
-    def action_focus_records(self) -> None:
+    def action_focus_records(self: SambatuiApp) -> None:
         self.pending_g = False
         self.focus_records_table()
 
-    def focus_table(self, table_id: str) -> DataTable:
+    def focus_table(self: SambatuiApp, table_id: str) -> DataTable:
         table = self.query_one(f"#{table_id}", DataTable)
         table.focus()
         return table
 
-    def next_table_id(self, table_id: str | None) -> str | None:
+    def next_table_id(self: SambatuiApp, table_id: str | None) -> str | None:
         return NEXT_TABLE_BY_ID.get(table_id or "")
 
-    def action_next_table(self) -> None:
+    def action_next_table(self: SambatuiApp) -> None:
         table = self.focused_table()
         table_id = self.next_table_id(str(table.id)) if table is not None else None
         if table_id is None:
@@ -159,20 +113,20 @@ class AppNavigationMixin(App):
             return
         self.focus_table(table_id)
 
-    def action_previous_table(self) -> None:
+    def action_previous_table(self: SambatuiApp) -> None:
         table = self.focused_table()
         if table and table.id == "records":
             self.action_focus_zones()
         else:
             self.action_focus_records()
 
-    def action_next_side_tab(self) -> None:
+    def action_next_side_tab(self: SambatuiApp) -> None:
         self.switch_side_tab(1)
 
-    def action_previous_side_tab(self) -> None:
+    def action_previous_side_tab(self: SambatuiApp) -> None:
         self.switch_side_tab(-1)
 
-    def switch_side_tab(self, delta: int) -> None:
+    def switch_side_tab(self: SambatuiApp, delta: int) -> None:
         tabs = self.query_one("#side_tabs", TabbedContent)
         current = tabs.active if tabs.active in SIDE_TAB_IDS else "dns_tab"
         current_index = SIDE_TAB_IDS.index(current)
@@ -182,21 +136,21 @@ class AppNavigationMixin(App):
         self.action_focus_zones()
 
     def on_tabbed_content_tab_activated(
-        self, event: TabbedContent.TabActivated
+        self: SambatuiApp, event: TabbedContent.TabActivated
     ) -> None:
         if event.tabbed_content.id == "side_tabs":
             self.refresh_key_hints()
 
-    def action_sort_name(self) -> None:
+    def action_sort_name(self: SambatuiApp) -> None:
         self.sort_records("name")
 
-    def action_sort_type(self) -> None:
+    def action_sort_type(self: SambatuiApp) -> None:
         self.sort_records("type")
 
-    def action_sort_value(self) -> None:
+    def action_sort_value(self: SambatuiApp) -> None:
         self.sort_records("value")
 
-    def update_visual_selection(self) -> None:
+    def update_visual_selection(self: SambatuiApp) -> None:
         anchor = self.current_selection_anchor()
         if not self.views.visual_selecting or anchor is None:
             return
@@ -204,70 +158,74 @@ class AppNavigationMixin(App):
         if self.focused_table() is table:
             self.select_current_range(anchor, table.cursor_row)
 
-    def active_table(self) -> DataTable:
+    def active_table(self: SambatuiApp) -> DataTable:
         return self.focused_table() or self.records_table()
 
-    def page_rows(self, table: DataTable) -> int:
+    def page_rows(self: SambatuiApp, table: DataTable) -> int:
         height = getattr(table.size, "height", 0)
         if not height:
             return DEFAULT_PAGE_ROWS
         return max(1, height - TABLE_CHROME_ROWS)
 
-    def finish_cursor_move(self) -> None:
+    def finish_cursor_move(self: SambatuiApp) -> None:
         self.update_visual_selection()
         self.update_details_pane()
 
-    def move_cursor_to(self, table: DataTable, row: int) -> None:
+    def move_cursor_to(self: SambatuiApp, table: DataTable, row: int) -> None:
         table.move_cursor(row=max(0, min(row, table.row_count - 1)))
         self.finish_cursor_move()
 
-    def move_cursor_by(self, delta: int) -> None:
+    def move_cursor_by(self: SambatuiApp, delta: int) -> None:
         table = self.active_table()
         if not table.row_count:
             return
         self.move_cursor_to(table, table.cursor_row + delta)
 
-    def action_cursor_down(self) -> None:
+    def action_cursor_down(self: SambatuiApp) -> None:
         self.pending_g = False
         self.move_cursor_by(1)
 
-    def action_cursor_up(self) -> None:
+    def action_cursor_up(self: SambatuiApp) -> None:
         self.pending_g = False
         self.move_cursor_by(-1)
 
-    def page_delta(self, table: DataTable, *, half_page: bool = False) -> int:
+    def page_delta(
+        self: SambatuiApp, table: DataTable, *, half_page: bool = False
+    ) -> int:
         rows = self.page_rows(table)
         return max(1, rows // 2) if half_page else rows
 
-    def move_cursor_by_page(self, direction: int, *, half_page: bool = False) -> None:
+    def move_cursor_by_page(
+        self: SambatuiApp, direction: int, *, half_page: bool = False
+    ) -> None:
         self.pending_g = False
         self.move_cursor_by(
             direction * self.page_delta(self.active_table(), half_page=half_page)
         )
 
-    def action_cursor_page_down(self) -> None:
+    def action_cursor_page_down(self: SambatuiApp) -> None:
         self.move_cursor_by_page(1)
 
-    def action_cursor_page_up(self) -> None:
+    def action_cursor_page_up(self: SambatuiApp) -> None:
         self.move_cursor_by_page(-1)
 
-    def action_cursor_half_page_down(self) -> None:
+    def action_cursor_half_page_down(self: SambatuiApp) -> None:
         self.move_cursor_by_page(1, half_page=True)
 
-    def action_cursor_half_page_up(self) -> None:
+    def action_cursor_half_page_up(self: SambatuiApp) -> None:
         self.move_cursor_by_page(-1, half_page=True)
 
-    def action_cursor_top(self) -> None:
+    def action_cursor_top(self: SambatuiApp) -> None:
         self.pending_g = False
         self.move_cursor_to(self.active_table(), 0)
 
-    def action_cursor_bottom(self) -> None:
+    def action_cursor_bottom(self: SambatuiApp) -> None:
         self.pending_g = False
         table = self.active_table()
         if table.row_count:
             self.move_cursor_to(table, table.row_count - 1)
 
-    def ensure_selectable_records_view(self) -> bool:
+    def ensure_selectable_records_view(self: SambatuiApp) -> bool:
         if self.views.mode in SELECTABLE_VIEW_MODES:
             return True
         self.set_status(
@@ -276,7 +234,7 @@ class AppNavigationMixin(App):
         return False
 
     def record_selection_table(
-        self, *, focus: bool = False, require_records_focus: bool = False
+        self: SambatuiApp, *, focus: bool = False, require_records_focus: bool = False
     ) -> DataTable | None:
         table = self.focus_records_table() if focus else self.active_table()
         if require_records_focus and table.id != "records":
@@ -290,7 +248,7 @@ class AppNavigationMixin(App):
             return None
         return table
 
-    def action_toggle_select(self) -> None:
+    def action_toggle_select(self: SambatuiApp) -> None:
         self.pending_g = False
         table = self.record_selection_table(require_records_focus=True)
         if table is None:
@@ -302,7 +260,7 @@ class AppNavigationMixin(App):
         self.set_current_row_selected(row_index, not is_selected)
         self.set_status(self.selection_status_text())
 
-    def action_visual_select(self) -> None:
+    def action_visual_select(self: SambatuiApp) -> None:
         self.pending_g = False
         table = self.record_selection_table(focus=True)
         if table is None:
@@ -323,7 +281,7 @@ class AppNavigationMixin(App):
         )
         self.set_status(f"VISUAL · use j/k · {action_hint} · Esc ends")
 
-    def action_select_range(self) -> None:
+    def action_select_range(self: SambatuiApp) -> None:
         self.pending_g = False
         table = self.record_selection_table(focus=True)
         if table is None:
@@ -334,7 +292,7 @@ class AppNavigationMixin(App):
             self.set_current_selection_anchor(anchor)
         self.select_current_range(anchor, table.cursor_row)
 
-    def extend_selection_by(self, delta: int) -> None:
+    def extend_selection_by(self: SambatuiApp, delta: int) -> None:
         self.pending_g = False
         table = self.record_selection_table(focus=True)
         if table is None:
@@ -346,13 +304,13 @@ class AppNavigationMixin(App):
         self.move_cursor_by(delta)
         self.select_current_range(anchor, table.cursor_row)
 
-    def action_extend_up(self) -> None:
+    def action_extend_up(self: SambatuiApp) -> None:
         self.extend_selection_by(-1)
 
-    def action_extend_down(self) -> None:
+    def action_extend_down(self: SambatuiApp) -> None:
         self.extend_selection_by(1)
 
-    def action_clear_navigation_state(self) -> None:
+    def action_clear_navigation_state(self: SambatuiApp) -> None:
         self.pending_g = False
         if self.focused_inline_search():
             if self.search_text:
@@ -380,14 +338,14 @@ class AppNavigationMixin(App):
             return
         self.action_focus_records()
 
-    def set_visual_selection_off_status(self) -> None:
+    def set_visual_selection_off_status(self: SambatuiApp) -> None:
         self.refresh_selection_indicator()
         self.set_status(self.selection_status_text())
 
-    def is_sidebar_table(self, table: DataTable | None) -> bool:
+    def is_sidebar_table(self: SambatuiApp, table: DataTable | None) -> bool:
         return table is not None and table.id in SIDEBAR_TABLE_IDS
 
-    async def action_activate_row(self) -> None:
+    async def action_activate_row(self: SambatuiApp) -> None:
         self.pending_g = False
         table = self.focused_table()
         if table and table.id == "records":
@@ -406,7 +364,7 @@ class AppNavigationMixin(App):
         if table is not None and self.is_sidebar_table(table):
             await self.activate_sidebar_selection(table)
 
-    async def on_key(self, event: Key) -> None:
+    async def on_key(self: SambatuiApp, event: Key) -> None:
         if self.handle_inline_search_key(event):
             event.prevent_default()
             event.stop()
@@ -418,10 +376,10 @@ class AppNavigationMixin(App):
             event.prevent_default()
             event.stop()
 
-    def focused_inline_search(self) -> bool:
+    def focused_inline_search(self: SambatuiApp) -> bool:
         return isinstance(self.focused, Input) and self.focused.id == "inline_search"
 
-    def handle_inline_search_key(self, event: Key) -> bool:
+    def handle_inline_search_key(self: SambatuiApp, event: Key) -> bool:
         if not self.focused_inline_search():
             return False
         if event.key == "escape":
@@ -433,12 +391,12 @@ class AppNavigationMixin(App):
             return True
         return False
 
-    def should_ignore_key_event(self, event: Key) -> bool:
+    def should_ignore_key_event(self: SambatuiApp, event: Key) -> bool:
         if isinstance(self.focused, Input):
             return True
         return isinstance(self.focused, Button) and event.key in {"enter", "space"}
 
-    async def handle_key(self, key: str, char: str | None) -> bool:
+    async def handle_key(self: SambatuiApp, key: str, char: str | None) -> bool:
         char_lower = char.casefold() if char else ""
         if char_lower != "g":
             self.pending_g = False
@@ -453,20 +411,20 @@ class AppNavigationMixin(App):
         self.pending_g = False
         return False
 
-    async def handle_case_sensitive_key(self, char: str | None) -> bool:
+    async def handle_case_sensitive_key(self: SambatuiApp, char: str | None) -> bool:
         action_name = CASE_SENSITIVE_ACTION_NAMES.get(char or "")
         if action_name is None:
             return False
         await self.invoke_action(action_name)
         return True
 
-    def handle_smart_view_shortcut(self, char_lower: str) -> bool:
+    def handle_smart_view_shortcut(self: SambatuiApp, char_lower: str) -> bool:
         if char_lower not in SMART_VIEW_BY_SHORTCUT:
             return False
         self.action_smart_view_shortcut(char_lower)
         return True
 
-    def handle_g_key(self, char: str | None, char_lower: str) -> bool:
+    def handle_g_key(self: SambatuiApp, char: str | None, char_lower: str) -> bool:
         if char_lower != "g":
             return False
         if char == "G":
@@ -478,19 +436,19 @@ class AppNavigationMixin(App):
             self.set_status("g pressed: press g again for top; G goes bottom")
         return True
 
-    async def handle_mapped_key(self, key: str, char_lower: str) -> bool:
+    async def handle_mapped_key(self: SambatuiApp, key: str, char_lower: str) -> bool:
         action_name = KEY_ACTION_NAMES.get(key) or CHAR_ACTION_NAMES.get(char_lower)
         if action_name is None:
             return False
         await self.invoke_action(action_name)
         return True
 
-    async def invoke_action(self, action_name: str, *args: object) -> None:
+    async def invoke_action(self: SambatuiApp, action_name: str, *args: object) -> None:
         result = getattr(self, action_name)(*args)
         if inspect.isawaitable(result):
             await result
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_input_changed(self: SambatuiApp, event: Input.Changed) -> None:
         if event.input.id != "inline_search":
             return
         event.stop()
@@ -500,20 +458,26 @@ class AppNavigationMixin(App):
         self.refresh_current_view()
         self.refresh_inline_search_scope(event.value, self.views.mode)
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+    def on_data_table_row_highlighted(
+        self: SambatuiApp, event: DataTable.RowHighlighted
+    ) -> None:
         if event.data_table.id == "records":
             self.update_details_pane()
 
-    async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+    async def on_data_table_row_selected(
+        self: SambatuiApp, event: DataTable.RowSelected
+    ) -> None:
         if not self.is_sidebar_table(event.data_table):
             return
         await self.activate_sidebar_selection(event.data_table)
 
-    def header_sort_field(self, column_index: int) -> str | None:
+    def header_sort_field(self: SambatuiApp, column_index: int) -> str | None:
         sort_fields = HEADER_SORT_FIELDS_BY_VIEW_MODE.get(self.views.mode)
         return None if sort_fields is None else sort_fields.get(column_index)
 
-    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+    def on_data_table_header_selected(
+        self: SambatuiApp, event: DataTable.HeaderSelected
+    ) -> None:
         if event.data_table.id != "records":
             return
 

@@ -3,9 +3,8 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Protocol
 
-AuthMode = Literal["password", "kerberos"]
 KERBEROS_MODES = frozenset({"off", "desired", "required"})
 AUTH_MODES = frozenset({"password", "kerberos"})
 
@@ -66,23 +65,22 @@ class SambaToolClient:
             self.config.executable,
             "dns",
             action,
+            *self._global_args(),
+            "--",
             self.config.server,
             zone,
             *args,
-        ] + self._global_args()
-
-    def dns_zone_command(
-        self, action: str, zone: str, args: Sequence[str]
-    ) -> list[str]:
-        return self.dns_command(action, zone, args)
+        ]
 
     def zonelist_command(self) -> list[str]:
         return [
             self.config.executable,
             "dns",
             "zonelist",
+            *self._global_args(),
+            "--",
             self.config.server,
-        ] + self._global_args()
+        ]
 
     def _global_args(self) -> list[str]:
         args: list[str] = []

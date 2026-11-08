@@ -75,7 +75,9 @@ def test_read_only_secret_rechecks_mount_after_open(
     path.chmod(0o444)
     monkeypatch.setattr(config, "SECRETS_DIR", tmp_path)
     monkeypatch.setattr(os, "getuid", lambda: -1)
-    monkeypatch.setattr(os, "statvfs", lambda path: SimpleNamespace(f_flag=os.ST_RDONLY))
+    monkeypatch.setattr(
+        os, "statvfs", lambda path: SimpleNamespace(f_flag=os.ST_RDONLY)
+    )
     monkeypatch.setattr(
         os,
         "fstatvfs",
@@ -88,7 +90,9 @@ def test_read_only_secret_rechecks_mount_after_open(
     assert path.stat().st_mode & 0o777 == 0o444
 
 
-def test_writable_secret_requires_private_permissions(tmp_path: Path, monkeypatch) -> None:
+def test_writable_secret_requires_private_permissions(
+    tmp_path: Path, monkeypatch
+) -> None:
     path = tmp_path / "ad-password"
     path.write_text("secret\n", encoding="utf-8")
     path.chmod(0o644)

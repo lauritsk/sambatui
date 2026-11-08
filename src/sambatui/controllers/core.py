@@ -3,32 +3,35 @@ from __future__ import annotations
 import os
 import shutil
 import socket
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, nullcontext, suppress
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from textual import work
+from textual.app import ScreenStackError
+from textual.css.query import NoMatches
 from textual.widgets import (
     Button,
-    Input,
     Static,
 )
 
-from ..app_constants import (
+from sambatui.app_actions import PALETTE_ACTION_MAP, PALETTE_ACTIONS
+from sambatui.app_constants import LDAP_DEFAULT_MAX_ROWS
+from sambatui.core.config import (
     DEFAULT_AUTH,
     DEFAULT_AUTO_PTR,
-    DEFAULT_LDAP_COMPATIBILITY,
     DEFAULT_LDAP_ENCRYPTION,
     DEFAULT_PASSWORD_FILE,
     DEFAULT_SMART_DAYS,
     DEFAULT_SMART_DISABLED_DAYS,
     DEFAULT_SMART_MAX_ROWS,
     DEFAULT_SMART_NEVER_LOGGED_DAYS,
-    LDAP_DEFAULT_MAX_ROWS,
-    PALETTE_ACTION_MAP,
-    PALETTE_ACTIONS,
 )
+from sambatui.ldap.client import LdapDirectoryClient
+from sambatui.ldap.types import LdapSearchConfig
+
 from ..core.config import (
     DEFAULT_COMMAND_TIMEOUT,
     fix_password_file_permissions,
@@ -39,14 +42,11 @@ from ..core.config import (
     save_user_config,
     write_private_text,
 )
+from ..core.mutations import MutationGuard, MutationInProgress
 from ..core.remediation import actionable_error
 from ..core.settings import ConnectionSettings
 from ..core.view_state import AppViewState, DirectoryViewState, SmartViewState
 from ..dns.parsing import parse_records
-from ..ldap.client import (
-    LdapDirectoryClient,
-    LdapSearchConfig,
-)
 from ..ldap.rows import DirectoryRow
 from ..ldap.sidebar import (
     SidebarItem,
@@ -69,11 +69,13 @@ from ..ui.screens import (
 from ..ui.tables import (
     DNS_COLUMNS,
 )
-from .base import AppControllerBase
+
+if TYPE_CHECKING:
+    from ..app import SambatuiApp
 
 
-class AppCoreMixin(AppControllerBase):
-    def on_mount(self) -> None:
+class AppCoreMixin:
+    def on_mount(self: SambatuiApp) -> None:
         self.initialize_view()
 
         samba_tool = shutil.which("samba-tool")
@@ -90,7 +92,11 @@ class AppCoreMixin(AppControllerBase):
         else:
             self.call_after_refresh(self.load_zones)
 
-    def initialize_state(self) -> None:
+    def initialize_state(self: SambatuiApp) -> None:
+        self.samba_tool_executable = "samba-tool"
+        self._connection = ConnectionSettings()
+        self.connection_revision = 0
+        self.mutations = MutationGuard()
         self.views = AppViewState(
             directory=DirectoryViewState(max_rows=LDAP_DEFAULT_MAX_ROWS),
             smart=SmartViewState(max_rows=SMART_ROW_LIMIT_DEFAULT),
@@ -104,7 +110,7 @@ class AppCoreMixin(AppControllerBase):
         self.pending_g = False
         self._busy_depth = 0
 
-    def initialize_view(self) -> None:
+    def initialize_view(self: SambatuiApp) -> None:
         self.refresh_connection_summary()
         self.update_records_title()
         self.populate_zones([])
@@ -114,7 +120,7 @@ class AppCoreMixin(AppControllerBase):
         self.refresh_key_hints()
         self.render_records([])
 
-    def set_initial_connection_status(self) -> None:
+    def set_initial_connection_status(self: SambatuiApp) -> None:
         if (self.val("auth") or DEFAULT_AUTH).casefold() == "kerberos":
             self.set_status("Kerberos auth selected. Run kinit if the ticket expires.")
             return
@@ -126,22 +132,44 @@ class AppCoreMixin(AppControllerBase):
         else:
             self.set_status("Enter password, load password file, or use kerberos auth")
 
-    def val(self, widget_id: str) -> str:
-        return self.query_one(f"#{widget_id}", Input).value.strip()
+    def val(self: SambatuiApp, field: str) -> str:
+        return self.connection_settings().value(field)
 
-    def set_status(self, message: str) -> None:
-        with suppress(Exception):
+    def set_status(self: SambatuiApp, message: str) -> None:
+        with suppress(NoMatches, ScreenStackError):
             self.query_one("#status", Static).update(message)
 
-    def report_error(self, message: str) -> None:
+    def report_error(self: SambatuiApp, message: str) -> None:
         text = actionable_error(message)
         self.notify(text[:200], severity="error", markup=False)
         self.set_status(text[:180])
 
-    def set_val(self, widget_id: str, value: str) -> None:
-        self.query_one(f"#{widget_id}", Input).value = value
+    def set_val(self: SambatuiApp, field: str, value: str) -> None:
+        self.set_connection_values({field: value})
 
-    def preference_values(self) -> dict[str, str]:
+    def set_connection_values(self: SambatuiApp, values: dict[str, str]) -> None:
+        updated = self._connection.updated(values)
+        previous = self._connection
+        if updated == previous:
+            return
+        self._connection = updated
+        self.connection_revision += 1
+        samba_changed = updated.samba_config() != previous.samba_config()
+        ldap_changed = updated.ldap_config() != previous.ldap_config()
+        if samba_changed or ldap_changed or updated.zone != previous.zone:
+            self.views.invalidate()
+            if samba_changed:
+                self.zones = []
+            if ldap_changed:
+                self.ldap_structure_rows = []
+            if self.screen_stack:
+                if samba_changed:
+                    self.populate_zones([])
+                if ldap_changed:
+                    self.populate_ldap_structure([])
+                self.refresh_current_view()
+
+    def preference_values(self: SambatuiApp) -> dict[str, str]:
         zone = self.val("zone")
         domain = self.connection_domain_default()
         return {
@@ -157,8 +185,6 @@ class AppCoreMixin(AppControllerBase):
             "options": self.val("options"),
             "ldap_base": self.val("ldap_base"),
             "ldap_encryption": self.val("ldap_encryption") or DEFAULT_LDAP_ENCRYPTION,
-            "ldap_compatibility": self.val("ldap_compatibility")
-            or DEFAULT_LDAP_COMPATIBILITY,
             "auto_ptr": self.val("auto_ptr") or DEFAULT_AUTO_PTR,
             "smart_days": self.val("smart_days") or DEFAULT_SMART_DAYS,
             "smart_disabled_days": self.val("smart_disabled_days")
@@ -169,22 +195,22 @@ class AppCoreMixin(AppControllerBase):
             "password_file": self.val("password_file"),
         }
 
-    def save_preferences(self) -> None:
+    def save_preferences(self: SambatuiApp) -> None:
         try:
             save_user_config(self.preference_values())
         except OSError as exc:
             self.report_error(f"Cannot save preferences: {exc}")
 
-    def connection_settings(self) -> ConnectionSettings:
-        return ConnectionSettings.from_lookup(self.val)
+    def connection_settings(self: SambatuiApp) -> ConnectionSettings:
+        return self.mutations.snapshot or self._connection
 
-    def connection_summary(self) -> str:
-        return self.connection_settings().summary
+    def connection_is_current(self: SambatuiApp) -> bool:
+        return self._connection == self.connection_settings()
 
-    def connection_needs_setup(self) -> bool:
+    def connection_needs_setup(self: SambatuiApp) -> bool:
         return self.connection_settings().needs_setup(read_password_file)
 
-    def normalized_domain_candidate(self, value: str) -> str:
+    def normalized_domain_candidate(self: SambatuiApp, value: str) -> str:
         if not value or is_reverse_dns_zone(value):
             return ""
         try:
@@ -192,7 +218,7 @@ class AppCoreMixin(AppControllerBase):
         except ValueError:
             return ""
 
-    def connection_domain_default(self) -> str:
+    def connection_domain_default(self: SambatuiApp) -> str:
         candidates = [
             self.val("domain"),
             self.val("zone"),
@@ -210,36 +236,29 @@ class AppCoreMixin(AppControllerBase):
             "",
         )
 
-    def discovery_domain_default(self) -> str:
-        return self.connection_domain_default()
-
-    def refresh_connection_summary(self) -> None:
-        with suppress(Exception):
+    def refresh_connection_summary(self: SambatuiApp) -> None:
+        with suppress(NoMatches, ScreenStackError):
             self.query_one("#connection_summary", Static).update(
-                f"Connection: {self.connection_summary()}"
+                f"Connection: {self.connection_settings().summary}"
             )
 
-    def connection_fields(self) -> list[FormField]:
-        return self.connection_settings().form_fields()
-
-    def password_file(self) -> Path:
+    def password_file(self: SambatuiApp) -> Path:
         return self.connection_settings().path_password_file
 
-    def samba_config(self) -> SambaToolConfig:
+    def samba_config(self: SambatuiApp) -> SambaToolConfig:
         config = self.connection_settings().samba_config()
-        executable = getattr(self, "samba_tool_executable", "samba-tool")
-        return replace(config, executable=executable)
+        return replace(config, executable=self.samba_tool_executable)
 
-    def samba_client(self) -> SambaToolClient:
+    def samba_client(self: SambatuiApp) -> SambaToolClient:
         return SambaToolClient(self.samba_config())
 
-    def ldap_config(self, base_dn: str = "") -> LdapSearchConfig:
+    def ldap_config(self: SambatuiApp, base_dn: str = "") -> LdapSearchConfig:
         return self.connection_settings().ldap_config(base_dn)
 
-    def ldap_client(self, base_dn: str = "") -> LdapDirectoryClient:
+    def ldap_client(self: SambatuiApp, base_dn: str = "") -> LdapDirectoryClient:
         return LdapDirectoryClient(self.ldap_config(base_dn))
 
-    async def load_password(self) -> None:
+    async def load_password(self: SambatuiApp) -> None:
         path = self.password_file()
         warning = password_file_warning(path)
         if warning:
@@ -262,12 +281,12 @@ class AppCoreMixin(AppControllerBase):
         if not password:
             self.report_error(f"No password found in {path}")
             return
-        self.query_one("#password", Input).value = password
+        self.set_val("password", password)
         self.set_status(f"Loaded password from {path}")
         self.notify("Password loaded")
 
     @work
-    async def save_password(self) -> None:
+    async def save_password(self: SambatuiApp) -> None:
         path = self.password_file()
         password = self.val("password")
         if not password:
@@ -282,7 +301,9 @@ class AppCoreMixin(AppControllerBase):
         self.set_status(f"Saved password to {path}")
         self.notify("Password saved")
 
-    async def confirm(self, message: str, *, default_confirm: bool = False) -> bool:
+    async def confirm(
+        self: SambatuiApp, message: str, *, default_confirm: bool = False
+    ) -> bool:
         return bool(
             await self.push_screen_wait(
                 ConfirmScreen(message, default_confirm=default_confirm)
@@ -290,7 +311,7 @@ class AppCoreMixin(AppControllerBase):
         )
 
     async def form(
-        self,
+        self: SambatuiApp,
         title: str,
         hint: str,
         fields: list[FormField],
@@ -301,10 +322,10 @@ class AppCoreMixin(AppControllerBase):
             FormScreen(title, hint, fields, submit_label, validator)
         )
 
-    def action_help(self) -> None:
+    def action_help(self: SambatuiApp) -> None:
         self.push_screen(HelpScreen())
 
-    async def action_open_command_palette(self) -> None:
+    async def action_open_command_palette(self: SambatuiApp) -> None:
         action_id = await self.push_screen_wait(
             CommandPaletteScreen(list(PALETTE_ACTIONS))
         )
@@ -312,7 +333,9 @@ class AppCoreMixin(AppControllerBase):
             return
         await self.run_command_palette_action(action_id)
 
-    async def run_command_palette_action(self, action_id: str | None) -> bool:
+    async def run_command_palette_action(
+        self: SambatuiApp, action_id: str | None
+    ) -> bool:
         action = PALETTE_ACTION_MAP.get(action_id or "")
         if action is None:
             return False
@@ -320,14 +343,14 @@ class AppCoreMixin(AppControllerBase):
         await self.invoke_action(action_name, *args)
         return True
 
-    async def action_load_password_file(self) -> None:
+    async def action_load_password_file(self: SambatuiApp) -> None:
         await self.load_password()
 
-    def action_save_password_file(self) -> None:
+    def action_save_password_file(self: SambatuiApp) -> None:
         self.save_password()
 
     async def run_command(
-        self, client: SambaCommandClient, cmd: list[str]
+        self: SambatuiApp, client: SambaCommandClient, cmd: list[str]
     ) -> tuple[int, str]:
         error = client.authentication_error()
         if error:
@@ -344,31 +367,40 @@ class AppCoreMixin(AppControllerBase):
             self.set_status("OK")
         return result.code, result.output
 
-    async def run_samba(self, action: str, args: list[str]) -> tuple[int, str]:
-        client = self.samba_client()
-        return await self.run_command(
-            client, client.dns_command(action, self.val("zone"), args)
-        )
+    async def run_samba(
+        self: SambatuiApp, action: str, args: list[str]
+    ) -> tuple[int, str]:
+        return await self.run_samba_zone(action, self.val("zone"), args)
 
     async def run_samba_zone(
-        self, action: str, zone: str, args: list[str]
+        self: SambatuiApp, action: str, zone: str, args: list[str]
     ) -> tuple[int, str]:
-        client = self.samba_client()
-        return await self.run_command(
-            client, client.dns_zone_command(action, zone, args)
-        )
+        try:
+            reservation = (
+                nullcontext()
+                if action == "query"
+                else self.mutations.reserve(self.connection_settings())
+            )
+            with reservation:
+                client = self.samba_client()
+                return await self.run_command(
+                    client, client.dns_command(action, zone, args)
+                )
+        except MutationInProgress as exc:
+            self.report_error(str(exc))
+            return 2, str(exc)
 
-    async def run_zonelist(self) -> tuple[int, str]:
+    async def run_zonelist(self: SambatuiApp) -> tuple[int, str]:
         client = self.samba_client()
         return await self.run_command(client, client.zonelist_command())
 
-    def set_busy(self, busy: bool) -> None:
+    def set_busy(self: SambatuiApp, busy: bool) -> None:
         for button in self.query(Button):
             button.disabled = busy
 
     @asynccontextmanager
-    async def busy(self) -> AsyncIterator[None]:
-        self._busy_depth = getattr(self, "_busy_depth", 0) + 1
+    async def busy(self: SambatuiApp) -> AsyncGenerator[None]:
+        self._busy_depth += 1
         if self._busy_depth == 1:
             self.set_busy(True)
         try:
@@ -379,11 +411,19 @@ class AppCoreMixin(AppControllerBase):
                 self.set_busy(False)
 
     async def do_command(
-        self, action: str, args: list[str], update_table: bool = False
+        self: SambatuiApp, action: str, args: list[str], update_table: bool = False
     ) -> int:
+        revision = self.connection_revision
+        mode = self.views.mode
         async with self.busy():
             code, output = await self.run_samba(action, args)
-            if update_table and code == 0:
+            if (
+                update_table
+                and code == 0
+                and revision == self.connection_revision
+                and mode == self.views.mode
+                and self.connection_is_current()
+            ):
                 self.views.dns.last_search_zone = (
                     self.val("zone")
                     if action == "query" and args == ["@", "ALL"]
@@ -394,7 +434,7 @@ class AppCoreMixin(AppControllerBase):
                 self.notify("OK")
             return code
 
-    async def action_refresh(self) -> None:
+    async def action_refresh(self: SambatuiApp) -> None:
         match self.views.mode:
             case "dns":
                 await self.refresh_current_zone()

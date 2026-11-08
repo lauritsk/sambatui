@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 import dns.exception
 import dns.resolver
+from dns.rdtypes.IN.SRV import SRV
 
 from sambatui.dns.validation import valid_dns_name
 
@@ -68,10 +69,11 @@ def _services_from_answer(
         target = str(getattr(record, "target", "")).rstrip(".")
         if not target or target == ".":
             continue
+        record = cast(SRV, record)
         try:
-            port = int(getattr(record, "port"))
-            priority = int(getattr(record, "priority"))
-            weight = int(getattr(record, "weight"))
+            port = int(record.port)
+            priority = int(record.priority)
+            weight = int(record.weight)
         except TypeError, ValueError:
             continue
         services.append(

@@ -3,11 +3,9 @@ from contextlib import suppress
 from typing import Any, cast
 
 from pytest import MonkeyPatch
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable
 
-from sambatui.app import (
-    SambatuiApp,
-)
+from sambatui.app import SambatuiApp
 from sambatui.ldap.client import LdapDirectoryClient
 from sambatui.ldap.rows import DirectoryRow
 from sambatui.ui.screens import (
@@ -21,7 +19,9 @@ def test_update_ldap_entry_edits_changed_allowlisted_attributes() -> None:
         def __init__(self, app: Any) -> None:
             self.app = app
 
-        def modify_attributes(self, dn: str, changes: dict[str, str]) -> None:
+        def modify_attributes(
+            self, dn: str, changes: dict[str, str], *, expected_revision: str
+        ) -> None:
             self.app.modified = (dn, changes)
 
     class LdapEditApp(SambatuiApp):
@@ -86,6 +86,7 @@ def test_update_ldap_entry_edits_changed_allowlisted_attributes() -> None:
                         name="Alice",
                         summary="alice@example.com",
                         attributes={
+                            "uSNChanged": ("17",),
                             "displayName": ("Alice",),
                             "mail": ("alice@example.com",),
                             "description": ("same",),
@@ -222,7 +223,7 @@ def test_delete_ldap_entry_deletes_selected_dn() -> None:
         def __init__(self, app: Any) -> None:
             self.app = app
 
-        def delete_entry(self, dn: str) -> None:
+        def delete_entry(self, dn: str, *, expected_revision: str) -> None:
             self.app.deleted = dn
 
     class LdapDeleteApp(SambatuiApp):
@@ -253,7 +254,7 @@ def test_delete_ldap_entry_deletes_selected_dn() -> None:
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     )
                 ]
             )
@@ -273,7 +274,7 @@ def test_delete_ldap_entry_bulk_deletes_selected_entries_after_preview() -> None
         def __init__(self, app: Any) -> None:
             self.app = app
 
-        def delete_entry(self, dn: str) -> None:
+        def delete_entry(self, dn: str, *, expected_revision: str) -> None:
             self.app.deleted.append(dn)
 
     class LdapBulkDeleteApp(SambatuiApp):
@@ -304,21 +305,21 @@ def test_delete_ldap_entry_bulk_deletes_selected_entries_after_preview() -> None
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Bob,DC=example,DC=com",
                         kind="user",
                         name="Bob",
                         summary="bob@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Ops,DC=example,DC=com",
                         kind="group",
                         name="Ops",
                         summary="ops@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )
@@ -384,14 +385,14 @@ def test_update_ldap_entry_rejects_multiple_selected_entries(
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="CN=Bob,DC=example,DC=com",
                         kind="user",
                         name="Bob",
                         summary="bob@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ]
             )
@@ -440,7 +441,7 @@ def test_selected_directory_entries_rejects_stale_selection(
                         kind="user",
                         name="Alice",
                         summary="alice@example.com",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     )
                 ]
             )
@@ -465,7 +466,7 @@ def test_ldap_delete_preview_truncates_long_selection() -> None:
             kind="user",
             name=f"User {index}",
             summary="",
-            attributes={},
+            attributes={"uSNChanged": ("17",)},
         )
         for index in range(13)
     ]
@@ -545,7 +546,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
                     kind="group",
                     name="Ops",
                     summary="",
-                    attributes={},
+                    attributes={"uSNChanged": ("17",)},
                 )
             ]
 
@@ -557,14 +558,14 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
                         kind="container",
                         name="Users",
                         summary="",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                     DirectoryRow(
                         dn="OU=Departments,DC=example,DC=com",
                         kind="ou",
                         name="Departments",
                         summary="",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     ),
                 ],
                 "OU=Departments,DC=example,DC=com": [
@@ -573,7 +574,7 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
                         kind="ou",
                         name="Engineering",
                         summary="",
-                        attributes={},
+                        attributes={"uSNChanged": ("17",)},
                     )
                 ],
             }
@@ -582,10 +583,10 @@ def test_ldap_sidebar_uses_root_and_discovered_tree_rows() -> None:
     async def run_app() -> None:
         app = SidebarApp()
         async with app.run_test():
-            app.query_one("#server", Input).value = "dc01.example.com"
-            app.query_one("#user", Input).value = "admin@example.com"
-            app.query_one("#password", Input).value = "secret"
-            app.query_one("#ldap_base", Input).value = "DC=example,DC=com"
+            app.set_val("server", "dc01.example.com")
+            app.set_val("user", "admin@example.com")
+            app.set_val("password", "secret")
+            app.set_val("ldap_base", "DC=example,DC=com")
             app.populate_ldap_structure([])
             structure = app.query_one("#ldap_structure", DataTable)
 

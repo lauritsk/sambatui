@@ -41,9 +41,6 @@ CONFIG_KEYS = st.sampled_from(
 
 
 def test_config_last_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert user_config_value_error("ldap_compatibility", "maybe") == (
-        "LDAP compatibility must be on or off."
-    )
     assert user_config_value_error("smart_days", "many") == (
         "Smart days must be a whole number."
     )

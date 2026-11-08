@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sambatui.ldap.rows import DirectoryRow
 from sambatui.core.models import DnsRow
+from sambatui.ldap.rows import DirectoryRow
 from sambatui.smart_views import (
     ACCOUNTDISABLE,
     disabled_user_evidence,
@@ -81,9 +81,10 @@ def test_smart_view_remaining_edges() -> None:
             "userAccountControl": (str(ACCOUNTDISABLE),),
         }
     )
-    assert ldap_delete_candidate_users(
-        [recent_disabled, disabled_without_age], now=now
-    ) == []
+    assert (
+        ldap_delete_candidate_users([recent_disabled, disabled_without_age], now=now)
+        == []
+    )
     assert disabled_user_evidence(None, None, now) == "disabled"
     assert parse_ad_datetime("2026-04-30 12:00:00") == datetime(
         2026, 4, 30, 12, tzinfo=UTC
