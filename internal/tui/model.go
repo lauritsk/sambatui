@@ -31,6 +31,7 @@ type writeResult struct {
 	flow       *lifecycle.Flow
 }
 type Model struct {
+	theme                                         theme
 	state                                         *lifecycle.State
 	journal                                       *journal.Store
 	restarted                                     *journal.Record
@@ -82,6 +83,7 @@ func New(settings config.Settings, path string, service backend.Service) *Model 
 		selected:     map[int]bool{},
 		filterByMode: map[string]string{},
 		status:       "Ctrl+O setup · z zones · l directory · ? help",
+		theme:        newTheme(false),
 		width:        100,
 		height:       30,
 		anchor:       -1,
