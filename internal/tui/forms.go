@@ -192,7 +192,9 @@ func formInput(current field, input []rune) (string, error) {
 
 func (model *Model) formView() string {
 	currentForm := model.form
-	out := Literal(currentForm.Title) + "\n"
+	var output strings.Builder
+	output.WriteString(Literal(currentForm.Title))
+	output.WriteByte('\n')
 	wrapped := []string{}
 	for _, line := range strings.Split(currentForm.Context, "\n") {
 		wrapped = append(wrapped, ansi.Wrap(Literal(line), max(20, model.width-2), " "))
@@ -201,10 +203,12 @@ func (model *Model) formView() string {
 	page := max(2, model.height-14)
 	offset := min(currentForm.ContextOffset, max(0, len(lines)-page))
 	for _, line := range lines[offset:min(len(lines), offset+page)] {
-		out += line + "\n"
+		output.WriteString(line)
+		output.WriteByte('\n')
 	}
 	if len(lines) > page {
-		out += fmt.Sprintf(
+		fmt.Fprintf(
+			&output,
 			"Context lines %d–%d/%d · PgUp/PgDn scroll complete preview\n",
 			offset+1,
 			min(len(lines), offset+page),
@@ -218,11 +222,18 @@ func (model *Model) formView() string {
 		if index == currentForm.Cursor {
 			mark = "> "
 		}
-		value := Literal(field.text())
+		var value string
 		if field.Secret {
-			value = strings.Repeat("•", len([]rune(field.text())))
+			value = strings.Repeat("•", utf8.RuneCountInString(field.text()))
+		} else {
+			value = Literal(field.text())
 		}
-		out += mark + Literal(field.Label) + ": " + value + "\n"
+		output.WriteString(mark)
+		output.WriteString(Literal(field.Label))
+		output.WriteString(": ")
+		output.WriteString(value)
+		output.WriteByte('\n')
 	}
-	return out + "Tab/Enter next · Ctrl+S submit · Ctrl+U clear · Esc cancel"
+	output.WriteString("Tab/Enter next · Ctrl+S submit · Ctrl+U clear · Esc cancel")
+	return output.String()
 }

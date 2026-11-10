@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/config"
+	"github.com/lauritsk/sambatui/internal/directory"
 )
 
 func (model *Model) visible() []int {
@@ -47,12 +48,16 @@ func (model *Model) sortKey(index int) string {
 }
 
 func (model *Model) rowTexts() []string {
-	out := []string{}
+	count := len(model.records)
+	if model.mode == "ldap" {
+		count = len(model.entries)
+	}
+	texts := make([]string, 0, count)
 	switch model.mode {
 	case "dns":
 		for _, row := range model.records {
-			out = append(
-				out,
+			texts = append(
+				texts,
 				fmt.Sprintf(
 					"%-28s %-6s %-8d %s",
 					Literal(row.Name),
@@ -64,10 +69,12 @@ func (model *Model) rowTexts() []string {
 		}
 	case "ldap":
 		for _, entry := range model.entries {
-			out = append(out, Literal(entry.Name)+"  "+Literal(entry.Kind)+"  "+Literal(entry.DN))
+			texts = append(texts,
+				Literal(entry.Name)+"  "+Literal(entry.Kind)+"  "+Literal(entry.DN),
+			)
 		}
 	}
-	return out
+	return texts
 }
 
 func (model *Model) move(delta int) {
@@ -137,18 +144,33 @@ func (model *Model) details() {
 			row.Value,
 		)
 	case "ldap":
-		entry := model.entries[index]
-		text = "DC: " + model.settings.Server + "\nDN: " + entry.DN + "\nRevision (DC-local): " +
-			entry.Revision +
-			"\n"
-		keys := []string{}
-		for key := range entry.Attributes {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			text += key + ": " + strings.Join(entry.Attributes[key], "; ") + "\n"
-		}
+		text = directoryDetails(model.settings.Server, model.entries[index])
 	}
 	model.showDetails(text)
+}
+
+// Entries already passed the LDAP search byte/attribute budgets. Build details
+// linearly within that bound, preserving deterministic attribute order.
+func directoryDetails(server string, entry directory.Entry) string {
+	var text strings.Builder
+	fmt.Fprintf(&text, "DC: %s\nDN: %s\nRevision (DC-local): %s\n",
+		server, entry.DN, entry.Revision,
+	)
+	keys := make([]string, 0, len(entry.Attributes))
+	for key := range entry.Attributes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		text.WriteString(key)
+		text.WriteString(": ")
+		for index, value := range entry.Attributes[key] {
+			if index > 0 {
+				text.WriteString("; ")
+			}
+			text.WriteString(value)
+		}
+		text.WriteByte('\n')
+	}
+	return text.String()
 }
