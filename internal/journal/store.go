@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const journalBytesMax = 16 << 20
+
 type Record struct {
 	Snapshot      lifecycle.Snapshot
 	Plan          backend.Plan
@@ -61,19 +63,19 @@ func (s *Store) Load() (*Record, error) {
 		return nil, e
 	}
 	defer f.Close()
-	b, e := io.ReadAll(io.LimitReader(f, (16<<20)+1))
+	b, e := io.ReadAll(io.LimitReader(f, journalBytesMax+1))
 	if e != nil {
 		return nil, e
 	}
-	if len(b) > 16<<20 {
+	if len(b) > journalBytesMax {
 		return nil, errors.New("pending-write journal exceeds 16 MiB")
 	}
 	var r Record
 	if e = json.Unmarshal(b, &r); e != nil {
 		return nil, errors.New("pending-write journal is invalid; inspect original DC before repairing it")
 	}
-	if len(r.Plan.Actions) == 0 || r.Snapshot.Settings.Server == "" {
-		return nil, errors.New("pending-write journal is incomplete; writes refused")
+	if err := r.validate(); err != nil {
+		return nil, err
 	}
 	return &r, nil
 }
@@ -84,12 +86,31 @@ func (s *Store) Start(snapshot lifecycle.Snapshot, p backend.Plan) error {
 	} else if previous != nil {
 		return errors.New("an unresolved pending-write journal already exists")
 	}
-	r := Record{Snapshot: snapshot, Plan: p.Clone(), CacheIdentity: snapshot.Settings.CacheIdentity}
+	r := Record{Snapshot: snapshot, Plan: p, CacheIdentity: snapshot.Settings.CacheIdentity}
+	if err := r.validate(); err != nil {
+		return err
+	}
+	r.Plan = p.Clone()
 	b, e := json.MarshalIndent(r, "", "  ")
 	if e != nil {
 		return e
 	}
+	if len(b)+1 > journalBytesMax {
+		return errors.New("pending-write journal exceeds 16 MiB")
+	}
 	return config.PrivateWrite(s.path, append(b, '\n'))
+}
+
+// Validate at both persistence boundaries: no intent may be written that this
+// client would refuse to recover after a crash.
+func (r Record) validate() error {
+	if r.Snapshot.Generation == 0 || r.Snapshot.Settings.Server == "" {
+		return errors.New("pending-write journal is incomplete; writes refused")
+	}
+	if err := r.Plan.Validate(r.Snapshot.Settings); err != nil {
+		return fmt.Errorf("invalid pending-write plan; writes refused: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Clear() error {
