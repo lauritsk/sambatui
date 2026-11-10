@@ -17,7 +17,16 @@ const (
 
 // Drain AD's ranged attributes on the same session: treating a ranged memberOf
 // as absent would produce false hygiene findings. Publish only complete entries.
-func expandRanges(ctx context.Context, session Session, entry *ldap.Entry) error {
+func expandRanges(operationContext context.Context, session Session, entry *ldap.Entry) error {
+	return expandRangesBudget(operationContext, session, entry, newReadBudget())
+}
+
+func expandRangesBudget(
+	operationContext context.Context, session Session, entry *ldap.Entry, budget *readBudget,
+) error {
+	if err := budget.entry(entry); err != nil {
+		return err
+	}
 	attributes := make([]*ldap.EntryAttribute, 0, len(entry.Attributes))
 	seen := map[string]bool{}
 	for _, attribute := range entry.Attributes {
@@ -33,7 +42,7 @@ func expandRanges(ctx context.Context, session Session, entry *ldap.Entry) error
 			attributes = append(attributes, attribute)
 			continue
 		}
-		values, err := expandRange(ctx, session, entry.DN, attribute, spec)
+		values, err := expandRange(operationContext, session, entry.DN, attribute, spec, budget)
 		if err != nil {
 			return err
 		}
@@ -44,13 +53,14 @@ func expandRanges(ctx context.Context, session Session, entry *ldap.Entry) error
 }
 
 func expandRange(
-	ctx context.Context, session Session, dn string, attribute *ldap.EntryAttribute, spec string,
+	operationContext context.Context, session Session, dn string, attribute *ldap.EntryAttribute,
+	spec string, budget *readBudget,
 ) ([]string, error) {
 	base, _, _ := strings.Cut(strings.ToLower(attribute.Name), ";range=")
 	var values []string
 	expected, sizeBytes := 0, 0
 	for page := 0; page < rangePagesMax; page++ {
-		if err := ctx.Err(); err != nil {
+		if err := operationContext.Err(); err != nil {
 			return nil, err
 		}
 		nextOffset, complete, err := rangeBounds(spec, expected, len(attribute.Values))
@@ -76,8 +86,15 @@ func expandRange(
 		if err != nil {
 			return nil, err
 		}
+		if err := budget.entry(
+			&ldap.Entry{Attributes: []*ldap.EntryAttribute{attribute}},
+		); err != nil {
+			return nil, err
+		}
 	}
-	return nil, errors.New("LDAP ranged attribute exceeds page safety limit; no partial entry returned")
+	return nil, errors.New(
+		"LDAP ranged attribute exceeds page safety limit; no partial " + "entry returned",
+	)
 }
 
 func rangeBounds(spec string, expected, count int) (int, bool, error) {
@@ -135,7 +152,9 @@ func rangeContinuation(
 		}
 	}
 	if next == nil {
-		return nil, "", errors.New("LDAP range continuation missing; refresh rather than accepting a partial entry")
+		return nil, "", errors.New(
+			"LDAP range continuation missing; refresh rather than " + "accepting a partial entry",
+		)
 	}
 	return next, spec, nil
 }
