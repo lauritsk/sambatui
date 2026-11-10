@@ -38,6 +38,7 @@ func (f *fake) Execute(context.Context, config.Settings, Plan) lifecycle.Outcome
 func TestReconciliationReadsOriginalTargetAndNeverWrites(t *testing.T) {
 	s := config.Defaults()
 	s.Server = "original-dc"
+	s.BaseDN = "DC=lab,DC=invalid"
 	f := &fake{}
 	p := Plan{Title: "test", Actions: []Action{{Kind: "dns_add", Zone: "lab.invalid", Name: "host", Type: "A", Value: "192.0.2.10"}, {Kind: "ldap_add", EntryKind: "group", Name: "x", Parent: "DC=lab,DC=invalid"}}}
 	report, e := Inspect(context.Background(), f, s, p)

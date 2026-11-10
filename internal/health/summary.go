@@ -25,12 +25,12 @@ func Dashboard(rows []Finding, completed map[int]bool) []Finding {
 		counts := map[string]int{}
 		worst := "info"
 		total := 0
-		for _, r := range rows {
-			if r.Check == check {
+		for _, finding := range rows {
+			if finding.Check == check {
 				total++
-				counts[r.Severity]++
-				if Rank(r.Severity) < Rank(worst) {
-					worst = r.Severity
+				counts[finding.Severity]++
+				if Rank(finding.Severity) < Rank(worst) {
+					worst = finding.Severity
 				}
 			}
 		}
@@ -39,7 +39,22 @@ func Dashboard(rows []Finding, completed map[int]bool) []Finding {
 			status = "failed, incomplete or limited; do not conclude clean"
 			worst = "error"
 		}
-		summaries = append(summaries, Finding{Check: check, Severity: worst, Object: Labels[check-1], Finding: "Check summary: " + status, Evidence: fmt.Sprintf("%d findings; high=%d medium=%d low=%d", total, counts["high"], counts["medium"], counts["low"])})
+		summaries = append(
+			summaries,
+			Finding{
+				Check:    check,
+				Severity: worst,
+				Object:   Labels[check-1],
+				Finding:  "Check summary: " + status,
+				Evidence: fmt.Sprintf(
+					"%d findings; high=%d medium=%d low=%d",
+					total,
+					counts["high"],
+					counts["medium"],
+					counts["low"],
+				),
+			},
+		)
 	}
 	return append(summaries, rows...)
 }

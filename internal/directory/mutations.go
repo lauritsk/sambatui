@@ -13,12 +13,12 @@ import (
 
 const AssertionOID = "1.3.6.1.1.12"
 
-func decimal(s string) bool {
-	if s == "" {
+func decimal(text string) bool {
+	if text == "" {
 		return false
 	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
+	for _, character := range text {
+		if character < '0' || character > '9' {
 			return false
 		}
 	}
@@ -26,44 +26,50 @@ func decimal(s string) bool {
 }
 
 func Assertion(revision string, flags *uint32) (ldap.Control, error) {
-	if !decimal(revision) {
+	if len(revision) > 20 || !decimal(revision) {
 		return nil, errors.New("missing or invalid LDAP revision; refresh before writing")
 	}
-	f := "(&(uSNChanged=" + revision + ")"
+	filter := "(&(uSNChanged=" + revision + ")"
 	if flags != nil {
-		f += "(userAccountControl=" + strconv.FormatUint(uint64(*flags), 10) + ")"
+		filter += "(userAccountControl=" + strconv.FormatUint(uint64(*flags), 10) + ")"
 	}
-	f += ")"
-	packet, e := ldap.CompileFilter(f)
-	if e != nil {
-		return nil, e
+	filter += ")"
+	packet, err := ldap.CompileFilter(filter)
+	if err != nil {
+		return nil, err
 	}
 	return ldap.NewControlString(AssertionOID, true, string(packet.Bytes())), nil
 }
 
 func InScope(dn, base string) bool {
-	d, e := ldap.ParseDN(dn)
-	if e != nil {
+	if len(dn) > dnBytesMax || len(base) > dnBytesMax {
 		return false
 	}
-	b, e := ldap.ParseDN(base)
-	if e != nil || len(b.RDNs) == 0 {
+	targetDN, err := ldap.ParseDN(dn)
+	if err != nil {
 		return false
 	}
-	return b.EqualFold(d) || b.AncestorOfFold(d)
+	baseDN, err := ldap.ParseDN(base)
+	if err != nil || len(baseDN.RDNs) == 0 {
+		return false
+	}
+	return baseDN.EqualFold(targetDN) || baseDN.AncestorOfFold(targetDN)
 }
 
-func EqualDN(a, b string) bool {
-	x, e := ldap.ParseDN(a)
-	if e != nil {
+func EqualDN(left, right string) bool {
+	if len(left) > dnBytesMax || len(right) > dnBytesMax {
 		return false
 	}
-	y, e := ldap.ParseDN(b)
-	return e == nil && x.EqualFold(y)
+	leftDN, err := ldap.ParseDN(left)
+	if err != nil {
+		return false
+	}
+	rightDN, err := ldap.ParseDN(right)
+	return err == nil && leftDN.EqualFold(rightDN)
 }
 
-func (c *Client) scope(dn string) error {
-	if !InScope(dn, c.cfg.BaseDN) {
+func (client *Client) scope(dn string) error {
+	if !InScope(dn, client.settings.BaseDN) {
 		return errors.New("LDAP target must be at or below configured base DN")
 	}
 	return nil
@@ -71,38 +77,73 @@ func (c *Client) scope(dn string) error {
 
 type UncertainError struct{ Cause error }
 
-func (e *UncertainError) Error() string {
-	return "LDAP write outcome uncertain; cancellation/connection loss is not rollback. Read server state before retrying: " + e.Cause.Error()
-}
-func (e *UncertainError) Unwrap() error { return e.Cause }
-func mutationError(e error) error {
-	if e == nil {
-		return nil
-	}
-	if ldap.IsErrorWithCode(e, ldap.LDAPResultAssertionFailed) {
-		return errors.New("LDAP entry changed; refresh before retrying")
-	}
-	if ldap.IsErrorWithCode(e, ldap.LDAPResultUnavailableCriticalExtension) {
-		return errors.New("server does not support critical conditional LDAP writes; refused without unsafe fallback")
-	}
-	var result *ldap.Error
-	if errors.As(e, &result) && result.ResultCode > 0 && result.ResultCode < 200 {
-		return fmt.Errorf("LDAP write refused: %w", e)
-	}
-	return &UncertainError{e}
+func (failure *UncertainError) Error() string {
+	return "LDAP write outcome uncertain; cancellation/connection loss " +
+		"is not rollback. Read server state before retrying: " +
+		failure.Cause.Error()
 }
 
-func (c *Client) write(ctx context.Context, conditional bool, f func(Session) error) error {
-	return c.with(ctx, func(s Session) error {
+func (failure *UncertainError) Unwrap() error {
+	return failure.Cause
+}
+
+func mutationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultAssertionFailed) {
+		return errors.New("LDAP entry changed; refresh before retrying")
+	}
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultUnavailableCriticalExtension) {
+		return errors.New(
+			"server does not support critical conditional LDAP writes; " +
+				"refused without unsafe fallback",
+		)
+	}
+	var result *ldap.Error
+	if errors.As(err, &result) && result.ResultCode > 0 && result.ResultCode < 200 {
+		return fmt.Errorf("LDAP write refused: %w", err)
+	}
+	return &UncertainError{err}
+}
+
+func (client *Client) write(
+	operationContext context.Context,
+	conditional bool,
+	operation func(Session) error,
+) error {
+	return client.with(operationContext, func(currentSession Session) error {
 		if conditional {
 			// Samba versions can omit the assertion capability. Do not send a write
 			// merely hoping that an unadvertised critical control will be enforced.
-			r, e := s.Search(ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, 0, false, "(objectClass=*)", []string{"supportedControl"}, nil))
-			if e != nil {
-				return fmt.Errorf("check conditional LDAP write support: %w", e)
+			capabilities, currentErr := currentSession.Search(
+				ldap.NewSearchRequest(
+					"",
+					ldap.ScopeBaseObject,
+					ldap.NeverDerefAliases,
+					1,
+					0,
+					false,
+					"(objectClass=*)",
+					[]string{"supportedControl"},
+					nil,
+				),
+			)
+			if currentErr != nil {
+				return fmt.Errorf("check conditional LDAP write support: %w", currentErr)
+			}
+			if capabilities == nil || len(capabilities.Entries) != 1 ||
+				len(capabilities.Referrals) > 0 {
+				return errors.New(
+					"invalid LDAP conditional-write capability result; refused " +
+						"without unsafe fallback",
+				)
+			}
+			if err := newReadBudget().entry(capabilities.Entries[0]); err != nil {
+				return err
 			}
 			supported := false
-			for _, entry := range r.Entries {
+			for _, entry := range capabilities.Entries {
 				for _, oid := range entry.GetAttributeValues("supportedControl") {
 					if oid == AssertionOID {
 						supported = true
@@ -110,19 +151,36 @@ func (c *Client) write(ctx context.Context, conditional bool, f func(Session) er
 				}
 			}
 			if !supported {
-				return errors.New("server does not advertise critical conditional LDAP writes; refused without unsafe fallback")
+				return errors.New(
+					"server does not advertise critical conditional LDAP writes; " +
+						"refused without unsafe fallback",
+				)
 			}
 		}
-		return mutationError(f(s))
+		return mutationError(operation(currentSession))
 	})
 }
 
-var Editable = map[string][]string{"user": {"displayName", "mail", "description"}, "group": {"description", "mail"}, "computer": {"description"}, "ou": {"description"}}
+var Editable = map[string][]string{
+	"user":     {"displayName", "mail", "description"},
+	"group":    {"description", "mail"},
+	"computer": {"description"},
+	"ou":       {"description"},
+}
 
 // ValidateChanges is shared by plan validation and dispatch so confirmation
 // cannot approve attributes that the protocol boundary would refuse.
 func ValidateChanges(kind string, changes map[string]string) error {
-	for attribute := range changes {
+	if len(Editable[kind]) == 0 {
+		return errors.New("LDAP entry kind is not editable")
+	}
+	if len(changes) > len(Editable[kind]) {
+		return errors.New("too many LDAP attribute changes")
+	}
+	for attribute, value := range changes {
+		if len(value) > filterBytesMax {
+			return errors.New("LDAP attribute value exceeds safety limit")
+		}
 		allowed := false
 		for _, editable := range Editable[kind] {
 			if attribute == editable {
@@ -137,13 +195,17 @@ func ValidateChanges(kind string, changes map[string]string) error {
 	return nil
 }
 
-func (c *Client) Modify(ctx context.Context, dn, kind, revision string, changes map[string]string) error {
-	if e := c.scope(dn); e != nil {
-		return e
+func (client *Client) Modify(
+	operationContext context.Context,
+	dn, kind, revision string,
+	changes map[string]string,
+) error {
+	if currentErr := client.scope(dn); currentErr != nil {
+		return currentErr
 	}
-	control, e := Assertion(revision, nil)
-	if e != nil {
-		return e
+	control, currentErr := Assertion(revision, nil)
+	if currentErr != nil {
+		return currentErr
 	}
 	if err := ValidateChanges(kind, changes); err != nil {
 		return err
@@ -151,53 +213,71 @@ func (c *Client) Modify(ctx context.Context, dn, kind, revision string, changes 
 	if len(changes) == 0 {
 		return nil
 	}
-	req := ldap.NewModifyRequest(dn, []ldap.Control{control})
+	request := ldap.NewModifyRequest(dn, []ldap.Control{control})
 	keys := []string{}
-	for k := range changes {
-		keys = append(keys, k)
+	for key := range changes {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, a := range keys {
-		if changes[a] == "" {
-			req.Delete(a, nil)
+	for _, attribute := range keys {
+		if changes[attribute] == "" {
+			request.Delete(attribute, nil)
 		} else {
-			req.Replace(a, []string{changes[a]})
+			request.Replace(attribute, []string{changes[attribute]})
 		}
 	}
-	return c.write(ctx, true, func(s Session) error { return s.Modify(req) })
+	return client.write(operationContext, true, func(session Session) error {
+		return session.Modify(request)
+	})
 }
 
-func (c *Client) Delete(ctx context.Context, dn, revision string) error {
-	if e := c.scope(dn); e != nil {
-		return e
+func (client *Client) Delete(operationContext context.Context, dn, revision string) error {
+	if err := client.scope(dn); err != nil {
+		return err
 	}
-	if EqualDN(dn, c.cfg.BaseDN) {
+	if EqualDN(dn, client.settings.BaseDN) {
 		return errors.New("refusing to delete LDAP base DN")
 	}
-	control, e := Assertion(revision, nil)
-	if e != nil {
-		return e
+	control, err := Assertion(revision, nil)
+	if err != nil {
+		return err
 	}
-	req := ldap.NewDelRequest(dn, []ldap.Control{control})
-	return c.write(ctx, true, func(s Session) error { return s.Del(req) })
+	request := ldap.NewDelRequest(dn, []ldap.Control{control})
+	return client.write(operationContext, true, func(session Session) error {
+		return session.Del(request)
+	})
 }
 
-func (c *Client) Disable(ctx context.Context, dn, revision string, flags uint32) error {
-	if e := c.scope(dn); e != nil {
-		return e
+func (client *Client) Disable(
+	operationContext context.Context,
+	dn, revision string,
+	flags uint32,
+) error {
+	if err := client.scope(dn); err != nil {
+		return err
 	}
-	control, e := Assertion(revision, &flags)
-	if e != nil {
-		return e
+	control, err := Assertion(revision, &flags)
+	if err != nil {
+		return err
 	}
-	req := ldap.NewModifyRequest(dn, []ldap.Control{control})
-	req.Replace("userAccountControl", []string{strconv.FormatUint(uint64(flags|2), 10)})
-	return c.write(ctx, true, func(s Session) error { return s.Modify(req) })
+	request := ldap.NewModifyRequest(dn, []ldap.Control{control})
+	request.Replace("userAccountControl", []string{strconv.FormatUint(uint64(flags|2), 10)})
+	return client.write(operationContext, true, func(session Session) error {
+		return session.Modify(request)
+	})
 }
 
-func BuildAdd(kind, parent, name string, attrs map[string]string) (*ldap.AddRequest, error) {
-	classes := map[string][]string{"user": {"top", "person", "organizationalPerson", "user"}, "group": {"top", "group"}, "computer": {"top", "person", "organizationalPerson", "user", "computer"}, "ou": {"top", "organizationalUnit"}}
-	cl, ok := classes[kind]
+func BuildAdd(kind, parent, name string, attributes map[string]string) (*ldap.AddRequest, error) {
+	if err := validateAddSize(parent, name, attributes); err != nil {
+		return nil, err
+	}
+	classes := map[string][]string{
+		"user":     {"top", "person", "organizationalPerson", "user"},
+		"group":    {"top", "group"},
+		"computer": {"top", "person", "organizationalPerson", "user", "computer"},
+		"ou":       {"top", "organizationalUnit"},
+	}
+	objectClasses, ok := classes[kind]
 	if !ok {
 		return nil, errors.New("LDAP add kind must be user, group, computer or ou")
 	}
@@ -205,63 +285,41 @@ func BuildAdd(kind, parent, name string, attrs map[string]string) (*ldap.AddRequ
 	if name == "" {
 		return nil, errors.New("LDAP add requires a name")
 	}
-	if _, e := ldap.ParseDN(parent); e != nil {
-		return nil, e
+	if _, currentErr := ldap.ParseDN(parent); currentErr != nil {
+		return nil, currentErr
 	}
 	rdn := "CN"
 	if kind == "ou" {
 		rdn = "OU"
 	}
-	req := ldap.NewAddRequest(rdn+"="+ldap.EscapeDN(name)+","+parent, nil)
-	req.Attribute("objectClass", cl)
-	values := map[string]string{}
-	for k, v := range attrs {
-		if v != "" {
-			values[k] = v
-		}
-	}
-	if kind == "ou" {
-		values["ou"] = name
-	} else {
-		values["cn"] = name
-	}
-	if kind == "user" || kind == "group" {
-		if values["sAMAccountName"] == "" {
-			values["sAMAccountName"] = name
-		}
-	}
-	if kind == "group" && values["groupType"] == "" {
-		values["groupType"] = "-2147483646"
-	}
-	if kind == "computer" {
-		account := values["sAMAccountName"]
-		if account == "" {
-			account = name
-		}
-		values["sAMAccountName"] = strings.TrimRight(account, "$") + "$"
-		if values["userAccountControl"] == "" {
-			values["userAccountControl"] = "4128"
-		}
-	}
+	request := ldap.NewAddRequest(rdn+"="+ldap.EscapeDN(name)+","+parent, nil)
+	request.Attribute("objectClass", objectClasses)
+	values := buildAddValues(kind, name, attributes)
 	keys := []string{}
-	for k := range values {
-		keys = append(keys, k)
+	for key := range values {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, a := range keys {
-		req.Attribute(a, []string{values[a]})
+	for _, left := range keys {
+		request.Attribute(left, []string{values[left]})
 	}
-	return req, nil
+	return request, nil
 }
 
-func (c *Client) Add(ctx context.Context, kind, parent, name string, attrs map[string]string) (string, error) {
-	if e := c.scope(parent); e != nil {
-		return "", e
+func (client *Client) Add(
+	operationContext context.Context,
+	kind, parent, name string,
+	attributes map[string]string,
+) (string, error) {
+	if err := client.scope(parent); err != nil {
+		return "", err
 	}
-	req, e := BuildAdd(kind, parent, name, attrs)
-	if e != nil {
-		return "", e
+	request, err := BuildAdd(kind, parent, name, attributes)
+	if err != nil {
+		return "", err
 	}
-	e = c.write(ctx, false, func(s Session) error { return s.Add(req) })
-	return req.DN, e
+	err = client.write(operationContext, false, func(session Session) error {
+		return session.Add(request)
+	})
+	return request.DN, err
 }

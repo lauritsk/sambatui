@@ -11,58 +11,61 @@ import (
 
 // These boundaries contain malformed untrusted wire data, not application or
 // UI errors. No decoder panic is allowed to become partial-success output.
-func decodeNodes(b []byte) (nodes record.NodeList, err error) {
+func decodeNodes(data []byte) (nodes record.NodeList, err error) {
 	defer func() {
 		if recover() != nil {
 			nodes = record.NodeList{}
 			err = errors.New("malformed DNS management node buffer")
 		}
 	}()
-	err = ndr.Unmarshal(b, &nodes, ndr.Opaque)
+	if len(data) > recordBytesMax {
+		return record.NodeList{}, errors.New("DNS management node buffer exceeds safety limit")
+	}
+	err = ndr.Unmarshal(data, &nodes, ndr.Opaque)
 	return nodes, err
 }
 
-func decodeRecord(r *record.Record) (rr dns.RR, err error) {
+func decodeRecord(currentRecord *record.Record) (resource dns.RR, err error) {
 	defer func() {
 		if recover() != nil {
-			rr = nil
+			resource = nil
 			err = errors.New("malformed DNS management record")
 		}
 	}()
-	if r == nil {
+	if currentRecord == nil {
 		return nil, errors.New("missing DNS management record")
 	}
-	if uint16(r.Type) == dns.TypeTXT {
-		if len(r.Buffer) > 65535 {
+	if uint16(currentRecord.Type) == dns.TypeTXT {
+		if len(currentRecord.Buffer) > 65535 {
 			return nil, errors.New("invalid TXT RDATA size")
 		}
-		wire := make([]byte, 11+len(r.Buffer))
+		wire := make([]byte, 11+len(currentRecord.Buffer))
 		binary.BigEndian.PutUint16(wire[1:3], dns.TypeTXT)
 		binary.BigEndian.PutUint16(wire[3:5], dns.ClassINET)
-		binary.BigEndian.PutUint32(wire[5:9], r.TTLSeconds)
-		binary.BigEndian.PutUint16(wire[9:11], uint16(len(r.Buffer)))
-		copy(wire[11:], r.Buffer)
-		rr, _, err = dns.UnpackRR(wire, 0)
-		return rr, err
+		binary.BigEndian.PutUint32(wire[5:9], currentRecord.TTLSeconds)
+		binary.BigEndian.PutUint16(wire[9:11], uint16(len(currentRecord.Buffer)))
+		copy(wire[11:], currentRecord.Buffer)
+		resource, _, err = dns.UnpackRR(wire, 0)
+		return resource, err
 	}
-	rr = r.RR()
-	if rr == nil {
+	resource = currentRecord.RR()
+	if resource == nil {
 		return nil, errors.New("unsupported DNS management record")
 	}
-	rr.Header().Name = "." // The node owner is carried separately by MS-DNSP.
+	resource.Header().Name = "." // The node owner is carried separately by MS-DNSP.
 	// Samba can return name RDATA without a root dot (notably PTR). Keep
 	// presentation canonical so value-based update matching is semantic.
-	switch v := rr.(type) {
+	switch value := resource.(type) {
 	case *dns.PTR:
-		v.Ptr = dns.Fqdn(v.Ptr)
+		value.Ptr = dns.Fqdn(value.Ptr)
 	case *dns.CNAME:
-		v.Target = dns.Fqdn(v.Target)
+		value.Target = dns.Fqdn(value.Target)
 	case *dns.NS:
-		v.Ns = dns.Fqdn(v.Ns)
+		value.Ns = dns.Fqdn(value.Ns)
 	case *dns.MX:
-		v.Mx = dns.Fqdn(v.Mx)
+		value.Mx = dns.Fqdn(value.Mx)
 	case *dns.SRV:
-		v.Target = dns.Fqdn(v.Target)
+		value.Target = dns.Fqdn(value.Target)
 	}
-	return rr, nil
+	return resource, nil
 }

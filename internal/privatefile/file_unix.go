@@ -12,24 +12,32 @@ import (
 )
 
 func Open(path string) (*os.File, error) {
-	fd, e := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if e != nil {
-		return nil, e
+	descriptor, err := unix.Open(
+		path,
+		unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC,
+		0,
+	)
+	if err != nil {
+		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), path)
-	st, e := f.Stat()
-	if e != nil {
-		f.Close()
-		return nil, e
+	file := os.NewFile(uintptr(descriptor), path)
+	metadata, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
 	}
 	var info unix.Stat_t
-	if e = unix.Fstat(fd, &info); e != nil {
-		f.Close()
-		return nil, e
+	if err = unix.Fstat(descriptor, &info); err != nil {
+		file.Close()
+		return nil, err
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 || info.Uid != uint32(os.Getuid()) {
-		f.Close()
-		return nil, errors.New("credential/state file must be a regular non-symlink file owned by current user with mode 0600")
+	if !metadata.Mode().IsRegular() || metadata.Mode().Perm()&0o077 != 0 ||
+		info.Uid != uint32(os.Getuid()) {
+		file.Close()
+		return nil, errors.New(
+			"credential/state file must be a regular non-symlink file " +
+				"owned by current user with mode 0600",
+		)
 	}
-	return f, nil
+	return file, nil
 }

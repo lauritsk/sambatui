@@ -18,5 +18,6 @@ outcomes with **R**; never delete the pending-write journal to bypass recovery.
 LDAP edits/deletes require server support for RFC 4528 assertion controls.
 
 Configuration: [config.example.json](config.example.json).
-Development: [STYLE.md](STYLE.md), `go test ./...`.
+Development: [STYLE.md](STYLE.md), `go test ./...`, or `go run ./cmd/dev check`.
+Releases: `go run ./cmd/dev release --version v1.2.3 --output dist` (new directory).
 Optional live tests: [integration/README.md](integration/README.md).

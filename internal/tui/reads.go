@@ -9,6 +9,7 @@ import (
 	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/dnsrpc"
 	"github.com/lauritsk/sambatui/internal/health"
+	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
 	"github.com/miekg/dns"
 )
@@ -16,26 +17,39 @@ import (
 // readRequest contains only immutable values. Workers never access Model state.
 type readRequest struct {
 	snapshot                                                  lifecycle.Snapshot
-	id                                                        uint64
+	requestID                                                 uint64
 	kind, zone, base, searchKind, query, queryType, queryName string
 	check                                                     int
 }
 
-func runRead(ctx context.Context, service backend.Service, request readRequest) readResult {
+func runRead(
+	operationContext context.Context,
+	service backend.Service,
+	request readRequest,
+) readResult {
+	invariant.Require(request.snapshot.Generation > 0, "read requires a connection generation")
+	invariant.Require(request.requestID > 0, "read requires a request ID")
 	result := readResult{
-		gen: request.snapshot.Generation, id: request.id, kind: request.kind, zone: request.zone,
+		generation: request.snapshot.Generation, requestID: request.requestID,
+		kind: request.kind, zone: request.zone,
 	}
 	settings := request.snapshot.Settings
 	switch request.kind {
 	case "zones", "setup":
-		result.zones, result.err = service.Zones(ctx, settings)
+		result.zones, result.err = service.Zones(operationContext, settings)
 		if request.kind == "setup" && result.err == nil {
-			result.err = service.CheckLDAP(ctx, settings)
+			result.err = service.CheckLDAP(operationContext, settings)
 		}
 	case "dns":
-		result.records, result.err = service.Records(ctx, settings, request.zone, "@", dns.TypeANY)
+		result.records, result.err = service.Records(
+			operationContext,
+			settings,
+			request.zone,
+			"@",
+			dns.TypeANY,
+		)
 	case "query":
-		typ, err := backend.ParseQueryType(request.queryType)
+		recordType, err := backend.ParseQueryType(request.queryType)
 		if err != nil {
 			result.err = err
 		} else {
@@ -43,19 +57,26 @@ func runRead(ctx context.Context, service backend.Service, request readRequest) 
 			if name == "" {
 				name = "@"
 			}
-			result.records, result.err = service.Records(ctx, settings, request.zone, name, typ)
+			result.records, result.err = service.Records(
+				operationContext,
+				settings,
+				request.zone,
+				name,
+				recordType,
+			)
 		}
 	case "ldap":
 		result.entries, result.err = service.Search(
-			ctx, settings, request.base, request.searchKind, request.query, settings.LDAPMaxRows,
+			operationContext, settings, request.base, request.searchKind,
+			request.query, settings.LDAPMaxRows,
 		)
 		if result.err == nil {
 			result.folders, result.err = service.Search(
-				ctx, settings, request.base, "containers", "", settings.LDAPMaxRows,
+				operationContext, settings, request.base, "containers", "", settings.LDAPMaxRows,
 			)
 		}
 	case "health":
-		result.findings = readHealth(ctx, service, settings, request.check)
+		result.findings = readHealth(operationContext, service, settings, request.check)
 	default:
 		panic("unknown read kind")
 	}
@@ -63,19 +84,19 @@ func runRead(ctx context.Context, service backend.Service, request readRequest) 
 }
 
 func readHealth(
-	ctx context.Context, service backend.Service, settings config.Settings, check int,
+	operationContext context.Context, service backend.Service, settings config.Settings, check int,
 ) []health.Finding {
 	findings := []health.Finding{}
 	completed := map[int]bool{}
 	if check <= 3 || check == 8 {
-		dnsFindings, complete := readHealthDNS(ctx, service, settings, check)
+		dnsFindings, complete := readHealthDNS(operationContext, service, settings, check)
 		findings = append(findings, dnsFindings...)
 		for number := 1; number <= 3; number++ {
 			completed[number] = complete
 		}
 	}
 	if check >= 4 {
-		ldapFindings, complete := readHealthLDAP(ctx, service, settings, check)
+		ldapFindings, complete := readHealthLDAP(operationContext, service, settings, check)
 		findings = append(findings, ldapFindings...)
 		for number := 4; number <= 7; number++ {
 			completed[number] = complete
@@ -100,9 +121,9 @@ const (
 )
 
 func readHealthDNS(
-	ctx context.Context, service backend.Service, settings config.Settings, check int,
+	operationContext context.Context, service backend.Service, settings config.Settings, check int,
 ) ([]health.Finding, bool) {
-	zones, err := service.Zones(ctx, settings)
+	zones, err := service.Zones(operationContext, settings)
 	if err != nil {
 		return []health.Finding{{
 			Severity: "error", Finding: "DNS checks failed", Evidence: err.Error(),
@@ -119,10 +140,14 @@ func readHealthDNS(
 		}}, false
 	}
 	for _, zone := range zones {
-		rows, err := service.Records(ctx, settings, zone, "@", dns.TypeANY)
+		rows, err := service.Records(operationContext, settings, zone, "@", dns.TypeANY)
 		if err == nil {
 			var readBytes int
-			readBytes, err = readHealthDNSBudget(rows, healthDNSRowsMax-rowCount, healthDNSBytesMax-sizeBytes)
+			readBytes, err = readHealthDNSBudget(
+				rows,
+				healthDNSRowsMax-rowCount,
+				healthDNSBytesMax-sizeBytes,
+			)
 			if err != nil {
 				return append(findings, health.Finding{
 					Severity: "error", Object: zone, Finding: "DNS zone check failed",
@@ -151,13 +176,17 @@ func readHealthDNS(
 
 func readHealthDNSBudget(rows []dnsrpc.Row, remainingRows, remainingBytes int) (int, error) {
 	if len(rows) > remainingRows {
-		return 0, errors.New("DNS health check exceeds record safety limit; no clean result claimed")
+		return 0, errors.New(
+			"DNS health check exceeds record safety limit; no clean " + "result claimed",
+		)
 	}
 	sizeBytes := 0
 	for _, row := range rows {
 		for _, value := range []string{row.Name, row.Type, row.Value} {
 			if len(value) > remainingBytes-sizeBytes {
-				return 0, errors.New("DNS health check exceeds byte safety limit; no clean result claimed")
+				return 0, errors.New(
+					"DNS health check exceeds byte safety limit; no clean result claimed",
+				)
 			}
 			sizeBytes += len(value)
 		}
@@ -166,9 +195,16 @@ func readHealthDNSBudget(rows []dnsrpc.Row, remainingRows, remainingBytes int) (
 }
 
 func readHealthLDAP(
-	ctx context.Context, service backend.Service, settings config.Settings, check int,
+	operationContext context.Context, service backend.Service, settings config.Settings, check int,
 ) ([]health.Finding, bool) {
-	entries, err := service.Search(ctx, settings, settings.BaseDN, "all", "", settings.MaxRows)
+	entries, err := service.Search(
+		operationContext,
+		settings,
+		settings.BaseDN,
+		"all",
+		"",
+		settings.MaxRows,
+	)
 	if err != nil {
 		return []health.Finding{{
 			Severity: "error", Finding: "LDAP checks failed", Evidence: err.Error(),
@@ -183,7 +219,8 @@ func readHealthLDAP(
 		findings = append(findings, health.Finding{
 			Severity: "info", Finding: "LDAP check limited",
 			Evidence: fmt.Sprintf(
-				"Only first %d entries checked; load more before concluding clean.", settings.MaxRows,
+				"Only first %d entries checked; load more before concluding clean.",
+				settings.MaxRows,
 			),
 		})
 	}

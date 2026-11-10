@@ -1,20 +1,32 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      go:
-        patterns: ["*"]
-  - package-ecosystem: docker
-    directory: /integration
-    schedule:
-      interval: weekly
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ["*"]
+    - package-ecosystem: gomod
+      directory: /
+      open-pull-requests-limit: 5
+      schedule:
+          interval: weekly
+          day: monday
+          time: "08:00"
+          timezone: UTC
+      groups:
+          go:
+              patterns: ["*"]
+    - package-ecosystem: docker
+      directory: /integration
+      open-pull-requests-limit: 5
+      schedule:
+          interval: weekly
+          day: monday
+          time: "08:00"
+          timezone: UTC
+    - package-ecosystem: github-actions
+      directory: /
+      open-pull-requests-limit: 5
+      schedule:
+          interval: weekly
+          day: monday
+          time: "08:00"
+          timezone: UTC
+      groups:
+          actions:
+              patterns: ["*"]
