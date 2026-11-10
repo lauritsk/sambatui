@@ -101,6 +101,33 @@ func startTLS(conn net.Conn) error {
 	return nil
 }
 
+func bindNTLMPayload(packet *ber.Packet) []byte {
+	var payload []byte
+	for _, value := range packet.Children[1].Children[3:] {
+		if value.ClassType == ber.ClassContext && value.Tag == 7 {
+			payload = append([]byte(nil), value.Data.Bytes()...)
+		}
+	}
+	return payload
+}
+
+func bindNTLMRequest(token []byte) *ber.Packet {
+	request := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationBindRequest, nil, "")
+	request.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 3, ""))
+	request.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", ""))
+	sasl := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "")
+	sasl.AppendChild(ber.NewString(
+		ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "GSS-SPNEGO", "",
+	))
+	if token != nil {
+		sasl.AppendChild(ber.NewString(
+			ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, string(token), "",
+		))
+	}
+	request.AppendChild(sasl)
+	return request
+}
+
 func bindNTLM(ctx context.Context, conn net.Conn, user string, password auth.Secret, target string, binding []byte) error {
 	domain, username, ok := strings.Cut(user, `\`)
 	if !ok || username == "" {
@@ -120,15 +147,7 @@ func bindNTLM(ctx context.Context, conn net.Conn, user string, password auth.Sec
 		if e := ctx.Err(); e != nil {
 			return e
 		}
-		req := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationBindRequest, nil, "")
-		req.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 3, ""))
-		req.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", ""))
-		sasl := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "")
-		sasl.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "GSS-SPNEGO", ""))
-		if out != nil {
-			sasl.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, string(out), ""))
-		}
-		req.AppendChild(sasl)
+		req := bindNTLMRequest(out)
 		p, code, e := exchange(conn, round+2, req, ldap.ApplicationBindResponse)
 		if e != nil {
 			return e
@@ -136,12 +155,7 @@ func bindNTLM(ctx context.Context, conn net.Conn, user string, password auth.Sec
 		if code != 0 && code != 14 {
 			return ldap.GetLDAPError(p)
 		}
-		var payload []byte
-		for _, v := range p.Children[1].Children[3:] {
-			if v.ClassType == ber.ClassContext && v.Tag == 7 {
-				payload = append([]byte(nil), v.Data.Bytes()...)
-			}
-		}
+		payload := bindNTLMPayload(p)
 		if len(payload) == 0 {
 			if code == 0 && round > 0 {
 				return nil
@@ -168,7 +182,10 @@ func bindNTLM(ctx context.Context, conn net.Conn, user string, password auth.Sec
 		if e != nil {
 			return e
 		}
-		response, _ := gss.NewNegTokenResp()
+		response, e := gss.NewNegTokenResp()
+		if e != nil {
+			return e
+		}
 		response.State = gss.GssStateAcceptIncomplete
 		response.ResponseToken = answer
 		out, e = response.MarshalBinary()

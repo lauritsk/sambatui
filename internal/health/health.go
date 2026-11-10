@@ -2,6 +2,7 @@ package health
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,116 +29,182 @@ type Options struct {
 }
 
 func norm(s string) string { return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), ".")) }
+
+// dnsIndex batches normalization and lookups so consistency checks do not scan
+// all records for every forward/reverse relationship.
+type dnsIndex struct {
+	records            map[string][]dnsrpc.Row
+	zones              []string
+	pointers, forwards map[string]map[string]bool
+	duplicates         map[string]int
+	typesByName        map[string]map[string]bool
+}
+
 func DNS(records map[string][]dnsrpc.Row) []Finding {
-	normalized := map[string][]dnsrpc.Row{}
-	for zone, rows := range records {
+	index := indexDNS(records)
+	findings := dnsConflicts(index)
+	for _, zone := range index.zones {
+		for _, row := range index.records[zone] {
+			var finding Finding
+			var found bool
+			switch row.Type {
+			case "A":
+				finding, found = dnsForward(index, zone, row)
+			case "PTR":
+				finding, found = dnsPointer(index, zone, row)
+			}
+			if found {
+				findings = append(findings, finding)
+			}
+		}
+	}
+	// Map iteration must not change the order of evidence or guided fixes.
+	sort.Slice(findings, func(left, right int) bool {
+		a, b := findings[left], findings[right]
+		if a.Check != b.Check {
+			return a.Check < b.Check
+		}
+		if a.Object != b.Object {
+			return a.Object < b.Object
+		}
+		return a.Finding < b.Finding
+	})
+	return findings
+}
+
+func indexDNS(records map[string][]dnsrpc.Row) *dnsIndex {
+	index := &dnsIndex{
+		records: map[string][]dnsrpc.Row{}, pointers: map[string]map[string]bool{},
+		forwards: map[string]map[string]bool{}, duplicates: map[string]int{},
+		typesByName: map[string]map[string]bool{},
+	}
+	originalZones := make([]string, 0, len(records))
+	for zone := range records {
+		originalZones = append(originalZones, zone)
+	}
+	sort.Strings(originalZones)
+	for _, zone := range originalZones {
 		key := norm(zone)
-		normalized[key] = append(normalized[key], rows...)
+		index.records[key] = append(index.records[key], records[zone]...)
 	}
-	records = normalized
+	for zone, rows := range index.records {
+		index.zones = append(index.zones, zone)
+		for _, row := range rows {
+			name := norm(dnsdata.FQDN(row.Name, zone))
+			key := zone + ":" + norm(row.Name)
+			value := norm(row.Value)
+			if row.Type == "TXT" {
+				value = row.Value
+			}
+			index.duplicates[key+":"+row.Type+":"+value]++
+			dnsIndexValue(index.typesByName, key, row.Type)
+			switch row.Type {
+			case "PTR":
+				dnsIndexValue(index.pointers, name, norm(row.Value))
+			case "A":
+				dnsIndexValue(index.forwards, name, row.Value)
+			}
+		}
+	}
+	sort.Strings(index.zones)
+	return index
+}
+
+func dnsIndexValue(index map[string]map[string]bool, name, value string) {
+	if index[name] == nil {
+		index[name] = map[string]bool{}
+	}
+	index[name][value] = true
+}
+
+func dnsConflicts(index *dnsIndex) []Finding {
 	findings := []Finding{}
-	zones := []string{}
-	ptr := map[string]map[string]bool{}
-	forward := map[string]map[string]bool{}
-	dupes := map[string]int{}
-	byname := map[string]map[string]bool{}
-	for zone, rows := range records {
-		zones = append(zones, zone)
-		for _, r := range rows {
-			name := norm(dnsdata.FQDN(r.Name, zone))
-			key := norm(zone) + ":" + norm(r.Name)
-			value := norm(r.Value)
-			if r.Type == "TXT" {
-				value = r.Value
-			}
-			identity := key + ":" + r.Type + ":" + value
-			dupes[identity]++
-			if byname[key] == nil {
-				byname[key] = map[string]bool{}
-			}
-			byname[key][r.Type] = true
-			if r.Type == "PTR" {
-				if ptr[name] == nil {
-					ptr[name] = map[string]bool{}
-				}
-				ptr[name][norm(r.Value)] = true
-			}
-			if r.Type == "A" {
-				if forward[name] == nil {
-					forward[name] = map[string]bool{}
-				}
-				forward[name][r.Value] = true
-			}
-		}
-	}
-	for key, count := range dupes {
+	for key, count := range index.duplicates {
 		if count > 1 {
-			findings = append(findings, Finding{Check: 1, Severity: "medium", Object: key, Finding: "Duplicate DNS record", Evidence: fmt.Sprintf("%d identical records", count), Action: "Remove duplicate copies; keep one valid record."})
+			findings = append(findings, Finding{
+				Check: 1, Severity: "medium", Object: key, Finding: "Duplicate DNS record",
+				Evidence: fmt.Sprintf("%d identical records", count),
+				Action:   "Remove duplicate copies; keep one valid record.",
+			})
 		}
 	}
-	for key, types := range byname {
+	for key, types := range index.typesByName {
 		if types["CNAME"] && len(types) > 1 {
-			findings = append(findings, Finding{Check: 1, Severity: "high", Object: key, Finding: "CNAME conflicts with other records", Action: "Keep CNAME alone or replace it with address/alias records."})
-		}
-	}
-	for zone, rows := range records {
-		for _, r := range rows {
-			if r.Type == "A" {
-				z, n, ok := dnsdata.Reverse(r.Value, zones)
-				if !ok {
-					continue
-				}
-				fqdn := norm(dnsdata.FQDN(r.Name, zone))
-				f := Finding{Check: 2, Severity: "medium", Object: fqdn + " A " + r.Value, Action: "Review forward/reverse DNS consistency."}
-				if _, loaded := records[z]; !loaded {
-					f.Severity = "low"
-					f.Finding = "No loaded reverse zone for A record"
-					f.Evidence = "Expected zone " + z
-				} else {
-					targets := ptr[norm(dnsdata.FQDN(n, z))]
-					if targets[fqdn] {
-						continue
-					}
-					if len(targets) == 0 {
-						f.Finding = "A record missing PTR"
-						f.Fix = "dns_add_ptr"
-						f.Zone = z
-						f.Record = dnsrpc.Row{Name: n, Type: "PTR", Value: dnsdata.FQDN(r.Name, zone), TTL: 900}
-						f.Evidence = n + "." + z + " PTR " + fqdn
-					} else {
-						f.Finding = "A record PTR points elsewhere"
-						for v := range targets {
-							f.Evidence += v + " "
-						}
-					}
-				}
-				findings = append(findings, f)
-			}
-			if r.Type == "PTR" {
-				ip := dnsdata.ReverseIP(r.Name, zone)
-				if ip == "" {
-					continue
-				}
-				ips := forward[norm(r.Value)]
-				if ips[ip] {
-					continue
-				}
-				f := Finding{Check: 3, Severity: "medium", Object: dnsdata.FQDN(r.Name, zone) + " PTR " + r.Value, Action: "Review matching forward A record or stale PTR."}
-				if len(ips) == 0 {
-					f.Finding = "PTR target missing forward A"
-					f.Evidence = "No loaded A record for " + r.Value
-				} else {
-					f.Finding = "PTR does not match forward A"
-					f.Evidence = "PTR IP " + ip + "; forward IPs: "
-					for v := range ips {
-						f.Evidence += v + " "
-					}
-				}
-				findings = append(findings, f)
-			}
+			findings = append(findings, Finding{
+				Check: 1, Severity: "high", Object: key, Finding: "CNAME conflicts with other records",
+				Action: "Keep CNAME alone or replace it with address/alias records.",
+			})
 		}
 	}
 	return findings
+}
+
+func dnsForward(index *dnsIndex, zone string, row dnsrpc.Row) (Finding, bool) {
+	reverseZone, name, ok := dnsdata.Reverse(row.Value, index.zones)
+	if !ok {
+		return Finding{}, false
+	}
+	fqdn := norm(dnsdata.FQDN(row.Name, zone))
+	finding := Finding{
+		Check: 2, Severity: "medium", Object: fqdn + " A " + row.Value,
+		Action: "Review forward/reverse DNS consistency.",
+	}
+	if _, loaded := index.records[reverseZone]; !loaded {
+		finding.Severity = "low"
+		finding.Finding = "No loaded reverse zone for A record"
+		finding.Evidence = "Expected zone " + reverseZone
+		return finding, true
+	}
+	targets := index.pointers[norm(dnsdata.FQDN(name, reverseZone))]
+	if targets[fqdn] {
+		return Finding{}, false
+	}
+	if len(targets) == 0 {
+		finding.Finding = "A record missing PTR"
+		finding.Fix = "dns_add_ptr"
+		finding.Zone = reverseZone
+		finding.Record = dnsrpc.Row{
+			Name: name, Type: "PTR", Value: dnsdata.FQDN(row.Name, zone), TTL: 900,
+		}
+		finding.Evidence = name + "." + reverseZone + " PTR " + fqdn
+	} else {
+		finding.Finding = "A record PTR points elsewhere"
+		finding.Evidence = dnsEvidence(targets)
+	}
+	return finding, true
+}
+
+func dnsPointer(index *dnsIndex, zone string, row dnsrpc.Row) (Finding, bool) {
+	ip := dnsdata.ReverseIP(row.Name, zone)
+	if ip == "" {
+		return Finding{}, false
+	}
+	addresses := index.forwards[norm(row.Value)]
+	if addresses[ip] {
+		return Finding{}, false
+	}
+	finding := Finding{
+		Check: 3, Severity: "medium",
+		Object: dnsdata.FQDN(row.Name, zone) + " PTR " + row.Value,
+		Action: "Review matching forward A record or stale PTR.",
+	}
+	if len(addresses) == 0 {
+		finding.Finding = "PTR target missing forward A"
+		finding.Evidence = "No loaded A record for " + row.Value
+	} else {
+		finding.Finding = "PTR does not match forward A"
+		finding.Evidence = "PTR IP " + ip + "; forward IPs: " + dnsEvidence(addresses)
+	}
+	return finding, true
+}
+
+func dnsEvidence(values map[string]bool) string {
+	keys := make([]string, 0, len(values))
+	for value := range values {
+		keys = append(keys, value)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, " ") + " "
 }
 
 func adTime(s string) time.Time {
@@ -164,7 +231,7 @@ func firstTime(e directory.Entry, attrs ...string) time.Time {
 	return time.Time{}
 }
 
-func LDAP(rows []directory.Entry, o Options) []Finding {
+func ldapOptions(o Options) Options {
 	if o.Now.IsZero() {
 		o.Now = time.Now().UTC()
 	}
@@ -177,6 +244,11 @@ func LDAP(rows []directory.Entry, o Options) []Finding {
 	if o.NeverLoggedDays < 1 {
 		o.NeverLoggedDays = 30
 	}
+	return o
+}
+
+func LDAP(rows []directory.Entry, o Options) []Finding {
+	o = ldapOptions(o)
 	findings := []Finding{}
 	age := func(d time.Time) int {
 		if d.IsZero() {

@@ -18,7 +18,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/health"
 	"github.com/lauritsk/sambatui/internal/journal"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
-	"github.com/miekg/dns"
 )
 
 type readResult struct {
@@ -169,19 +168,24 @@ func (m *Model) setConnection(s config.Settings) {
 }
 
 func (m *Model) load(kind string) tea.Cmd {
-	if e := m.cfg.Validate(true); e != nil {
-		m.error(e)
+	if err := m.cfg.Validate(true); err != nil {
+		m.error(err)
 		return nil
 	}
 	if m.readCancel != nil {
 		m.readCancel()
 	}
-	snap := m.state.Snapshot()
+	snapshot := m.state.Snapshot()
 	m.readID++
-	id := m.readID
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(snap.Settings.TimeoutSeconds)*time.Second)
+	ctx, cancel := context.WithTimeout(
+		context.Background(), time.Duration(snapshot.Settings.TimeoutSeconds)*time.Second,
+	)
 	m.readCancel = cancel
-	zone, base, searchKind, query, check := m.zone, m.base, m.kind, m.query, m.healthCheck
+	request := readRequest{
+		snapshot: snapshot, id: m.readID, kind: kind, zone: m.zone, base: m.base,
+		searchKind: m.kind, query: m.query, check: m.healthCheck,
+		queryType: m.dnsQueryType, queryName: m.dnsQueryName,
+	}
 	m.selected = map[int]bool{}
 	m.cursor = 0
 	m.anchor = -1
@@ -197,350 +201,119 @@ func (m *Model) load(kind string) tea.Cmd {
 		m.setMode("health")
 		m.findings = nil
 	}
-	queryType := m.dnsQueryType
-	queryName := m.dnsQueryName
-	if queryName == "" {
-		queryName = "@"
-	}
 	service := m.service
 	m.status = "Loading " + kind + "…"
 	return func() tea.Msg {
 		defer cancel()
-		r := readResult{gen: snap.Generation, id: id, kind: kind, zone: zone}
-		s := snap.Settings
-		switch kind {
-		case "zones", "setup":
-			r.zones, r.err = service.Zones(ctx, s)
-			if kind == "setup" && r.err == nil {
-				r.err = service.CheckLDAP(ctx, s)
-			}
-		case "dns":
-			r.records, r.err = service.Records(ctx, s, zone, "@", dns.TypeANY)
-		case "query":
-			typ, e := backend.ParseQueryType(strings.ToUpper(queryType))
-			if e != nil {
-				r.err = e
-			} else {
-				r.records, r.err = service.Records(ctx, s, zone, queryName, typ)
-			}
-		case "ldap":
-			r.entries, r.err = service.Search(ctx, s, base, searchKind, query, s.LDAPMaxRows)
-			if r.err == nil {
-				r.folders, r.err = service.Search(ctx, s, base, "containers", "", s.LDAPMaxRows)
-			}
-		case "health":
-			records := map[string][]dnsrpc.Row{}
-			completeDNS := true
-			completed := map[int]bool{}
-			if check <= 3 || check == 8 {
-				zones, e := service.Zones(ctx, s)
-				if e != nil {
-					r.findings = append(r.findings, health.Finding{Severity: "error", Finding: "DNS checks failed", Evidence: e.Error()})
-					completeDNS = false
-				} else {
-					for _, z := range zones {
-						rows, e := service.Records(ctx, s, z, "@", dns.TypeANY)
-						if e != nil {
-							r.findings = append(r.findings, health.Finding{Severity: "error", Object: z, Finding: "DNS zone check failed", Evidence: e.Error()})
-							completeDNS = false
-						} else {
-							records[z] = rows
-						}
-					}
-				}
-				// Cross-zone negative findings would be misleading after a failed zone read.
-				if completeDNS {
-					for i := 1; i <= 3; i++ {
-						completed[i] = true
-					}
-					for _, f := range health.DNS(records) {
-						if check == 8 || f.Check == check {
-							r.findings = append(r.findings, f)
-						}
-					}
-				}
-			}
-			if check >= 4 {
-				entries, e := service.Search(ctx, s, s.BaseDN, "all", "", s.MaxRows)
-				if e != nil {
-					r.findings = append(r.findings, health.Finding{Severity: "error", Finding: "LDAP checks failed", Evidence: e.Error()})
-				} else {
-					if len(entries) < s.MaxRows {
-						for i := 4; i <= 7; i++ {
-							completed[i] = true
-						}
-					}
-					for _, f := range health.LDAP(entries, health.Options{Days: s.Days, DisabledDays: s.DisabledDays, NeverLoggedDays: s.NeverLoggedDays}) {
-						if check == 8 || f.Check == check {
-							r.findings = append(r.findings, f)
-						}
-					}
-					if len(entries) >= s.MaxRows {
-						r.findings = append(r.findings, health.Finding{Severity: "info", Finding: "LDAP check limited", Evidence: fmt.Sprintf("Only first %d entries checked; load more before concluding clean.", s.MaxRows)})
-					}
-				}
-			}
-			if check == 8 {
-				r.findings = health.Dashboard(r.findings, completed)
-			}
-			if len(r.findings) == 0 {
-				r.findings = append(r.findings, health.Finding{Severity: "info", Finding: "No findings in completed checks", Evidence: "This is hygiene evidence, not an authorization or security audit."})
-			}
-		}
-		return r
+		return runRead(ctx, service, request)
 	}
 }
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch v := msg.(type) {
+func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch value := message.(type) {
 	case tea.WindowSizeMsg:
-		m.width = v.Width
-		m.height = v.Height
-		return m, nil
+		m.width = value.Width
+		m.height = value.Height
 	case readResult:
-		if !m.state.Current(v.gen) || v.id != m.readID {
-			return m, nil
-		}
-		if v.err != nil {
-			m.error(v.err)
-			return m, nil
-		}
-		m.selected = map[int]bool{}
-		m.cursor = 0
-		m.anchor = -1
-		switch v.kind {
-		case "zones", "setup":
-			m.zones = v.zones
-			m.status = fmt.Sprintf("Loaded %d zones", len(v.zones))
-			if len(v.zones) > 0 {
-				if !contains(v.zones, m.zone) {
-					m.zone = v.zones[0]
-				}
-				return m, m.load("dns")
-			}
-		case "dns", "query":
-			m.setMode("dns")
-			m.records = v.records
-			m.status = fmt.Sprintf("%d records from %s", len(v.records), m.zone)
-		case "ldap":
-			m.setMode("ldap")
-			m.entries = v.entries
-			m.folders = v.folders
-			m.status = fmt.Sprintf("%d entries (limit %d)", len(v.entries), m.cfg.LDAPMaxRows)
-		case "health":
-			m.setMode("health")
-			m.findings = v.findings
-			m.status = fmt.Sprintf("%d findings/check notices", len(v.findings))
-		}
-		return m, nil
+		return m, m.updateRead(value)
 	case discovered:
-		if !m.state.Current(v.gen) {
-			return m, nil
-		}
-		if v.err != nil {
-			m.error(v.err)
-			return m, nil
-		}
-		text := "Discovered services (review before selecting):\n"
-		for _, s := range v.services {
-			text += fmt.Sprintf("%s %s:%d priority=%d weight=%d\n", s.Kind, Literal(s.Target), s.Port, s.Priority, s.Weight)
-		}
-		preferred, ok := discovery.Preferred(v.services)
-		if !ok {
-			m.status = "No AD service endpoints discovered"
-			return m, nil
-		}
-		m.openForm("Select discovered DC", text, []field{{"DC hostname", preferred.Target, false}}, false, func(values []string) tea.Cmd {
-			s := m.cfg
-			s.Server = values[0]
-			s.Domain = v.domain
-			s.BaseDN = "DC=" + strings.ReplaceAll(v.domain, ".", ",DC=")
-			m.setConnection(s)
-			m.connectionForm()
-			return nil
-		})
-		return m, nil
+		return m, m.updateDiscovered(value)
 	case reconciledRead:
-		return m, m.reconcileRead(v)
+		return m, m.reconcileRead(value)
 	case writeResult:
-		m.flow = nil
-		m.writeCancel = nil
-		if v.out.Err != nil {
-			m.error(v.out.Err)
-		} else {
-			m.status = "Write acknowledged by original DC. Refresh to inspect current state."
-		}
-		if v.out.Uncertain {
-			m.status += " OUTCOME UNCERTAIN: further writes blocked. Press R to inspect/reconcile."
-		}
-		return m, nil
+		m.updateWrite(value)
 	case tea.KeyMsg:
-		// Bubble Tea may coalesce consecutive printable keystrokes. Preserve
-		// navigation repeats, but never interpret bracketed paste as commands.
-		if m.form == nil && v.Type == tea.KeyRunes && len(v.Runes) > 1 && !v.Paste && !v.Alt {
-			cmds := []tea.Cmd{}
-			for _, r := range v.Runes {
-				_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-			return m, tea.Batch(cmds...)
-		}
-		if m.form == nil && v.Paste {
-			return m, nil
-		}
-		key := v.String()
-		if key == "ctrl+c" {
-			if m.writeCancel != nil {
-				m.writeCancel()
-				m.status = "Cancellation requested; waiting for worker cleanup. This is not rollback."
-				return m, nil
-			}
-			if m.form != nil {
-				m.closeForm()
-				return m, nil
-			}
-			return m, tea.Quit
-		}
-		if m.form != nil {
-			return m, m.updateForm(v)
-		}
-		if m.detail != "" {
-			switch key {
-			case "esc", "enter", "q":
-				m.detail = ""
-			case "j", "down":
-				m.detailOffset++
-			case "k", "up":
-				m.detailOffset = max(0, m.detailOffset-1)
-			case "pgdown":
-				m.detailOffset += max(1, m.height-8)
-			case "pgup":
-				m.detailOffset = max(0, m.detailOffset-max(1, m.height-8))
-			}
-			return m, nil
-		}
-		switch key {
-		case "Q":
-			if m.flow != nil {
-				m.status = "Cannot quit during a write; cancel and drain it first."
-				return m, nil
-			}
-			return m, tea.Quit
-		case "?":
-			m.showDetails(help)
-		case "h":
-			m.findingsForm()
-		case "ctrl+o":
-			m.connectionForm()
-		case "ctrl+p":
-			m.commandForm()
-		case "z":
-			m.setMode("dns")
-			return m, m.load("zones")
-		case "l":
-			m.ldapForm()
-		case "q":
-			m.queryForm()
-		case "r":
-			if m.mode == "ldap" {
-				return m, m.load("ldap")
-			}
-			if m.mode == "health" {
-				return m, m.load("health")
-			}
-			return m, m.load("dns")
-		case "R":
-			return m, m.reconcile()
-		case "tab":
-			m.sidebar = !m.sidebar
-		case "j", "down":
-			m.move(1)
-		case "k", "up":
-			m.move(-1)
-		case "pgdown", "ctrl+d":
-			m.move(max(1, (m.height-10)/2))
-		case "pgup", "ctrl+u":
-			m.move(-max(1, (m.height-10)/2))
-		case "home", "g":
-			m.move(-100000)
-		case "end", "G":
-			m.move(100000)
-		case " ":
-			if !m.sidebar {
-				indices := m.visible()
-				if m.cursor < len(indices) {
-					i := indices[m.cursor]
-					m.selected[i] = !m.selected[i]
-					m.anchor = m.cursor
-				}
-			}
-		case "v":
-			if m.anchor < 0 {
-				m.anchor = m.cursor
-			} else {
-				indices := m.visible()
-				for i := min(m.anchor, m.cursor); i <= max(m.anchor, m.cursor) && i < len(indices); i++ {
-					m.selected[indices[i]] = true
-				}
-				m.anchor = -1
-			}
-		case "esc":
-			m.selected = map[int]bool{}
-			m.search = ""
-			m.anchor = -1
-		case "/":
-			m.searchForm()
-		case "s":
-			m.sortField = (m.sortField + 1) % 3
-			m.reverse = !m.reverse
-		case "enter":
-			if m.sidebar {
-				return m, m.activateSide()
-			}
-			m.details()
-		case "a", "u", "e", "d", "f":
-			return m, m.writeForm(key)
-		case "m":
-			if m.mode == "health" {
-				m.cfg.MaxRows = min(5000, m.cfg.MaxRows+200)
-			} else if m.mode == "ldap" {
-				m.cfg.LDAPMaxRows = min(5000, m.cfg.LDAPMaxRows+200)
-			} else {
-				m.status = "Load more is available for directory/findings views"
-				return m, nil
-			}
-			m.state.Change(m.cfg)
-			m.selected = map[int]bool{}
-			if m.mode == "health" {
-				return m, m.load("health")
-			}
-			return m, m.load("ldap")
-		case "p":
-			password, e := config.ReadPassword(m.cfg.PasswordFile)
-			if e != nil {
-				m.error(e)
-			} else {
-				s := m.cfg
-				s.Password = newSecret(password)
-				m.setConnection(s)
-			}
-		case "P":
-			m.savePasswordForm()
-		case "1", "2", "3", "4", "5", "6", "7", "8":
-			m.healthCheck = int(key[0] - '0')
-			return m, m.load("health")
-		}
+		return m, m.updateKey(value)
 	}
 	return m, nil
 }
 
+func (m *Model) updateRead(v readResult) tea.Cmd {
+	if !m.state.Current(v.gen) || v.id != m.readID {
+		return nil
+	}
+	if v.err != nil {
+		m.error(v.err)
+		return nil
+	}
+	m.selected = map[int]bool{}
+	m.cursor = 0
+	m.anchor = -1
+	switch v.kind {
+	case "zones", "setup":
+		m.zones = v.zones
+		m.status = fmt.Sprintf("Loaded %d zones", len(v.zones))
+		if len(v.zones) > 0 {
+			if !contains(v.zones, m.zone) {
+				m.zone = v.zones[0]
+			}
+			return m.load("dns")
+		}
+	case "dns", "query":
+		m.setMode("dns")
+		m.records = v.records
+		m.status = fmt.Sprintf("%d records from %s", len(v.records), m.zone)
+	case "ldap":
+		m.setMode("ldap")
+		m.entries = v.entries
+		m.folders = v.folders
+		m.status = fmt.Sprintf("%d entries (limit %d)", len(v.entries), m.cfg.LDAPMaxRows)
+	case "health":
+		m.setMode("health")
+		m.findings = v.findings
+		m.status = fmt.Sprintf("%d findings/check notices", len(v.findings))
+	}
+	return nil
+}
+
+func (m *Model) updateDiscovered(v discovered) tea.Cmd {
+	if !m.state.Current(v.gen) {
+		return nil
+	}
+	if v.err != nil {
+		m.error(v.err)
+		return nil
+	}
+	text := "Discovered services (review before selecting):\n"
+	for _, s := range v.services {
+		text += fmt.Sprintf("%s %s:%d priority=%d weight=%d\n", s.Kind, Literal(s.Target), s.Port, s.Priority, s.Weight)
+	}
+	preferred, ok := discovery.Preferred(v.services)
+	if !ok {
+		m.status = "No AD service endpoints discovered"
+		return nil
+	}
+	m.openForm("Select discovered DC", text, []field{{"DC hostname", preferred.Target, false}}, false, func(values []string) tea.Cmd {
+		s := m.cfg
+		s.Server = values[0]
+		s.Domain = v.domain
+		s.BaseDN = "DC=" + strings.ReplaceAll(v.domain, ".", ",DC=")
+		m.setConnection(s)
+		m.connectionForm()
+		return nil
+	})
+	return nil
+}
+
+func (m *Model) updateWrite(v writeResult) {
+	m.flow = nil
+	m.writeCancel = nil
+	if v.out.Err != nil {
+		m.error(v.out.Err)
+	} else {
+		m.status = "Write acknowledged by original DC. Refresh to inspect current state."
+	}
+	if v.out.Uncertain {
+		m.status += " OUTCOME UNCERTAIN: further writes blocked. Press R to inspect/reconcile."
+	}
+}
+
 func (m *Model) visible() []int {
 	values := m.rowTexts()
-	indices := []int{}
+	indices := make([]int, 0, len(values))
+	needle := strings.ToLower(m.search)
 	for i, s := range values {
-		if strings.Contains(strings.ToLower(s), strings.ToLower(m.search)) {
+		if strings.Contains(strings.ToLower(s), needle) {
 			indices = append(indices, i)
 		}
 	}

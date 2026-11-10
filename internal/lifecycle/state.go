@@ -112,10 +112,11 @@ type Flow struct {
 	finished bool
 }
 
-// Abort is only for forms/confirmation before dispatch. It cannot release a
-// running worker. Cancellation of an active operation goes through Run.
+// RetainUncertain restores the guard when durable intent cleanup fails.
 func (f *Flow) RetainUncertain() error { return f.state.RestoreUncertain(f.Snapshot) }
 
+// Abort is only for forms/confirmation before dispatch. It cannot release a
+// running worker. Cancellation of an active operation goes through Run.
 func (f *Flow) Abort() {
 	s := f.state
 	s.mu.Lock()
@@ -130,6 +131,9 @@ func (f *Flow) Abort() {
 }
 
 func (f *Flow) Run(ctx context.Context, fn func(context.Context, config.Settings) Outcome) Outcome {
+	if fn == nil {
+		panic("write flow requires an operation")
+	}
 	s := f.state
 	s.mu.Lock()
 	if f.finished || f.running || s.active != f {
@@ -143,11 +147,10 @@ func (f *Flow) Run(ctx context.Context, fn func(context.Context, config.Settings
 	}
 	f.running = true
 	s.mu.Unlock()
-	// Wait for the worker to settle even if the UI has already requested cancel.
+	// Run synchronously inside the caller's worker. Returning only after the
+	// operation settles retains ownership without an extra goroutine or queue.
 	// A canceled context is never interpreted as undoing a transmitted request.
-	result := make(chan Outcome, 1)
-	go func() { result <- fn(ctx, f.Snapshot.Settings) }()
-	out := <-result
+	out := fn(ctx, f.Snapshot.Settings)
 	if ctx.Err() != nil {
 		out.Uncertain = true
 		out.Err = ErrCancelled

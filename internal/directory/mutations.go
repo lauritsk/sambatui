@@ -119,6 +119,24 @@ func (c *Client) write(ctx context.Context, conditional bool, f func(Session) er
 
 var Editable = map[string][]string{"user": {"displayName", "mail", "description"}, "group": {"description", "mail"}, "computer": {"description"}, "ou": {"description"}}
 
+// ValidateChanges is shared by plan validation and dispatch so confirmation
+// cannot approve attributes that the protocol boundary would refuse.
+func ValidateChanges(kind string, changes map[string]string) error {
+	for attribute := range changes {
+		allowed := false
+		for _, editable := range Editable[kind] {
+			if attribute == editable {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("LDAP attribute is not editable: %s", attribute)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Modify(ctx context.Context, dn, kind, revision string, changes map[string]string) error {
 	if e := c.scope(dn); e != nil {
 		return e
@@ -127,14 +145,8 @@ func (c *Client) Modify(ctx context.Context, dn, kind, revision string, changes 
 	if e != nil {
 		return e
 	}
-	allowed := map[string]bool{}
-	for _, a := range Editable[kind] {
-		allowed[a] = true
-	}
-	for a := range changes {
-		if !allowed[a] {
-			return fmt.Errorf("LDAP attribute is not editable: %s", a)
-		}
+	if err := ValidateChanges(kind, changes); err != nil {
+		return err
 	}
 	if len(changes) == 0 {
 		return nil
