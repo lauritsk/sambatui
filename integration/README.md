@@ -1,6 +1,6 @@
 # Disposable Samba interoperability tests (opt-in)
 
-Run `sh integration/run.sh` from a checkout with Go and Docker. Neither Docker
+Run `go run ./cmd/dev integration` from the checkout root with Go and Docker. Neither Docker
 nor any server provisioning tools are needed for the normal Go test suite,
 build, installed executable or connection to an existing remote DC.
 
@@ -11,7 +11,8 @@ The runner:
 2. Cross-builds native Linux test binaries and the native client with
    `CGO_ENABLED=0` on the host.
 3. Starts the server with `--network none`, no published ports, host credentials,
-   host config mounts or extra capabilities. All server sockets are loopback-only.
+   host config mounts or extra capabilities. CPU, memory, process count and Docker
+   logs are bounded. All server sockets are loopback-only.
 4. Provisions `LAB.INVALID`, test-only users, a private TLS certificate and a
    reverse DNS zone inside that disposable container. Samba's upstream
    provisioning API and fixture ticket generation use the **server's** Python/
@@ -19,11 +20,15 @@ The runner:
 5. Copies only the native binaries into that network namespace, then executes
    the explicit fixture-only tests. They require both an opt-in variable and
    the fixture marker; there is no configurable production endpoint/credential.
-6. Removes its container and temporary host binaries, including after failure.
+6. Removes its uniquely owned container and temporary host binaries, including
+   after failure or cancellation. Subprocess groups and readiness have deadlines;
+   cleanup uses an independent deadline and reports failures instead of hiding them.
 
 `SAMBATUI_TEST_SERVER_IMAGE` can select an already-built **server fixture** image
 to avoid rebuilding it. This is not a fallback client image. Never run
-`server.sh` on a host; its guards refuse host provisioning.
+`server.py` on a host; its guards refuse host provisioning or existing fixture state.
+The fixture has a finite lifetime and bounded command/retry/shutdown budgets.
+Its Python safety tests run at image build time without provisioning a domain.
 
 ## Live checks
 
@@ -65,5 +70,5 @@ handling, write serialization/draining, durable uncertainty and UI transitions.
 The fixture accepts correctly bound integrated authentication. Strict negative
 channel-binding enforcement by other DC policies, Windows AD, multi-forest
 referrals, large production directories and real-DC lost-response timing have
-not been live-validated. Ranged membership retrieval has deterministic protocol coverage, not a live
-large-group claim. No external/production DC is accessed by these tests.
+not been live-validated. Ranged membership retrieval has deterministic protocol
+coverage, not a live large-group claim. No external/production DC is accessed by these tests.
