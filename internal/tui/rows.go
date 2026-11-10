@@ -75,6 +75,28 @@ func (model *Model) rowTexts() []string {
 	return texts
 }
 
+func (model *Model) cycleSort() {
+	before := model.visible()
+	focused, anchored := -1, -1
+	if model.cursor < len(before) {
+		focused = before[model.cursor]
+	}
+	if model.anchor >= 0 && model.anchor < len(before) {
+		anchored = before[model.anchor]
+	}
+	model.sortField = (model.sortField + 1) % 3
+	model.reverse = !model.reverse
+	model.anchor = -1
+	for position, index := range model.visible() {
+		if index == focused {
+			model.cursor = position
+		}
+		if index == anchored {
+			model.anchor = position
+		}
+	}
+}
+
 func (model *Model) move(delta int) {
 	if model.sidebar {
 		model.sideCursor = max(0, min(model.sideCursor+delta, len(model.sideLabels())-1))

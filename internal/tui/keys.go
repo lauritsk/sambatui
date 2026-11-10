@@ -164,8 +164,7 @@ func (model *Model) updateNavigationKey(key string) {
 		model.search = ""
 		model.anchor = -1
 	case "s":
-		model.sortField = (model.sortField + 1) % 3
-		model.reverse = !model.reverse
+		model.cycleSort()
 	}
 }
 
