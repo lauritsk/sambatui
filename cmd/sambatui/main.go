@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/term"
 	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/journal"
 	"github.com/lauritsk/sambatui/internal/tui"
@@ -31,11 +32,15 @@ func run() error {
 		path,
 		"native JSON preferences path (password stored separately)",
 	)
+	theme := flag.String("theme", "dark", "terminal palette: dark or light (respects NO_COLOR)")
 	showVersion := flag.Bool("version", false, "show version")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("sambatui", version)
 		return nil
+	}
+	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
+		return fmt.Errorf("interactive mode requires terminal stdin and stdout")
 	}
 	settings, err := config.Load(*configPath, os.LookupEnv)
 	if err != nil {
@@ -57,6 +62,9 @@ func run() error {
 	}
 	defer store.Close()
 	model := tui.New(settings, *configPath, nil)
+	if err = model.SetTheme(*theme); err != nil {
+		return err
+	}
 	if err = model.UseJournal(store); err != nil {
 		return err
 	}
