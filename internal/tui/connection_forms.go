@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/config"
@@ -89,16 +87,7 @@ func (model *Model) discoverForm() tea.Cmd {
 				model.error(err)
 				return nil
 			}
-			snap := model.state.Snapshot()
-			return func() tea.Msg {
-				operationContext, cancel := context.WithTimeout(
-					context.Background(),
-					10*time.Second,
-				)
-				defer cancel()
-				services, err := discovery.Discover(operationContext, domain, nil)
-				return discovered{snap.Generation, domain, services, err}
-			}
+			return model.startDiscovery(domain, nil)
 		},
 	)
 	return nil

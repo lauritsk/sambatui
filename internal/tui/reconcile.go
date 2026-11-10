@@ -1,13 +1,11 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/backend"
-	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
 )
 
@@ -39,15 +37,10 @@ func (model *Model) reconcile() tea.Cmd {
 		}
 	}
 	service := model.service
-	if model.readCancel != nil {
-		model.readCancel()
-	}
-	model.readID = invariant.Next(model.readID)
-	requestID := model.readID
-	operationContext, cancel := context.WithTimeout(
-		context.Background(), time.Duration(snapshot.Settings.TimeoutSeconds)*time.Second,
+	operationContext, cancel := model.startRead(
+		time.Duration(snapshot.Settings.TimeoutSeconds) * time.Second,
 	)
-	model.readCancel = cancel
+	requestID := model.readID
 	model.status = "Inspecting original DC (not the current connection)…"
 	return func() tea.Msg {
 		defer cancel()

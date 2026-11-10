@@ -12,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lauritsk/sambatui/internal/auth"
-	"github.com/lauritsk/sambatui/internal/discovery"
 	"github.com/lauritsk/sambatui/internal/invariant"
 )
 
@@ -226,13 +225,4 @@ func (model *Model) formView() string {
 		out += mark + Literal(field.Label) + ": " + value + "\n"
 	}
 	return out + "Tab/Enter next · Ctrl+S submit · Ctrl+U clear · Esc cancel"
-}
-
-// Discovery is an explicit user action. Selection still requires confirmation
-// in the connection form, never silent failover for an active write.
-type discovered struct {
-	generation uint64
-	domain     string
-	services   []discovery.Service
-	err        error
 }

@@ -2,12 +2,31 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	"github.com/lauritsk/sambatui/internal/backend"
 	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
 	"github.com/miekg/dns"
 )
+
+// One event-loop owner cancels and supersedes reads, including discovery and
+// reconciliation. Workers capture the resulting context and identity by value.
+func (model *Model) startRead(timeout time.Duration) (context.Context, context.CancelFunc) {
+	invariant.Require(timeout > 0, "read requires a positive timeout")
+	invariant.Require(timeout <= 300*time.Second, "read timeout exceeds settings limit")
+	if model.readCancel != nil {
+		model.readCancel()
+	}
+	model.readID = invariant.Next(model.readID)
+	operationContext, cancel := context.WithTimeout(context.Background(), timeout)
+	model.readCancel = cancel
+	return operationContext, cancel
+}
+
+func (model *Model) readCurrent(generation, requestID uint64) bool {
+	return model.state.Current(generation) && requestID == model.readID
+}
 
 // readRequest contains only immutable values. Workers never access Model state.
 type readRequest struct {

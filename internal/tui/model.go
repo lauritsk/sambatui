@@ -11,7 +11,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/backend"
 	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/directory"
-	"github.com/lauritsk/sambatui/internal/discovery"
 	"github.com/lauritsk/sambatui/internal/dnsrpc"
 	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/journal"
@@ -189,15 +188,10 @@ func (model *Model) load(kind string) tea.Cmd {
 		model.error(err)
 		return nil
 	}
-	if model.readCancel != nil {
-		model.readCancel()
-	}
 	snapshot := model.state.Snapshot()
-	model.readID = invariant.Next(model.readID)
-	operationContext, cancel := context.WithTimeout(
-		context.Background(), time.Duration(snapshot.Settings.TimeoutSeconds)*time.Second,
+	operationContext, cancel := model.startRead(
+		time.Duration(snapshot.Settings.TimeoutSeconds) * time.Second,
 	)
-	model.readCancel = cancel
 	request := readRequest{
 		snapshot: snapshot, requestID: model.readID, kind: kind, zone: model.zone, base: model.base,
 		searchKind: model.kind, query: model.query,
@@ -246,7 +240,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) updateRead(result readResult) tea.Cmd {
-	if !model.state.Current(result.generation) || result.requestID != model.readID {
+	if !model.readCurrent(result.generation, result.requestID) {
 		return nil
 	}
 	if result.err != nil {
@@ -280,48 +274,6 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 			model.settings.LDAPMaxRows,
 		)
 	}
-	return nil
-}
-
-func (model *Model) updateDiscovered(discoveryResult discovered) tea.Cmd {
-	if !model.state.Current(discoveryResult.generation) {
-		return nil
-	}
-	if discoveryResult.err != nil {
-		model.error(discoveryResult.err)
-		return nil
-	}
-	text := "Discovered services (review before selecting):\n"
-	for _, service := range discoveryResult.services {
-		text += fmt.Sprintf(
-			"%s %s:%d priority=%d weight=%d\n",
-			service.Kind,
-			Literal(service.Target),
-			service.Port,
-			service.Priority,
-			service.Weight,
-		)
-	}
-	preferred, ok := discovery.Preferred(discoveryResult.services)
-	if !ok {
-		model.status = "No AD service endpoints discovered"
-		return nil
-	}
-	model.openForm(
-		"Select discovered DC",
-		text,
-		[]field{{"DC hostname", preferred.Target, false}},
-		false,
-		func(values []string) tea.Cmd {
-			settings := model.settings
-			settings.Server = values[0]
-			settings.Domain = discoveryResult.domain
-			settings.BaseDN = "DC=" + strings.ReplaceAll(discoveryResult.domain, ".", ",DC=")
-			model.setConnection(settings)
-			model.connectionForm()
-			return nil
-		},
-	)
 	return nil
 }
 
