@@ -31,6 +31,8 @@ type writeResult struct {
 	flow       *lifecycle.Flow
 }
 type Model struct {
+	lastError                                     string
+	errorUnread                                   bool
 	theme                                         theme
 	state                                         *lifecycle.State
 	journal                                       *journal.Store
@@ -131,11 +133,16 @@ func escape(text string) string {
 	return builder.String()
 }
 
+const errorTextBytesMax = 64 << 10
+
 func (model *Model) error(err error) {
 	if err == nil {
 		return
 	}
 	text := err.Error()
+	if len(text) > errorTextBytesMax {
+		text = "Error message exceeds 64 KiB; remote details were not retained."
+	}
 	for _, secret := range []string{
 		model.settings.Password.Reveal(),
 		model.lastWrite.Settings.Password.Reveal(),
@@ -144,7 +151,13 @@ func (model *Model) error(err error) {
 			text = strings.ReplaceAll(text, secret, "[redacted]")
 		}
 	}
+	// Redaction can expand a short, repeated secret; apply the retention budget again.
+	if len(text) > errorTextBytesMax {
+		text = "Redacted error exceeds 64 KiB; remote details were not retained."
+	}
 	model.status = text
+	model.lastError = text
+	model.errorUnread = true
 }
 
 func (model *Model) setMode(mode string) {
