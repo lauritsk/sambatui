@@ -118,6 +118,28 @@ func dial(ctx context.Context, cfg Config, sockets *trackedDialer) (*Client, err
 		}
 		stop()
 	}()
+	opts, err := dialAuthentication(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	ctx = gssapi.NewSecurityContext(ctx, opts...)
+	cc, err := dcerpc.Dial(ctx, cfg.Server,
+		dcerpc.WithDialer(sockets), dcerpc.WithTimeout(cfg.Timeout),
+		epm.EndpointMapper(ctx, cfg.Server, dcerpc.WithDialer(sockets), dcerpc.WithTimeout(cfg.Timeout)))
+	if err != nil {
+		sockets.close()
+		return nil, fmt.Errorf("DNS RPC connect: %w", err)
+	}
+	rpc, err := dnsserver.NewDNSServerClient(ctx, cc, dcerpc.WithSeal(), dcerpc.WithEndpoint("ncacn_ip_tcp:"), dcerpc.WithTargetName("DNS/"+cfg.Server))
+	if err != nil {
+		sockets.close()
+		cc.Close(context.Background())
+		return nil, fmt.Errorf("DNS RPC authenticate: %w", err)
+	}
+	return &Client{ctx: ctx, conn: cc, rpc: rpc, server: cfg.Server, sockets: sockets}, nil
+}
+
+func dialAuthentication(ctx context.Context, cfg Config) ([]gssapi.ContextOption, error) {
 	var opts []gssapi.ContextOption
 	switch cfg.Auth {
 	case "", "password":
@@ -164,21 +186,7 @@ func dial(ctx context.Context, cfg Config, sockets *trackedDialer) (*Client, err
 	if (cfg.Auth == "kerberos" || cfg.PasswordAuth == "kerberos") && os.Getenv("KRB5_CCACHE") != "" {
 		return nil, errors.New("unset nonstandard KRB5_CCACHE; select the cache explicitly with SAMBATUI_KRB5_CCACHE")
 	}
-	ctx = gssapi.NewSecurityContext(ctx, opts...)
-	cc, err := dcerpc.Dial(ctx, cfg.Server,
-		dcerpc.WithDialer(sockets), dcerpc.WithTimeout(cfg.Timeout),
-		epm.EndpointMapper(ctx, cfg.Server, dcerpc.WithDialer(sockets), dcerpc.WithTimeout(cfg.Timeout)))
-	if err != nil {
-		sockets.close()
-		return nil, fmt.Errorf("DNS RPC connect: %w", err)
-	}
-	rpc, err := dnsserver.NewDNSServerClient(ctx, cc, dcerpc.WithSeal(), dcerpc.WithEndpoint("ncacn_ip_tcp:"), dcerpc.WithTargetName("DNS/"+cfg.Server))
-	if err != nil {
-		sockets.close()
-		cc.Close(context.Background())
-		return nil, fmt.Errorf("DNS RPC authenticate: %w", err)
-	}
-	return &Client{ctx: ctx, conn: cc, rpc: rpc, server: cfg.Server, sockets: sockets}, nil
+	return opts, nil
 }
 
 func kerberosSettings(ctx context.Context, cfg Config) (*krb5.Config, error) {
@@ -203,6 +211,9 @@ func (c *Client) Zones(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("DNS enumerate zones: %w", err)
 	}
+	if r == nil {
+		return nil, errors.New("DNS enumerate zones: missing result")
+	}
 	if r.Return != 0 {
 		return nil, fmt.Errorf("DNS enumerate zones: status %d", r.Return)
 	}
@@ -210,8 +221,11 @@ func (c *Client) Zones(ctx context.Context) ([]string, error) {
 		return nil, errors.New("DNS enumerate zones: missing result")
 	}
 	list, ok := r.DataOut.GetValue().(*dnsp.ZoneListW2K)
-	if !ok {
+	if !ok || list == nil {
 		return nil, fmt.Errorf("DNS enumerate zones: unexpected result type %d", r.TypeOut)
+	}
+	if len(list.ZoneArray) > zonesMax {
+		return nil, errors.New("DNS enumeration exceeds 10000 zones")
 	}
 	zones := make([]string, 0, len(list.ZoneArray))
 	for _, z := range list.ZoneArray {
@@ -222,6 +236,12 @@ func (c *Client) Zones(ctx context.Context) ([]string, error) {
 	sort.Strings(zones)
 	return zones, nil
 }
+
+const (
+	zonesMax       = 10000
+	recordNodesMax = 10000
+	recordBytesMax = 16 << 20
+)
 
 // Records enumerates the management interface, not ordinary DNS answers. A
 // partial/overflow response is an error, never a successful partial zone.
@@ -234,72 +254,117 @@ func (c *Client) Records(ctx context.Context, zone, node string, typ uint16) ([]
 	}
 	stop := context.AfterFunc(ctx, c.sockets.close)
 	defer stop()
+
 	queue := []string{node}
-	visited := map[string]bool{}
+	scheduled := map[string]bool{strings.ToLower(node): true}
 	rows := []Row{}
-	size := 0
-	for len(queue) > 0 {
+	sizeBytes := 0
+	for index := 0; index < len(queue); index++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		parent := queue[0]
-		queue = queue[1:]
-		if visited[parent] {
-			continue
-		}
-		visited[parent] = true
-		if len(visited) > 10000 {
-			return nil, errors.New("DNS enumeration exceeds 10000 nodes")
-		}
-		r, err := c.rpc.EnumRecords2(ctx, &dnsserver.EnumRecords2Request{ClientVersion: 0x70000, ServerName: c.server, Zone: zone, NodeName: parent, RecordType: typ, SelectFlag: 1})
+		parent := queue[index]
+		nodes, readBytes, err := c.recordsRead(ctx, zone, parent, typ, recordBytesMax-sizeBytes)
 		if err != nil {
-			return nil, fmt.Errorf("DNS enumerate records: %w", err)
+			return nil, err
 		}
-		if r.Return != 0 {
-			return nil, statusError("enumerate records", r.Return)
-		}
-		size += len(r.Buffer)
-		if size > 16<<20 {
-			return nil, errors.New("DNS record response exceeds 16 MiB (no partial results accepted)")
-		}
-		nodes, err := decodeNodes(r.Buffer)
+		sizeBytes += readBytes
+		pageRows, children, err := recordsRows(nodes, parent, node)
 		if err != nil {
-			return nil, fmt.Errorf("DNS record decoding: %w", err)
+			return nil, err
 		}
-		for _, n := range nodes.DNSNodes {
-			if n == nil || n.DNSNodeName == nil {
-				return nil, errors.New("DNS record decoding: missing node")
+		rows = append(rows, pageRows...)
+		for _, child := range children {
+			key := strings.ToLower(child)
+			if scheduled[key] {
+				continue
 			}
-			label := strings.TrimRight(string(n.DNSNodeName.DNSName), "\x00")
-			name := label
-			if label == "" {
-				name = parent
-			} else if parent != "@" {
-				name = label + "." + parent
+			// Bound pending work before enqueue, not just after visiting nodes.
+			if len(queue) == recordNodesMax {
+				return nil, errors.New("DNS enumeration exceeds 10000 nodes")
 			}
-			if label != "" && n.ChildCount > 0 {
-				queue = append(queue, name)
-			}
-			for _, rec := range n.DNSRecords {
-				rr, err := decodeRecord(rec)
-				if err != nil {
-					return nil, err
-				}
-				rr.Header().Name = "."
-				parts := strings.SplitN(rr.String(), "\t", 5)
-				if len(parts) != 5 {
-					return nil, errors.New("DNS record decoding: invalid resource record")
-				}
-				row := Row{Name: name, Type: dns.TypeToString[rr.Header().Rrtype], Value: parts[4], TTL: rr.Header().Ttl, Flags: rec.Flags, Serial: rec.Serial, Timestamp: rec.Timestamp}
-				// A parent's response already contains its immediate children's records.
-				// The recursive response's self node must not duplicate those records.
-				if parent == node || label != "" {
-					rows = append(rows, row)
-				}
-			}
+			scheduled[key] = true
+			queue = append(queue, child)
 		}
 	}
 	return rows, nil
+}
+
+func (c *Client) recordsRead(
+	ctx context.Context, zone, parent string, typ uint16, remainingBytes int,
+) (record.NodeList, int, error) {
+	response, err := c.rpc.EnumRecords2(ctx, &dnsserver.EnumRecords2Request{
+		ClientVersion: 0x70000, ServerName: c.server, Zone: zone,
+		NodeName: parent, RecordType: typ, SelectFlag: 1,
+	})
+	if err != nil {
+		return record.NodeList{}, 0, fmt.Errorf("DNS enumerate records: %w", err)
+	}
+	if response == nil {
+		return record.NodeList{}, 0, errors.New("DNS enumerate records: missing result")
+	}
+	if response.Return != 0 {
+		return record.NodeList{}, 0, statusError("enumerate records", response.Return)
+	}
+	if len(response.Buffer) > remainingBytes {
+		return record.NodeList{}, 0, errors.New(
+			"DNS record response exceeds 16 MiB (no partial results accepted)",
+		)
+	}
+	nodes, err := decodeNodes(response.Buffer)
+	if err != nil {
+		return record.NodeList{}, 0, fmt.Errorf("DNS record decoding: %w", err)
+	}
+	return nodes, len(response.Buffer), nil
+}
+
+func recordsRows(nodes record.NodeList, parent, root string) ([]Row, []string, error) {
+	rows := []Row{}
+	children := []string{}
+	for _, node := range nodes.DNSNodes {
+		if node == nil || node.DNSNodeName == nil {
+			return nil, nil, errors.New("DNS record decoding: missing node")
+		}
+		label := strings.TrimRight(string(node.DNSNodeName.DNSName), "\x00")
+		name := label
+		if label == "" {
+			name = parent
+		} else if parent != "@" {
+			name = label + "." + parent
+		}
+		if label != "" && node.ChildCount > 0 {
+			children = append(children, name)
+		}
+		for _, resource := range node.DNSRecords {
+			row, err := recordsRow(resource, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			// A parent's response already includes immediate children's records.
+			// A descendant response's self node must not duplicate those records.
+			if parent == root || label != "" {
+				rows = append(rows, row)
+			}
+		}
+	}
+	return rows, children, nil
+}
+
+func recordsRow(resource *record.Record, name string) (Row, error) {
+	decoded, err := decodeRecord(resource)
+	if err != nil {
+		return Row{}, err
+	}
+	decoded.Header().Name = "."
+	parts := strings.SplitN(decoded.String(), "\t", 5)
+	if len(parts) != 5 {
+		return Row{}, errors.New("DNS record decoding: invalid resource record")
+	}
+	return Row{
+		Name: name, Type: dns.TypeToString[decoded.Header().Rrtype], Value: parts[4],
+		TTL: decoded.Header().Ttl, Flags: resource.Flags,
+		Serial: resource.Serial, Timestamp: resource.Timestamp,
+	}, nil
 }
 
 // Replace matches the old RDATA on this DC and preserves its existing TTL,

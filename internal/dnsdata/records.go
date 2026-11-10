@@ -96,6 +96,10 @@ func Parse(name, typ, value string) (dns.RR, error) {
 			value = quoteTXT(value)
 		}
 	}
+	return parseRecord(typ, value)
+}
+
+func parseRecord(typ, value string) (dns.RR, error) {
 	rr, e := dns.NewRR(". 900 IN " + typ + " " + value)
 	if e != nil {
 		return nil, fmt.Errorf("invalid DNS record: %w", e)
