@@ -204,7 +204,7 @@ func TestDiscoverySelectionRequiresCurrentRequest(t *testing.T) {
 			}
 			if model.settings.Server != "selected.lab.invalid" ||
 				model.settings.Domain != "lab.invalid" || model.settings.BaseDN != "DC=lab,DC=invalid" ||
-				model.form == nil || model.form.Title != "Connection settings" {
+				model.form == nil || model.form.Title != "Connection" {
 				t.Fatal("selection bypassed connection review or lost its domain")
 			}
 		})

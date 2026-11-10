@@ -7,46 +7,50 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/discovery"
+	"github.com/lauritsk/sambatui/internal/invariant"
+)
+
+const (
+	connectionServerField = iota
+	connectionDomainField
+	connectionBaseField
+	connectionAuthField
+	connectionUserField
+	connectionPasswordField
+	connectionTLSField
+	connectionCAField
+	connectionCacheField
+	connectionKerberosConfigField
+	connectionPTRField
+	connectionDNSAuthField
+	connectionPasswordFileField
+	connectionTimeoutField
+	connectionFieldCount
 )
 
 func (model *Model) connectionForm() {
 	settings := model.settings
 	model.openForm(
-		"Connection settings",
-		"Individual DC hostname required: revisions are DC-local. TLS "+
-			"verification cannot be disabled.",
-		[]field{
-			{"DC hostname", settings.Server, false},
-			{"AD DNS domain", settings.Domain, false},
-			{"LDAP base DN", settings.BaseDN, false},
-			{"Auth: password / kerberos", settings.Auth, false},
-			{"User (UPN/DN or DOMAIN\\user)", settings.User, false},
-			{"Password (whitespace preserved)", settings.Password, true},
-			{"TLS: ldaps / starttls", settings.Encryption, false},
-			{"CA PEM file (empty = system roots)", settings.CAFile, false},
-			{"Selected Kerberos FILE cache", settings.Cache, false},
-			{"Kerberos config file", settings.KerberosConfig, false},
-			{"PTR: off / ask / on", settings.AutoPTR, false},
-			{"DNS password auth: ntlm / kerberos", settings.DNSAuth, false},
-			{"Password file path", settings.PasswordFile, false},
-			{"Timeout seconds 1–300", formatSetting(settings.TimeoutSeconds), false},
-		},
+		"Connection",
+		"",
+		connectionFields(settings),
 		false,
 		func(values []string) tea.Cmd {
-			settings.Server = strings.TrimSpace(values[0])
-			settings.Domain = strings.TrimRight(strings.TrimSpace(values[1]), ".")
-			settings.BaseDN = strings.TrimSpace(values[2])
-			settings.Auth = strings.TrimSpace(values[3])
-			settings.User = strings.TrimSpace(values[4])
-			settings.Password = newSecret(values[5])
-			settings.Encryption = strings.TrimSpace(values[6])
-			settings.CAFile = values[7]
-			settings.Cache = values[8]
-			settings.KerberosConfig = values[9]
-			settings.AutoPTR = values[10]
-			settings.DNSAuth = values[11]
-			settings.PasswordFile = values[12]
-			timeout, err := parseSetting(values[13])
+			settings.Server = strings.TrimSpace(values[connectionServerField])
+			settings.Domain = strings.TrimSpace(values[connectionDomainField])
+			settings.Domain = strings.TrimRight(settings.Domain, ".")
+			settings.BaseDN = strings.TrimSpace(values[connectionBaseField])
+			settings.Auth = strings.TrimSpace(values[connectionAuthField])
+			settings.User = strings.TrimSpace(values[connectionUserField])
+			settings.Password = newSecret(values[connectionPasswordField])
+			settings.Encryption = strings.TrimSpace(values[connectionTLSField])
+			settings.CAFile = values[connectionCAField]
+			settings.Cache = values[connectionCacheField]
+			settings.KerberosConfig = values[connectionKerberosConfigField]
+			settings.AutoPTR = values[connectionPTRField]
+			settings.DNSAuth = values[connectionDNSAuthField]
+			settings.PasswordFile = values[connectionPasswordFileField]
+			timeout, err := parseSetting(values[connectionTimeoutField])
 			if err != nil {
 				model.error(errors.New("timeout must be 1–300 seconds"))
 				return nil
@@ -72,13 +76,92 @@ func (model *Model) connectionForm() {
 			return model.load("zones")
 		},
 	)
+	if model.form != nil {
+		model.form.VisibleFields = connectionFieldIndices
+		model.form.setChoices(connectionAuthField, "password", "kerberos")
+		model.form.setChoices(connectionTLSField, "ldaps", "starttls")
+		model.form.setChoices(connectionPTRField, "off", "ask", "on")
+		model.form.setChoices(connectionDNSAuthField, "ntlm", "kerberos")
+	}
+}
+
+func connectionFields(settings config.Settings) []field {
+	return []field{
+		connectionServerField: {
+			"DC hostname", settings.Server, false,
+		},
+		connectionDomainField: {
+			"AD DNS domain", settings.Domain, false,
+		},
+		connectionBaseField: {
+			"LDAP base DN", settings.BaseDN, false,
+		},
+		connectionAuthField: {
+			"Authentication", settings.Auth, false,
+		},
+		connectionUserField: {
+			"User", settings.User, false,
+		},
+		connectionPasswordField: {
+			"Password", settings.Password, true,
+		},
+		connectionTLSField: {
+			"LDAP TLS", settings.Encryption, false,
+		},
+		connectionCAField: {
+			"CA file (optional)", settings.CAFile, false,
+		},
+		connectionCacheField: {
+			"Kerberos FILE cache", settings.Cache, false,
+		},
+		connectionKerberosConfigField: {
+			"Kerberos config file", settings.KerberosConfig, false,
+		},
+		connectionPTRField: {
+			"PTR records", settings.AutoPTR, false,
+		},
+		connectionDNSAuthField: {
+			"DNS authentication", settings.DNSAuth, false,
+		},
+		connectionPasswordFileField: {
+			"Password file path", settings.PasswordFile, false,
+		},
+		connectionTimeoutField: {
+			"Timeout seconds 1–300", formatSetting(settings.TimeoutSeconds), false,
+		},
+	}
+}
+
+func connectionFieldIndices(fields []field) []int {
+	invariant.Require(len(fields) == connectionFieldCount, "connection field layout changed")
+	kerberos := strings.TrimSpace(fields[connectionAuthField].text()) == "kerberos"
+	dnsKerberos := fields[connectionDNSAuthField].text() == "kerberos"
+	indices := make([]int, 0, len(fields))
+	for index := range fields {
+		switch index {
+		case connectionUserField, connectionPasswordField,
+			connectionDNSAuthField, connectionPasswordFileField:
+			if kerberos {
+				continue
+			}
+		case connectionCacheField:
+			if !kerberos {
+				continue
+			}
+		case connectionKerberosConfigField:
+			if !kerberos && !dnsKerberos {
+				continue
+			}
+		}
+		indices = append(indices, index)
+	}
+	return indices
 }
 
 func (model *Model) discoverForm() tea.Cmd {
 	model.openForm(
 		"Discover AD services",
-		"Uses AD LDAP/Kerberos SRV queries; does not change an active "+
-			"connection automatically.",
+		"",
 		[]field{{"AD DNS domain", model.settings.Domain, false}},
 		false,
 		func(values []string) tea.Cmd {
@@ -97,8 +180,7 @@ func (model *Model) savePasswordForm() {
 	model.openForm(
 		"Save password file",
 		"Destination: "+model.settings.PasswordFile+
-			"\nStored unencrypted with mode 0600. Preferences never "+
-			"contain the password.",
+			"\nUnencrypted, owner-readable only (0600).",
 		[]field{{"Type yes to save", "", false}},
 		false,
 		func(values []string) tea.Cmd {
