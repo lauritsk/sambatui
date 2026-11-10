@@ -25,6 +25,7 @@ func (model *Model) startDiscovery(domain string, resolver discovery.Resolver) t
 	invariant.Require(err == nil, "discovery requires a valid domain")
 	invariant.Require(domain == normalized, "discovery requires a normalized domain")
 	operationContext, cancel := model.startRead(discoveryTimeout)
+	model.loading = "discovery"
 	generation, requestID := model.state.Snapshot().Generation, model.readID
 	return func() tea.Msg {
 		defer cancel()
@@ -40,6 +41,7 @@ func (model *Model) updateDiscovered(result discovered) tea.Cmd {
 	if !model.readCurrent(result.generation, result.requestID) {
 		return nil
 	}
+	model.loading = ""
 	// A read must not replace a newer user interaction or orphan a write reservation.
 	if model.form != nil || model.flow != nil || model.detail != "" {
 		return nil

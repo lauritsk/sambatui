@@ -19,6 +19,7 @@ func (model *Model) startRead(timeout time.Duration) (context.Context, context.C
 		model.readCancel()
 	}
 	model.readID = invariant.Next(model.readID)
+	model.loading = ""
 	operationContext, cancel := context.WithTimeout(context.Background(), timeout)
 	model.readCancel = cancel
 	return operationContext, cancel

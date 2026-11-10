@@ -211,6 +211,27 @@ func TestDiscoverySelectionRequiresCurrentRequest(t *testing.T) {
 	}
 }
 
+func TestDiscoveryOwnsAndClearsItsLoadingIndicator(t *testing.T) {
+	model := testModel()
+	model.loading = "dns"
+	model.startDiscovery("lab.invalid", nil)
+	defer model.readCancel()
+	if model.loading != "discovery" {
+		t.Fatal("discovery retained a superseded read's busy indicator")
+	}
+	model.Update(discoveryResult(model))
+	if model.loading != "" || model.form == nil {
+		t.Fatal("completed discovery retained its busy indicator")
+	}
+	model.closeForm()
+	model.loading = "discovery"
+	model.startRead(time.Second)
+	defer model.readCancel()
+	if model.loading != "" {
+		t.Fatal("new read retained an obsolete busy indicator")
+	}
+}
+
 func TestDiscoveryFailureAndEmptyResultsDoNotOfferSelection(t *testing.T) {
 	failure := errors.New("lookup failed")
 	for _, lookupError := range []error{nil, failure} {
