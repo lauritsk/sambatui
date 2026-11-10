@@ -16,7 +16,7 @@ var releaseTargets = [...]struct{ platform, architecture string }{
 }
 
 var releaseDocuments = [...]string{
-	"LICENSE", "README.md", "config.example.json", "THIRD_PARTY_NOTICES.txt",
+	"README.md", "config.example.json",
 }
 
 func (tools *Tools) Release(ctx context.Context, version, output string) (result error) {
