@@ -12,10 +12,6 @@
   "kerberos_config": "",
   "last_zone": "example.com",
   "auto_ptr": "ask",
-  "days": 90,
-  "disabled_days": 180,
-  "never_logged_days": 30,
-  "max_rows": 500,
   "ldap_max_rows": 200,
   "timeout_seconds": 10
 }

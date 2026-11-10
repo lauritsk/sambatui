@@ -85,12 +85,13 @@ func TestEmptyExplicitCacheDoesNotUseAmbientIdentity(t *testing.T) {
 	}
 }
 
-func TestThresholdsCannotOverflowRemediationCutoffs(t *testing.T) {
-	for _, days := range []int32{-1, 0, 100001, 1<<31 - 1} {
-		s := Defaults()
-		s.Days = days
-		if e := s.Validate(false); e == nil {
-			t.Fatal("unsafe day threshold accepted", days)
+func TestLDAPRowLimitBoundaries(t *testing.T) {
+	for _, limit := range []int{-1, 0, 1, 5000, 5001} {
+		settings := Defaults()
+		settings.LDAPMaxRows = limit
+		err := settings.Validate(false)
+		if (err == nil) != (limit >= 1 && limit <= 5000) {
+			t.Fatalf("limit %d: %v", limit, err)
 		}
 	}
 }
@@ -100,7 +101,7 @@ func TestDocumentedConfigurationSchema(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if cfg.Password.Reveal() != "" || cfg.LDAPMaxRows != 200 || cfg.MaxRows != 500 || cfg.DNSAuth != "ntlm" {
+	if cfg.Password.Reveal() != "" || cfg.LDAPMaxRows != 200 || cfg.DNSAuth != "ntlm" {
 		t.Fatal("documented defaults differ from native settings")
 	}
 }

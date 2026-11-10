@@ -19,28 +19,24 @@ const (
 )
 
 type Settings struct {
-	Server          string      `json:"server"`
-	Domain          string      `json:"domain"`
-	LastZone        string      `json:"last_zone"`
-	User            string      `json:"user"`
-	Auth            string      `json:"auth"`
-	DNSAuth         string      `json:"dns_password_auth"`
-	Cache           string      `json:"cache"`
-	KerberosConfig  string      `json:"kerberos_config"`
-	BaseDN          string      `json:"base_dn"`
-	Encryption      string      `json:"encryption"`
-	CAFile          string      `json:"ca_file"`
-	PasswordFile    string      `json:"password_file"`
-	AutoPTR         string      `json:"auto_ptr"`
-	Days            int32       `json:"days"`
-	DisabledDays    int32       `json:"disabled_days"`
-	NeverLoggedDays int32       `json:"never_logged_days"`
-	MaxRows         int         `json:"max_rows"`
-	LDAPMaxRows     int         `json:"ldap_max_rows"`
-	TimeoutSeconds  int32       `json:"timeout_seconds"`
-	Password        auth.Secret `json:"-"`
-	CacheContents   auth.Secret `json:"-"`
-	CacheIdentity   string      `json:"-"`
+	Server         string      `json:"server"`
+	Domain         string      `json:"domain"`
+	LastZone       string      `json:"last_zone"`
+	User           string      `json:"user"`
+	Auth           string      `json:"auth"`
+	DNSAuth        string      `json:"dns_password_auth"`
+	Cache          string      `json:"cache"`
+	KerberosConfig string      `json:"kerberos_config"`
+	BaseDN         string      `json:"base_dn"`
+	Encryption     string      `json:"encryption"`
+	CAFile         string      `json:"ca_file"`
+	PasswordFile   string      `json:"password_file"`
+	AutoPTR        string      `json:"auto_ptr"`
+	LDAPMaxRows    int         `json:"ldap_max_rows"`
+	TimeoutSeconds int32       `json:"timeout_seconds"`
+	Password       auth.Secret `json:"-"`
+	CacheContents  auth.Secret `json:"-"`
+	CacheIdentity  string      `json:"-"`
 }
 
 func (settings Settings) Format(state fmt.State, verb rune) {
@@ -55,16 +51,12 @@ func (settings Settings) Format(state fmt.State, verb rune) {
 
 func Defaults() Settings {
 	return Settings{
-		Auth:            "password",
-		DNSAuth:         "ntlm",
-		Encryption:      "ldaps",
-		AutoPTR:         "ask",
-		Days:            90,
-		DisabledDays:    180,
-		NeverLoggedDays: 30,
-		MaxRows:         500,
-		LDAPMaxRows:     200,
-		TimeoutSeconds:  10,
+		Auth:           "password",
+		DNSAuth:        "ntlm",
+		Encryption:     "ldaps",
+		AutoPTR:        "ask",
+		LDAPMaxRows:    200,
+		TimeoutSeconds: 10,
 	}
 }
 
@@ -155,15 +147,8 @@ func (settings Settings) Validate(connection bool) error {
 	if settings.TimeoutSeconds < 1 || settings.TimeoutSeconds > 300 {
 		return errors.New("timeout_seconds must be 1–300")
 	}
-	for _, days := range []int32{settings.Days, settings.DisabledDays, settings.NeverLoggedDays} {
-		if days < 1 || days > 100000 {
-			return errors.New("day thresholds must be 1–100000")
-		}
-	}
-	for _, rows := range []int{settings.MaxRows, settings.LDAPMaxRows} {
-		if rows < 1 || rows > 5000 {
-			return errors.New("max_rows and ldap_max_rows must be 1–5000")
-		}
+	if settings.LDAPMaxRows < 1 || settings.LDAPMaxRows > 5000 {
+		return errors.New("ldap_max_rows must be 1–5000")
 	}
 	if !connection {
 		return nil

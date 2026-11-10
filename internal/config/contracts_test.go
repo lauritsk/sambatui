@@ -7,6 +7,31 @@ import (
 	"testing"
 )
 
+func TestRemovedConfigurationFieldsAreRejected(t *testing.T) {
+	for _, field := range []string{"days", "disabled_days", "never_logged_days", "max_rows"} {
+		t.Run(field, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte("{\""+field+"\":90}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, func(string) (string, bool) { return "", false })
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("removed field accepted: %v", err)
+			}
+			if err := Save(path, Defaults()); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "\""+field+"\"") {
+				t.Fatal("removed field persisted")
+			}
+		})
+	}
+}
+
 func TestConfigurationRequiresObjectAndRejectsOversizedEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	emptyEnvironment := func(string) (string, bool) { return "", false }
