@@ -18,6 +18,11 @@ import (
 	"github.com/lauritsk/sambatui/internal/privatefile"
 )
 
+const (
+	configBytesMax       = 1 << 20
+	passwordLineBytesMax = 1 << 20
+)
+
 type Settings struct {
 	Server          string      `json:"server"`
 	Domain          string      `json:"domain"`
@@ -61,15 +66,8 @@ func DefaultPath() (string, error) {
 
 func Load(path string, env func(string) (string, bool)) (Settings, error) {
 	cfg := Defaults()
-	b, e := os.ReadFile(path)
-	if e == nil {
-		dec := json.NewDecoder(bytes.NewReader(b))
-		dec.DisallowUnknownFields()
-		if e = dec.Decode(&cfg); e != nil {
-			return cfg, fmt.Errorf("invalid configuration: %w", e)
-		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		return cfg, e
+	if err := loadFile(path, &cfg); err != nil {
+		return cfg, err
 	}
 	vars := map[string]*string{"SERVER": &cfg.Server, "DOMAIN": &cfg.Domain, "ZONE": &cfg.LastZone, "USER": &cfg.User, "AUTH": &cfg.Auth, "DNS_PASSWORD_AUTH": &cfg.DNSAuth, "KRB5_CCACHE": &cfg.Cache, "KRB5_CONFIG": &cfg.KerberosConfig, "LDAP_BASE": &cfg.BaseDN, "LDAP_ENCRYPTION": &cfg.Encryption, "CA_FILE": &cfg.CAFile, "PASSWORD_FILE": &cfg.PasswordFile, "AUTO_PTR": &cfg.AutoPTR}
 	for name, dst := range vars {
@@ -100,6 +98,34 @@ func Load(path string, env func(string) (string, bool)) (Settings, error) {
 		return cfg, e
 	}
 	return cfg.Freeze()
+}
+
+func loadFile(path string, settings *Settings) error {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, configBytesMax+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > configBytesMax {
+		return errors.New("configuration exceeds 1 MiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(settings); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return errors.New("invalid configuration: expected exactly one JSON object")
+	}
+	return nil
 }
 
 func (s Settings) Validate(connection bool) error {
@@ -179,12 +205,19 @@ func Save(path string, s Settings) error {
 	if e != nil {
 		return e
 	}
+	if len(b)+1 > configBytesMax {
+		return errors.New("configuration exceeds 1 MiB")
+	}
 	return PrivateWrite(path, append(b, '\n'))
 }
 
 func SavePassword(path string, password auth.Secret) error {
 	if strings.ContainsAny(password.Reveal(), "\r\n") {
 		return errors.New("password files support one line only")
+	}
+	// Include the persisted newline in the same bound enforced by ReadPassword.
+	if len(password.Reveal())+1 > passwordLineBytesMax {
+		return errors.New("password first line exceeds 1 MiB")
 	}
 	return PrivateWrite(path, []byte(password.Reveal()+"\n"))
 }
@@ -196,11 +229,11 @@ func ReadPassword(path string) (string, error) {
 	}
 	defer f.Close()
 	// Only the first line, without its line ending. All other whitespace is data.
-	line, e := bufio.NewReader(io.LimitReader(f, (1<<20)+1)).ReadString('\n')
+	line, e := bufio.NewReader(io.LimitReader(f, passwordLineBytesMax+1)).ReadString('\n')
 	if e != nil && !errors.Is(e, io.EOF) {
 		return "", e
 	}
-	if len(line) > 1<<20 {
+	if len(line) > passwordLineBytesMax {
 		return "", errors.New("password first line exceeds 1 MiB")
 	}
 	return strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"), nil
