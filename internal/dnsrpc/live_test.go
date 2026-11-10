@@ -11,6 +11,7 @@ import (
 	"github.com/lauritsk/sambatui/internal/auth"
 	"github.com/lauritsk/sambatui/internal/dnsdata"
 	"github.com/miekg/dns"
+	"github.com/oiweiwei/go-msrpc/msrpc/dnsp/dnsserver/v5"
 	"github.com/oiweiwei/go-msrpc/msrpc/dnsp/record"
 )
 
@@ -183,17 +184,38 @@ func TestDisposableSamba(t *testing.T) {
 		t.Log(e)
 	})
 	t.Run("nested enumeration", func(t *testing.T) {
-		if e := c.Mutate(ctx, "lab.invalid", "leaf.branch", nil, a); e != nil {
-			t.Fatal(e)
+		for _, name := range []string{"branch", "leaf.branch", "leaf.suffix.invalid"} {
+			if e := c.Mutate(ctx, "lab.invalid", name, nil, a); e != nil {
+				t.Fatal(e)
+			}
+			t.Cleanup(func() {
+				if e := c.Mutate(ctx, "lab.invalid", name, a, nil); e != nil {
+					t.Error("nested enumeration cleanup:", e)
+				}
+			})
 		}
-		defer c.Mutate(ctx, "lab.invalid", "leaf.branch", a, nil)
 		r, e := c.Records(ctx, "lab.invalid", "@", dns.TypeANY)
 		if e != nil {
 			t.Fatal(e)
 		}
-		t.Log("root after add:", r)
-		if !slices.ContainsFunc(r, func(r Row) bool { return r.Name == "leaf.branch" }) {
-			t.Error("zone enumeration missed descendant")
+		legacy, legacyErr := c.rpc.EnumRecords2(ctx, &dnsserver.EnumRecords2Request{
+			ClientVersion: 0x70000, ServerName: cfg.Server, Zone: "lab.invalid",
+			NodeName: "suffix.invalid", RecordType: dns.TypeANY, SelectFlag: 1,
+		})
+		if legacyErr != nil || legacy == nil {
+			t.Fatalf("relative-name comparison failed: %v", legacyErr)
+		}
+		t.Logf("relative subtree status: %d; qualified enumeration succeeded", legacy.Return)
+		for _, name := range []string{"branch", "leaf.branch", "leaf.suffix.invalid"} {
+			count := 0
+			for _, row := range r {
+				if row.Name == name {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Errorf("zone enumeration returned %d copies of %s; want one", count, name)
+			}
 		}
 	})
 	t.Run("kerberos selected cache", func(t *testing.T) {

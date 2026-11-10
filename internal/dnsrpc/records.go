@@ -12,6 +12,11 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/dnsp/record"
 )
 
+type recordBranch struct {
+	name        string
+	includeSelf bool
+}
+
 // Records enumerates the management interface, not ordinary DNS answers. A
 // partial/overflow response is an error, never a successful partial zone.
 func (client *Client) Records(
@@ -34,7 +39,7 @@ func (client *Client) Records(
 	stop := context.AfterFunc(operationContext, client.sockets.close)
 	defer stop()
 
-	queue := []string{node}
+	queue := []recordBranch{{name: node, includeSelf: true}}
 	scheduled := map[string]bool{strings.ToLower(node): true}
 	rows := []Row{}
 	sizeBytes := 0
@@ -46,21 +51,21 @@ func (client *Client) Records(
 		nodes, readBytes, err := client.recordsRead(
 			operationContext,
 			zone,
-			parent,
+			qualifiedNodeName(zone, parent.name, node),
 			recordType,
 			recordBytesMax-sizeBytes,
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("DNS zone %q node %q: %w", zone, parent.name, err)
 		}
 		sizeBytes += readBytes
-		pageRows, children, err := recordsRows(nodes, parent, node)
+		pageRows, children, err := recordsRows(nodes, parent)
 		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, pageRows...)
 		for _, child := range children {
-			key := strings.ToLower(child)
+			key := strings.ToLower(child.name)
 			if scheduled[key] {
 				continue
 			}
@@ -78,6 +83,11 @@ func (client *Client) Records(
 func (client *Client) recordsRead(
 	operationContext context.Context, zone, parent string, recordType uint16, remainingBytes int,
 ) (record.NodeList, int, error) {
+	if len(strings.TrimSuffix(parent, ".")) > 253 {
+		return record.NodeList{}, 0, errors.New(
+			"fully qualified DNS enumeration name exceeds 253 bytes",
+		)
+	}
 	response, err := client.rpc.EnumRecords2(operationContext, &dnsserver.EnumRecords2Request{
 		ClientVersion: 0x70000, ServerName: client.server, Zone: zone,
 		NodeName: parent, RecordType: recordType, SelectFlag: 1,
@@ -103,9 +113,24 @@ func (client *Client) recordsRead(
 	return nodes, len(response.Buffer), nil
 }
 
-func recordsRows(nodes record.NodeList, parent, root string) ([]Row, []string, error) {
+// Fully qualify relative owners: Samba can strip even a partial zone suffix
+// from an undotted name, selecting a different subtree or returning status 9714.
+func qualifiedNodeName(zone, parent, root string) string {
+	if parent == "@" {
+		return parent
+	}
+	zone = strings.TrimSuffix(zone, ".")
+	absolute := strings.HasSuffix(root, ".") || strings.EqualFold(root, zone) ||
+		strings.HasSuffix(strings.ToLower(root), "."+strings.ToLower(zone))
+	if absolute {
+		return dns.Fqdn(parent)
+	}
+	return dns.Fqdn(parent + "." + zone)
+}
+
+func recordsRows(nodes record.NodeList, parent recordBranch) ([]Row, []recordBranch, error) {
 	rows := []Row{}
-	children := []string{}
+	children := []recordBranch{}
 	for _, node := range nodes.DNSNodes {
 		if node == nil || node.DNSNodeName == nil {
 			return nil, nil, errors.New("DNS record decoding: missing node")
@@ -113,21 +138,23 @@ func recordsRows(nodes record.NodeList, parent, root string) ([]Row, []string, e
 		label := strings.TrimRight(string(node.DNSNodeName.DNSName), "\x00")
 		name := label
 		if label == "" {
-			name = parent
-		} else if parent != "@" {
-			name = label + "." + parent
+			name = parent.name
+		} else if parent.name != "@" {
+			name = label + "." + parent.name
 		}
 		if label != "" && node.ChildCount > 0 {
-			children = append(children, name)
+			children = append(children, recordBranch{
+				name: name, includeSelf: len(node.DNSRecords) == 0,
+			})
 		}
 		for _, resource := range node.DNSRecords {
 			row, err := recordsRow(resource, name)
 			if err != nil {
 				return nil, nil, err
 			}
-			// A parent's response already includes immediate children's records.
-			// A descendant response's self node must not duplicate those records.
-			if parent == root || label != "" {
+			// Samba omits branch records from the parent's response, unlike
+			// servers that return both records and a nonzero child count.
+			if parent.includeSelf || label != "" {
 				rows = append(rows, row)
 			}
 		}
@@ -140,6 +167,10 @@ func recordsRow(resource *record.Record, name string) (Row, error) {
 	if err != nil {
 		return Row{}, err
 	}
+	return resourceRow(decoded, name, resource.Flags, resource.Serial, resource.Timestamp)
+}
+
+func resourceRow(decoded dns.RR, name string, flags, serial, timestamp uint32) (Row, error) {
 	decoded.Header().Name = "."
 	parts := strings.SplitN(decoded.String(), "\t", 5)
 	if len(parts) != 5 {
@@ -147,7 +178,7 @@ func recordsRow(resource *record.Record, name string) (Row, error) {
 	}
 	return Row{
 		Name: name, Type: dns.TypeToString[decoded.Header().Rrtype], Value: parts[4],
-		TTL: decoded.Header().Ttl, Flags: resource.Flags,
-		Serial: resource.Serial, Timestamp: resource.Timestamp,
+		TTL: decoded.Header().Ttl, Flags: flags,
+		Serial: serial, Timestamp: timestamp,
 	}, nil
 }

@@ -42,7 +42,7 @@ func TestMutationIsOneExchangeAndNeverRetried(t *testing.T) {
 	calls := 0
 	c := &Client{server: "selected-dc", sockets: &trackedDialer{}, rpc: fakeRPC{update: func(req *dnsserver.UpdateRecord2Request) (*dnsserver.UpdateRecord2Response, error) {
 		calls++
-		if req.ServerName != "selected-dc" || req.Zone != "lab.invalid" || req.NodeName != "host" {
+		if req.ServerName != "selected-dc" || req.Zone != "lab.invalid" || req.NodeName != "host.lab.invalid." {
 			t.Fatalf("wrong target %+v", req)
 		}
 		if req.AddRecord == nil || req.DeleteRecord == nil {

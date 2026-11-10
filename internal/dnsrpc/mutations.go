@@ -73,6 +73,10 @@ func (client *Client) Mutate(
 	if old == nil && new == nil {
 		return errors.New("empty DNS mutation")
 	}
+	nodeName := qualifiedNodeName(zone, name, name)
+	if len(strings.TrimSuffix(nodeName, ".")) > 253 {
+		return errors.New("fully qualified DNS mutation name exceeds 253 bytes")
+	}
 	convert := func(currentRecord *record.Record) (*dnsp.Record, error) {
 		if currentRecord == nil {
 			return nil, nil
@@ -105,7 +109,7 @@ func (client *Client) Mutate(
 		&dnsserver.UpdateRecord2Request{
 			ServerName:   client.server,
 			Zone:         zone,
-			NodeName:     name,
+			NodeName:     nodeName,
 			AddRecord:    add,
 			DeleteRecord: del,
 		},
