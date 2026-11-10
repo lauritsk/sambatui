@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/lauritsk/sambatui/internal/invariant"
 )
 
 func Filter(kind, text string) (string, error) {
@@ -128,11 +129,20 @@ func searchPages(
 	operationContext context.Context, session Session, request *ldap.SearchRequest,
 	pageSize uint32, limit int,
 ) ([]Entry, error) {
+	return searchPagesBounded(operationContext, session, request, pageSize, limit, searchRowsMax)
+}
+
+func searchPagesBounded(
+	operationContext context.Context, session Session, request *ldap.SearchRequest,
+	pageSize uint32, limit, rowsMax int,
+) ([]Entry, error) {
+	invariant.Require(rowsMax > 0 && rowsMax <= dnsNodesMax, "invalid LDAP row budget")
+	invariant.Require(limit >= 0 && limit <= rowsMax, "invalid LDAP caller limit")
 	control := ldap.NewControlPaging(pageSize)
 	request.Controls = []ldap.Control{
 		control, ldap.NewControlString(ldap.ControlTypeMicrosoftDomainScope, true, ""),
 	}
-	capacity := searchRowsMax
+	capacity := rowsMax
 	if limit > 0 {
 		capacity = limit
 	}
@@ -161,10 +171,8 @@ func searchPages(
 				)
 			}
 			// A zero caller limit requests a complete result, not unbounded memory.
-			if len(rows) == searchRowsMax {
-				return nil, errors.New(
-					"LDAP search exceeds read safety limit; no partial result returned",
-				)
+			if len(rows) == rowsMax {
+				return nil, errors.New("LDAP row safety limit exceeded; no partial result returned")
 			}
 			if err := expandRangesBudget(operationContext, session, entry, budget); err != nil {
 				return nil, err
