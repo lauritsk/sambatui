@@ -1,21 +1,14 @@
 version: 2
-registries:
-  dhi:
-    type: docker-registry
-    url: https://dhi.io
-    username: ${{ secrets.DOCKERHUB_USERNAME }}
-    password: ${{ secrets.DOCKERHUB_PASSWORD }}
 updates:
-  - package-ecosystem: uv
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
     groups:
-      python:
+      go:
         patterns: ["*"]
   - package-ecosystem: docker
-    directory: /
-    registries: [dhi]
+    directory: /integration
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
