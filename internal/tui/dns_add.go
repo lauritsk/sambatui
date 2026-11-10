@@ -20,7 +20,7 @@ func dnsAddFields(recordType string) ([]field, error) {
 	case "CNAME", "PTR", "NS":
 		fields = append(fields, field{"Target hostname", "", false})
 	case "TXT":
-		fields = append(fields, field{"Literal text or quoted DNS strings", "", false})
+		fields = append(fields, field{"Text", "", false})
 	case "MX":
 		fields = append(fields, field{"Priority", "10", false}, field{"Mail exchanger", "", false})
 	case "SRV":
@@ -75,5 +75,8 @@ func (model *Model) dnsAddPlan(action backend.Action) tea.Cmd {
 			return model.confirmPlan(plan)
 		},
 	)
+	if model.form != nil {
+		model.form.setChoices(0, "no", "yes")
+	}
 	return nil
 }

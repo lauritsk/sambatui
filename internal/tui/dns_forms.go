@@ -74,7 +74,7 @@ func (model *Model) dnsAddForm() tea.Cmd {
 	zone := model.zone
 	model.openForm(
 		"Choose DNS record type", "Zone: "+zone,
-		[]field{{"Type: A AAAA CNAME PTR TXT MX SRV NS", "A", false}},
+		[]field{{"Type", "A", false}},
 		true, func(values []string) tea.Cmd {
 			recordType := strings.ToUpper(values[0])
 			fields, err := dnsAddFields(recordType)
@@ -94,6 +94,9 @@ func (model *Model) dnsAddForm() tea.Cmd {
 			return nil
 		},
 	)
+	if model.form != nil {
+		model.form.setChoices(0, "A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS")
+	}
 	return nil
 }
 
