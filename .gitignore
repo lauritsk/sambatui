@@ -6,6 +6,7 @@
 !/.github/workflows/ci.yml
 !/LICENSE
 !/README.md
+!/STYLE.md
 !/THIRD_PARTY_NOTICES.txt
 !/config.example.json
 !/go.mod
