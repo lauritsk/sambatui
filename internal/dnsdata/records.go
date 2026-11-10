@@ -11,6 +11,9 @@ import (
 	"github.com/miekg/dns"
 )
 
+// Four presentation bytes can encode one RDATA byte (for example, \\255).
+const valueBytesMax = 4 * 65535
+
 var Types = []string{"A", "AAAA", "CNAME", "PTR", "TXT", "MX", "SRV", "NS"}
 
 func ValidName(name string, root bool) bool {
@@ -25,8 +28,11 @@ func ValidName(name string, root bool) bool {
 		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}
-		for _, c := range label {
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+		for _, character := range label {
+			if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+				(character >= '0' && character <= '9') ||
+				character == '_' ||
+				character == '-') {
 				return false
 			}
 		}
@@ -35,14 +41,17 @@ func ValidName(name string, root bool) bool {
 }
 
 // Unquoted TXT values are literal text.
-func Parse(name, typ, value string) (dns.RR, error) {
+func Parse(name, recordType, value string) (dns.RR, error) {
+	if len(value) > valueBytesMax {
+		return nil, errors.New("DNS value exceeds presentation size limit")
+	}
 	if !ValidName(name, true) {
 		return nil, errors.New("bad DNS name; use @ or ASCII DNS labels (underscore allowed)")
 	}
-	typ = strings.ToUpper(typ)
+	recordType = strings.ToUpper(recordType)
 	supported := false
-	for _, t := range Types {
-		if t == typ {
+	for _, currentValue := range Types {
+		if currentValue == recordType {
 			supported = true
 		}
 	}
@@ -52,84 +61,85 @@ func Parse(name, typ, value string) (dns.RR, error) {
 	if value == "" {
 		return nil, errors.New("DNS value required")
 	}
-	switch typ {
+	switch recordType {
 	case "A", "AAAA":
-		ip, e := netip.ParseAddr(value)
-		if e != nil || (typ == "A" && !ip.Is4()) || (typ == "AAAA" && !ip.Is6()) {
-			return nil, fmt.Errorf("invalid %s address", typ)
+		ip, err := netip.ParseAddr(value)
+		if err != nil || (recordType == "A" && !ip.Is4()) || (recordType == "AAAA" && !ip.Is6()) {
+			return nil, fmt.Errorf("invalid %s address", recordType)
 		}
 	case "CNAME", "PTR", "NS":
 		if !ValidName(value, false) {
 			return nil, errors.New("target must be a DNS hostname")
 		}
-		if typ == "CNAME" {
-			if _, e := netip.ParseAddr(strings.TrimSuffix(value, ".")); e == nil {
+		if recordType == "CNAME" {
+			if _, err := netip.ParseAddr(strings.TrimSuffix(value, ".")); err == nil {
 				return nil, errors.New("CNAME target must be a hostname, not an IP address")
 			}
 		}
 		value = dns.Fqdn(value)
 	case "MX":
-		p := strings.Fields(value)
-		if len(p) != 2 {
+		values := strings.Fields(value)
+		if len(values) != 2 {
 			return nil, errors.New("MX value: priority mail.example.com.")
 		}
-		if _, e := strconv.ParseUint(p[0], 10, 16); e != nil {
-			p[0], p[1] = p[1], p[0]
+		if _, err := strconv.ParseUint(values[0], 10, 16); err != nil {
+			values[0], values[1] = values[1], values[0]
 		}
-		if _, e := strconv.ParseUint(p[0], 10, 16); e != nil || !ValidName(p[1], false) {
+		_, priorityErr := strconv.ParseUint(values[0], 10, 16)
+		if priorityErr != nil || !ValidName(values[1], false) {
 			return nil, errors.New("MX needs priority 0–65535 and hostname")
 		}
-		value = p[0] + " " + dns.Fqdn(p[1])
+		value = values[0] + " " + dns.Fqdn(values[1])
 	case "SRV":
-		p := strings.Fields(value)
-		if len(p) != 4 || !ValidName(p[3], false) {
+		values := strings.Fields(value)
+		if len(values) != 4 || !ValidName(values[3], false) {
 			return nil, errors.New("SRV value: priority weight port target.example.com.")
 		}
-		for _, n := range p[:3] {
-			if _, e := strconv.ParseUint(n, 10, 16); e != nil {
+		for _, valueValue := range values[:3] {
+			if _, err := strconv.ParseUint(valueValue, 10, 16); err != nil {
 				return nil, errors.New("SRV numeric fields must be 0–65535")
 			}
 		}
-		value = strings.Join(p[:3], " ") + " " + dns.Fqdn(p[3])
+		value = strings.Join(values[:3], " ") + " " + dns.Fqdn(values[3])
 	case "TXT":
 		if !strings.HasPrefix(value, `"`) {
 			value = quoteTXT(value)
 		}
 	}
-	return parseRecord(typ, value)
+	return parseRecord(recordType, value)
 }
 
-func parseRecord(typ, value string) (dns.RR, error) {
-	rr, e := dns.NewRR(". 900 IN " + typ + " " + value)
-	if e != nil {
-		return nil, fmt.Errorf("invalid DNS record: %w", e)
+func parseRecord(recordType, value string) (dns.RR, error) {
+	resource, err := dns.NewRR(". 900 IN " + recordType + " " + value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DNS record: %w", err)
 	}
-	if dns.Len(rr) > 65535+256 {
+	if dns.Len(resource) > 65535+256 {
 		return nil, errors.New("DNS record exceeds protocol size limit")
 	}
-	wire := make([]byte, dns.Len(rr))
-	if _, e = dns.PackRR(rr, wire, 0, nil, false); e != nil {
-		return nil, fmt.Errorf("invalid DNS record encoding: %w", e)
+	wire := make([]byte, dns.Len(resource))
+	if _, err = dns.PackRR(resource, wire, 0, nil, false); err != nil {
+		return nil, fmt.Errorf("invalid DNS record encoding: %w", err)
 	}
-	return rr, nil
+	return resource, nil
 }
 
-func quoteTXT(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, c := range []byte(s) {
+func quoteTXT(text string) string {
+	var builder strings.Builder
+	builder.WriteByte('"')
+	for _, character := range []byte(text) {
 		switch {
-		case c == '"' || c == '\\':
-			b.WriteByte('\\')
-			b.WriteByte(c)
-		case c < 32 || c == 127:
-			fmt.Fprintf(&b, "\\%03d", c)
+		case character == '"' || character == '\\':
+			builder.WriteByte('\\')
+			builder.WriteByte(character)
+		case character < 32 || character == 127:
+			fmt.Fprintf(&builder, "\\%03d", character)
 		default:
-			b.WriteByte(c)
+			builder.WriteByte(character)
 		}
 	}
-	b.WriteByte('"')
-	return b.String()
+	builder.WriteByte('"')
+	return builder.String()
 }
 
 func FQDN(name, zone string) string {
@@ -140,23 +150,27 @@ func FQDN(name, zone string) string {
 	if strings.HasSuffix(name, ".") {
 		return strings.TrimSuffix(name, ".")
 	}
-	if strings.EqualFold(name, zone) || strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(zone)) {
+	if strings.EqualFold(name, zone) ||
+		strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(zone)) {
 		return name
 	}
 	return name + "." + zone
 }
 
 func Reverse(ip string, zones []string) (zone, name string, ok bool) {
-	a, e := netip.ParseAddr(ip)
-	if e != nil || !a.Is4() {
+	address, currentErr := netip.ParseAddr(ip)
+	if currentErr != nil || !address.Is4() {
 		return "", "", false
 	}
-	reverse, _ := dns.ReverseAddr(ip)
+	reverse, err := dns.ReverseAddr(ip)
+	if err != nil {
+		panic("validated IPv4 address cannot be reversed: " + err.Error())
+	}
 	reverse = strings.TrimSuffix(reverse, ".")
-	for _, z := range zones {
-		z = strings.ToLower(strings.TrimSuffix(z, "."))
-		if (reverse == z || strings.HasSuffix(reverse, "."+z)) && len(z) > len(zone) {
-			zone = z
+	for _, value := range zones {
+		value = strings.ToLower(strings.TrimSuffix(value, "."))
+		if (reverse == value || strings.HasSuffix(reverse, "."+value)) && len(value) > len(zone) {
+			zone = value
 		}
 	}
 	if zone == "" {
@@ -175,11 +189,11 @@ func ReverseIP(name, zone string) string {
 	if !strings.HasSuffix(full, ".in-addr.arpa") {
 		return ""
 	}
-	p := strings.Split(strings.TrimSuffix(full, ".in-addr.arpa"), ".")
-	if len(p) != 4 {
+	values := strings.Split(strings.TrimSuffix(full, ".in-addr.arpa"), ".")
+	if len(values) != 4 {
 		return ""
 	}
-	ip := net.ParseIP(p[3] + "." + p[2] + "." + p[1] + "." + p[0])
+	ip := net.ParseIP(values[3] + "." + values[2] + "." + values[1] + "." + values[0])
 	if ip == nil {
 		return ""
 	}
