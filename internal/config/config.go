@@ -1,12 +1,8 @@
 package config
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +11,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/auth"
 	"github.com/lauritsk/sambatui/internal/directory"
 	"github.com/lauritsk/sambatui/internal/dnsrpc"
-	"github.com/lauritsk/sambatui/internal/privatefile"
 )
 
 const (
@@ -37,239 +32,213 @@ type Settings struct {
 	CAFile          string      `json:"ca_file"`
 	PasswordFile    string      `json:"password_file"`
 	AutoPTR         string      `json:"auto_ptr"`
-	Days            int         `json:"days"`
-	DisabledDays    int         `json:"disabled_days"`
-	NeverLoggedDays int         `json:"never_logged_days"`
+	Days            int32       `json:"days"`
+	DisabledDays    int32       `json:"disabled_days"`
+	NeverLoggedDays int32       `json:"never_logged_days"`
 	MaxRows         int         `json:"max_rows"`
 	LDAPMaxRows     int         `json:"ldap_max_rows"`
-	TimeoutSeconds  int         `json:"timeout_seconds"`
+	TimeoutSeconds  int32       `json:"timeout_seconds"`
 	Password        auth.Secret `json:"-"`
 	CacheContents   auth.Secret `json:"-"`
 	CacheIdentity   string      `json:"-"`
 }
 
-func (s Settings) Format(state fmt.State, verb rune) {
-	fmt.Fprintf(state, "Settings{DC:%q, Auth:%q, TLS:%q, credentials:[redacted]}", s.Server, s.Auth, s.Encryption)
+func (settings Settings) Format(state fmt.State, verb rune) {
+	fmt.Fprintf(
+		state,
+		"Settings{DC:%q, Auth:%q, TLS:%q, credentials:[redacted]}",
+		settings.Server,
+		settings.Auth,
+		settings.Encryption,
+	)
 }
 
 func Defaults() Settings {
-	return Settings{Auth: "password", DNSAuth: "ntlm", Encryption: "ldaps", AutoPTR: "ask", Days: 90, DisabledDays: 180, NeverLoggedDays: 30, MaxRows: 500, LDAPMaxRows: 200, TimeoutSeconds: 10}
+	return Settings{
+		Auth:            "password",
+		DNSAuth:         "ntlm",
+		Encryption:      "ldaps",
+		AutoPTR:         "ask",
+		Days:            90,
+		DisabledDays:    180,
+		NeverLoggedDays: 30,
+		MaxRows:         500,
+		LDAPMaxRows:     200,
+		TimeoutSeconds:  10,
+	}
 }
 
 func DefaultPath() (string, error) {
-	dir, e := os.UserConfigDir()
-	if e != nil {
-		return "", e
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "sambatui", "config.json"), nil
 }
 
 func Load(path string, env func(string) (string, bool)) (Settings, error) {
-	cfg := Defaults()
-	if err := loadFile(path, &cfg); err != nil {
-		return cfg, err
+	if env == nil {
+		panic("configuration loading requires an environment lookup")
 	}
-	vars := map[string]*string{"SERVER": &cfg.Server, "DOMAIN": &cfg.Domain, "ZONE": &cfg.LastZone, "USER": &cfg.User, "AUTH": &cfg.Auth, "DNS_PASSWORD_AUTH": &cfg.DNSAuth, "KRB5_CCACHE": &cfg.Cache, "KRB5_CONFIG": &cfg.KerberosConfig, "LDAP_BASE": &cfg.BaseDN, "LDAP_ENCRYPTION": &cfg.Encryption, "CA_FILE": &cfg.CAFile, "PASSWORD_FILE": &cfg.PasswordFile, "AUTO_PTR": &cfg.AutoPTR}
-	for name, dst := range vars {
-		if v, ok := env("SAMBATUI_" + name); ok {
-			*dst = v
+	settings := Defaults()
+	if err := loadFile(path, &settings); err != nil {
+		return settings, err
+	}
+	vars := map[string]*string{
+		"SERVER":            &settings.Server,
+		"DOMAIN":            &settings.Domain,
+		"ZONE":              &settings.LastZone,
+		"USER":              &settings.User,
+		"AUTH":              &settings.Auth,
+		"DNS_PASSWORD_AUTH": &settings.DNSAuth,
+		"KRB5_CCACHE":       &settings.Cache,
+		"KRB5_CONFIG":       &settings.KerberosConfig,
+		"LDAP_BASE":         &settings.BaseDN,
+		"LDAP_ENCRYPTION":   &settings.Encryption,
+		"CA_FILE":           &settings.CAFile,
+		"PASSWORD_FILE":     &settings.PasswordFile,
+		"AUTO_PTR":          &settings.AutoPTR,
+	}
+	for name, target := range vars {
+		if currentValue, ok := env("SAMBATUI_" + name); ok {
+			*target = currentValue
 		}
 	}
 	_, explicitCache := env("SAMBATUI_KRB5_CCACHE")
-	if cfg.Cache == "" && !explicitCache {
-		cfg.Cache, _ = env("KRB5CCNAME")
+	if settings.Cache == "" && !explicitCache {
+		settings.Cache, _ = env("KRB5CCNAME")
 	}
-	if cfg.PasswordFile == "" {
-		cfg.PasswordFile = filepath.Join(filepath.Dir(path), "password")
+	if settings.PasswordFile == "" {
+		settings.PasswordFile = filepath.Join(filepath.Dir(path), "password")
 	}
-	if cfg.BaseDN == "" && cfg.Domain != "" {
-		cfg.BaseDN = "DC=" + strings.ReplaceAll(strings.TrimSuffix(cfg.Domain, "."), ".", ",DC=")
+	if settings.BaseDN == "" && settings.Domain != "" {
+		settings.BaseDN = "DC=" +
+			strings.ReplaceAll(strings.TrimSuffix(settings.Domain, "."), ".", ",DC=")
 	}
 	if value, ok := env("SAMBATUI_PASSWORD"); ok {
-		cfg.Password = auth.NewSecret(value)
+		settings.Password = auth.NewSecret(value)
 	} else {
-		password, e := ReadPassword(cfg.PasswordFile)
-		if e != nil && !errors.Is(e, os.ErrNotExist) {
-			return cfg, e
+		password, currentErr := ReadPassword(settings.PasswordFile)
+		if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+			return settings, currentErr
 		}
-		cfg.Password = auth.NewSecret(password)
+		settings.Password = auth.NewSecret(password)
 	}
-	if e := cfg.Validate(false); e != nil {
-		return cfg, e
+	if currentErr := settings.Validate(false); currentErr != nil {
+		return settings, currentErr
 	}
-	return cfg.Freeze()
+	return settings.Freeze()
 }
 
-func loadFile(path string, settings *Settings) error {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
+func (settings Settings) Validate(connection bool) error {
+	if err := settings.validateSize(); err != nil {
 		return err
 	}
-	defer file.Close()
-
-	data, err := io.ReadAll(io.LimitReader(file, configBytesMax+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > configBytesMax {
-		return errors.New("configuration exceeds 1 MiB")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(settings); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("invalid configuration: expected exactly one JSON object")
-	}
-	return nil
-}
-
-func (s Settings) Validate(connection bool) error {
-	if s.Auth != "password" && s.Auth != "kerberos" {
+	if settings.Auth != "password" && settings.Auth != "kerberos" {
 		return errors.New("auth must be password or kerberos")
 	}
-	if s.DNSAuth != "ntlm" && s.DNSAuth != "kerberos" {
-		return errors.New("dns_password_auth must be ntlm or kerberos; no automatic authentication downgrade")
+	if settings.DNSAuth != "ntlm" && settings.DNSAuth != "kerberos" {
+		return errors.New(
+			"dns_password_auth must be ntlm or kerberos; no automatic " +
+				"authentication downgrade",
+		)
 	}
-	if s.Encryption != "ldaps" && s.Encryption != "starttls" {
-		return errors.New("LDAP encryption must be ldaps or starttls; certificate verification cannot be disabled")
+	if settings.Encryption != "ldaps" && settings.Encryption != "starttls" {
+		return errors.New(
+			"LDAP encryption must be ldaps or starttls; certificate " +
+				"verification cannot be disabled",
+		)
 	}
-	if s.AutoPTR != "off" && s.AutoPTR != "ask" && s.AutoPTR != "on" {
+	if settings.AutoPTR != "off" && settings.AutoPTR != "ask" && settings.AutoPTR != "on" {
 		return errors.New("auto_ptr must be off, ask or on")
 	}
-	if s.TimeoutSeconds < 1 || s.TimeoutSeconds > 300 {
+	if settings.TimeoutSeconds < 1 || settings.TimeoutSeconds > 300 {
 		return errors.New("timeout_seconds must be 1–300")
 	}
-	if s.Days < 1 || s.Days > 100000 || s.DisabledDays < 1 || s.DisabledDays > 100000 || s.NeverLoggedDays < 1 || s.NeverLoggedDays > 100000 || s.MaxRows < 1 || s.MaxRows > 5000 || s.LDAPMaxRows < 1 || s.LDAPMaxRows > 5000 {
-		return errors.New("day thresholds must be 1–100000; max_rows and ldap_max_rows must be 1–5000")
+	for _, days := range []int32{settings.Days, settings.DisabledDays, settings.NeverLoggedDays} {
+		if days < 1 || days > 100000 {
+			return errors.New("day thresholds must be 1–100000")
+		}
+	}
+	for _, rows := range []int{settings.MaxRows, settings.LDAPMaxRows} {
+		if rows < 1 || rows > 5000 {
+			return errors.New("max_rows and ldap_max_rows must be 1–5000")
+		}
 	}
 	if !connection {
 		return nil
 	}
-	if _, _, e := directory.Endpoint(s.LDAP()); e != nil {
-		return e
+	if _, _, currentErr := directory.Endpoint(settings.LDAP()); currentErr != nil {
+		return currentErr
 	}
-	if s.BaseDN == "" || !directory.InScope(s.BaseDN, s.BaseDN) {
+	if settings.BaseDN == "" || !directory.InScope(settings.BaseDN, settings.BaseDN) {
 		return errors.New("valid LDAP base DN required")
 	}
-	if s.Auth == "password" && (s.User == "" || s.Password.Reveal() == "") {
+	if settings.Auth == "password" && (settings.User == "" || settings.Password.Reveal() == "") {
 		return errors.New("enter username and password")
 	}
-	if s.Auth == "kerberos" {
-		path, e := auth.CachePath(s.Cache)
-		if e != nil {
-			return e
+	if settings.Auth == "kerberos" {
+		path, currentErr := auth.CachePath(settings.Cache)
+		if currentErr != nil {
+			return currentErr
 		}
-		if _, e = os.Stat(path); e != nil && s.CacheContents.Reveal() == "" {
-			return fmt.Errorf("selected Kerberos cache: %w", e)
+		if settings.CacheContents.Reveal() == "" {
+			if _, currentErr = os.Stat(path); currentErr != nil {
+				return fmt.Errorf("selected Kerberos cache: %w", currentErr)
+			}
 		}
 	}
 	return nil
 }
 
-func (s Settings) Freeze() (Settings, error) {
-	s.CacheContents = auth.Secret{}
-	s.CacheIdentity = ""
-	if s.Auth == "kerberos" {
-		blob, identity, e := auth.CacheSnapshot(s.Cache)
-		if e != nil {
-			return s, e
+func (settings Settings) Freeze() (Settings, error) {
+	if err := settings.Validate(false); err != nil {
+		return settings, err
+	}
+	settings.CacheContents = auth.Secret{}
+	settings.CacheIdentity = ""
+	if settings.Auth == "kerberos" {
+		blob, identity, currentErr := auth.CacheSnapshot(settings.Cache)
+		if currentErr != nil {
+			return settings, currentErr
 		}
-		s.CacheContents = blob
-		s.CacheIdentity = identity
+		settings.CacheContents = blob
+		settings.CacheIdentity = identity
 	}
-	return s, nil
+	return settings, nil
 }
 
-func (s Settings) LDAP() directory.Config {
-	return directory.Config{Server: s.Server, BaseDN: s.BaseDN, User: s.User, Password: s.Password, Encryption: s.Encryption, Auth: s.Auth, Cache: s.Cache, CacheContents: s.CacheContents, KerberosConfig: s.KerberosConfig, CAFile: s.CAFile, PageSize: 200, Timeout: time.Duration(s.TimeoutSeconds) * time.Second}
+func (settings Settings) LDAP() directory.Config {
+	return directory.Config{
+		Server:         settings.Server,
+		BaseDN:         settings.BaseDN,
+		User:           settings.User,
+		Password:       settings.Password,
+		Encryption:     settings.Encryption,
+		Auth:           settings.Auth,
+		Cache:          settings.Cache,
+		CacheContents:  settings.CacheContents,
+		KerberosConfig: settings.KerberosConfig,
+		CAFile:         settings.CAFile,
+		PageSize:       200,
+		Timeout:        time.Duration(settings.TimeoutSeconds) * time.Second,
+	}
 }
 
-func (s Settings) DNS() dnsrpc.Config {
-	host, _, e := directory.Endpoint(s.LDAP())
-	if e != nil {
-		host = s.Server
+func (settings Settings) DNS() dnsrpc.Config {
+	host, _, err := directory.Endpoint(settings.LDAP())
+	if err != nil {
+		host = settings.Server
 	}
-	return dnsrpc.Config{Server: host, User: s.User, Password: dnsrpc.NewPassword(s.Password.Reveal()), Auth: s.Auth, PasswordAuth: s.DNSAuth, Cache: s.Cache, CacheContents: s.CacheContents, KerberosConfig: s.KerberosConfig, Timeout: time.Duration(s.TimeoutSeconds) * time.Second}
-}
-
-func Save(path string, s Settings) error {
-	if e := s.Validate(false); e != nil {
-		return e
+	return dnsrpc.Config{
+		Server:         host,
+		User:           settings.User,
+		Password:       dnsrpc.NewPassword(settings.Password.Reveal()),
+		Auth:           settings.Auth,
+		PasswordAuth:   settings.DNSAuth,
+		Cache:          settings.Cache,
+		CacheContents:  settings.CacheContents,
+		KerberosConfig: settings.KerberosConfig,
+		Timeout:        time.Duration(settings.TimeoutSeconds) * time.Second,
 	}
-	b, e := json.MarshalIndent(s, "", "  ")
-	if e != nil {
-		return e
-	}
-	if len(b)+1 > configBytesMax {
-		return errors.New("configuration exceeds 1 MiB")
-	}
-	return PrivateWrite(path, append(b, '\n'))
-}
-
-func SavePassword(path string, password auth.Secret) error {
-	if strings.ContainsAny(password.Reveal(), "\r\n") {
-		return errors.New("password files support one line only")
-	}
-	// Include the persisted newline in the same bound enforced by ReadPassword.
-	if len(password.Reveal())+1 > passwordLineBytesMax {
-		return errors.New("password first line exceeds 1 MiB")
-	}
-	return PrivateWrite(path, []byte(password.Reveal()+"\n"))
-}
-
-func ReadPassword(path string) (string, error) {
-	f, e := privatefile.Open(path)
-	if e != nil {
-		return "", e
-	}
-	defer f.Close()
-	// Only the first line, without its line ending. All other whitespace is data.
-	line, e := bufio.NewReader(io.LimitReader(f, passwordLineBytesMax+1)).ReadString('\n')
-	if e != nil && !errors.Is(e, io.EOF) {
-		return "", e
-	}
-	if len(line) > passwordLineBytesMax {
-		return "", errors.New("password first line exceeds 1 MiB")
-	}
-	return strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"), nil
-}
-
-func PrivateWrite(path string, b []byte) error {
-	parent := filepath.Dir(path)
-	if e := os.MkdirAll(parent, 0o700); e != nil {
-		return e
-	}
-	f, e := os.CreateTemp(parent, ".sambatui-*")
-	if e != nil {
-		return e
-	}
-	temp := f.Name()
-	defer os.Remove(temp)
-	if e = f.Chmod(0o600); e == nil {
-		_, e = f.Write(b)
-	}
-	if e == nil {
-		e = f.Sync()
-	}
-	closeErr := f.Close()
-	if e == nil {
-		e = closeErr
-	}
-	if e != nil {
-		return e
-	}
-	if e = os.Rename(temp, path); e != nil {
-		return e
-	}
-	dir, e := os.Open(parent)
-	if e != nil {
-		return e
-	}
-	defer dir.Close()
-	return dir.Sync()
 }

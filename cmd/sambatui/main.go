@@ -19,64 +19,79 @@ import (
 var version = "development"
 
 func main() {
-	if e := run(); e != nil {
-		fmt.Fprintln(os.Stderr, "sambatui:", tui.Literal(e.Error()))
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "sambatui:", tui.Literal(err.Error()))
 		os.Exit(1)
 	}
 }
 
 func run() error {
-	path, e := config.DefaultPath()
-	if e != nil {
-		return e
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
 	}
-	configPath := flag.String("config", path, "native JSON preferences path (password stored separately)")
+	configPath := flag.String(
+		"config",
+		path,
+		"native JSON preferences path (password stored separately)",
+	)
 	showVersion := flag.Bool("version", false, "show version")
-	check := flag.Bool("check", false, "check authentication, enumerate zones and verify LDAP TLS/bind without writes")
+	check := flag.Bool(
+		"check",
+		false,
+		"check authentication, enumerate zones and verify LDAP "+"TLS/bind without writes",
+	)
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("sambatui", version)
 		return nil
 	}
-	s, e := config.Load(*configPath, os.LookupEnv)
-	if e != nil {
-		return e
+	settings, err := config.Load(*configPath, os.LookupEnv)
+	if err != nil {
+		return err
 	}
-	redact := func(e error) error {
-		if e == nil {
+	redact := func(err error) error {
+		if err == nil {
 			return nil
 		}
-		v := e.Error()
-		if password := s.Password.Reveal(); password != "" {
-			v = strings.ReplaceAll(v, password, "[redacted]")
+		value := err.Error()
+		if password := settings.Password.Reveal(); password != "" {
+			value = strings.ReplaceAll(value, password, "[redacted]")
 		}
-		return fmt.Errorf("%s", v)
+		return fmt.Errorf("%s", value)
 	}
 	if *check {
-		if e = s.Validate(true); e != nil {
-			return redact(e)
+		if err = settings.Validate(true); err != nil {
+			return redact(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.TimeoutSeconds)*time.Second)
+		operationContext, cancel := context.WithTimeout(
+			context.Background(),
+			time.Duration(settings.TimeoutSeconds)*time.Second,
+		)
 		defer cancel()
-		zones, e := (backend.Native{}).Zones(ctx, s)
-		if e != nil {
-			return redact(e)
+		zones, err := (backend.Native{}).Zones(operationContext, settings)
+		if err != nil {
+			return redact(err)
 		}
-		if e = directory.New(s.LDAP()).Check(ctx); e != nil {
-			return redact(e)
+		if err = directory.New(settings.LDAP()).Check(operationContext); err != nil {
+			return redact(err)
 		}
-		fmt.Printf("Authenticated DNS management: %d zones; certificate-verified LDAP bind succeeded. No writes performed.\n", len(zones))
+		fmt.Printf(
+			"Authenticated DNS management: %d zones; certificate-verified "+
+				"LDAP bind succeeded. No writes performed.\n",
+			len(zones),
+		)
 		return nil
 	}
-	store, e := journal.Open(*configPath)
-	if e != nil {
-		return e
+	store, err := journal.Open(*configPath)
+	if err != nil {
+		return err
 	}
 	defer store.Close()
-	model := tui.New(s, *configPath, nil)
-	if e = model.UseJournal(store); e != nil {
-		return e
+	model := tui.New(settings, *configPath, nil)
+	if err = model.UseJournal(store); err != nil {
+		return err
 	}
-	_, e = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	return redact(e)
+	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	return redact(err)
 }

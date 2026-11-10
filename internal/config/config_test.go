@@ -86,7 +86,7 @@ func TestEmptyExplicitCacheDoesNotUseAmbientIdentity(t *testing.T) {
 }
 
 func TestThresholdsCannotOverflowRemediationCutoffs(t *testing.T) {
-	for _, days := range []int{-1, 0, 100001, int(^uint(0) >> 1)} {
+	for _, days := range []int32{-1, 0, 100001, 1<<31 - 1} {
 		s := Defaults()
 		s.Days = days
 		if e := s.Validate(false); e == nil {

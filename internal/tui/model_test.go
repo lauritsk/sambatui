@@ -77,7 +77,7 @@ func TestConfirmationHasOriginalContextAndNeedsExplicitYes(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("confirmed write not scheduled")
 	}
-	old := m.cfg
+	old := m.settings
 	next := old
 	next.Server = "different-dc"
 	next.Password = auth.NewSecret("new secret")
@@ -98,14 +98,14 @@ func TestConnectionChangeDiscardsLateReadsAndFailedRefreshLeavesNoSelection(t *t
 	m.selected[0] = true
 	snap := m.state.Snapshot()
 	m.readID = 7
-	cfg := m.cfg
+	cfg := m.settings
 	cfg.Server = "another-dc"
 	m.setConnection(cfg)
-	m.Update(readResult{gen: snap.Generation, id: 7, kind: "dns", records: []dnsrpc.Row{{Name: "late"}}})
+	m.Update(readResult{generation: snap.Generation, requestID: 7, kind: "dns", records: []dnsrpc.Row{{Name: "late"}}})
 	if len(m.records) != 0 || len(m.selected) != 0 {
 		t.Fatal("stale rows or selection survived connection change")
 	}
-	m.Update(readResult{gen: m.state.Snapshot().Generation, id: m.readID, kind: "dns", err: errors.New("network down")})
+	m.Update(readResult{generation: m.state.Snapshot().Generation, requestID: m.readID, kind: "dns", err: errors.New("network down")})
 	if len(m.records) != 0 || len(m.selected) != 0 {
 		t.Fatal("refresh failure restored old selection")
 	}
