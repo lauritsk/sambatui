@@ -55,7 +55,9 @@ func TestValidationAndPTR(t *testing.T) {
 	if !ok || z != "2.0.192.in-addr.arpa" || n != "10" {
 		t.Fatal(z, n, ok)
 	}
-	if ip := dnsdata.ReverseIP(n, z); ip != "192.0.2.10" {
-		t.Fatal(ip)
+	for _, ip := range []string{"192.0.2.10", "2001:db8::10", "invalid"} {
+		if _, _, ok := dnsdata.Reverse(ip, nil); ok {
+			t.Fatalf("reverse target guessed without an existing zone: %q", ip)
+		}
 	}
 }

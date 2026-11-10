@@ -3,7 +3,6 @@ package dnsdata
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -174,28 +173,11 @@ func Reverse(ip string, zones []string) (zone, name string, ok bool) {
 		}
 	}
 	if zone == "" {
-		parts := strings.SplitN(reverse, ".", 2)
-		return parts[1], parts[0], true
+		return "", "", false
 	}
 	name = strings.TrimSuffix(reverse, "."+zone)
 	if reverse == zone {
 		name = "@"
 	}
 	return zone, name, true
-}
-
-func ReverseIP(name, zone string) string {
-	full := strings.ToLower(FQDN(name, zone))
-	if !strings.HasSuffix(full, ".in-addr.arpa") {
-		return ""
-	}
-	values := strings.Split(strings.TrimSuffix(full, ".in-addr.arpa"), ".")
-	if len(values) != 4 {
-		return ""
-	}
-	ip := net.ParseIP(values[3] + "." + values[2] + "." + values[1] + "." + values[0])
-	if ip == nil {
-		return ""
-	}
-	return ip.String()
 }
