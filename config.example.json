@@ -1,0 +1,21 @@
+{
+  "server": "dc01.example.com",
+  "domain": "example.com",
+  "base_dn": "DC=example,DC=com",
+  "user": "administrator@example.com",
+  "auth": "password",
+  "dns_password_auth": "ntlm",
+  "encryption": "ldaps",
+  "ca_file": "/absolute/path/ad-ca.pem",
+  "password_file": "/absolute/path/private/password",
+  "cache": "",
+  "kerberos_config": "",
+  "last_zone": "example.com",
+  "auto_ptr": "ask",
+  "days": 90,
+  "disabled_days": 180,
+  "never_logged_days": 30,
+  "max_rows": 500,
+  "ldap_max_rows": 200,
+  "timeout_seconds": 10
+}
