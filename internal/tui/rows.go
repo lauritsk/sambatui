@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/directory"
 )
 
@@ -83,40 +81,6 @@ func (model *Model) move(delta int) {
 	} else {
 		model.cursor = max(0, min(model.cursor+delta, len(model.visible())-1))
 	}
-}
-
-func (model *Model) sideLabels() []string {
-	if model.mode != "ldap" {
-		return model.zones
-	}
-	out := []string{"↑ Configured base", "Users", "Groups", "Computers", "OUs", "All"}
-	for _, entry := range model.folders {
-		out = append(out, entry.Name)
-	}
-	return out
-}
-
-func (model *Model) activateSide() tea.Cmd {
-	if model.mode != "ldap" {
-		if model.sideCursor < len(model.zones) {
-			model.zone = model.zones[model.sideCursor]
-			model.settings.LastZone = model.zone
-			if err := config.Save(model.configPath, model.settings); err != nil {
-				model.error(err)
-			}
-			model.setMode("dns")
-			return model.load("dns")
-		}
-		return nil
-	}
-	if model.sideCursor == 0 {
-		model.base = model.settings.BaseDN
-	} else if model.sideCursor < 6 {
-		model.kind = []string{"users", "groups", "computers", "ous", "all"}[model.sideCursor-1]
-	} else if model.sideCursor-6 < len(model.folders) {
-		model.base = model.folders[model.sideCursor-6].DN
-	}
-	return model.load("ldap")
 }
 
 func (model *Model) showDetails(text string) {
