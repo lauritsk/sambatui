@@ -88,30 +88,57 @@ func Endpoint(cfg Config) (host, address string, err error) {
 }
 
 func Dial(ctx context.Context, cfg Config) (Session, error) {
-	host, address, e := Endpoint(cfg)
-	if e != nil {
-		return nil, e
+	host, address, err := Endpoint(cfg)
+	if err != nil {
+		return nil, err
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Second
 	}
-	ca, e := x509.SystemCertPool()
-	if e != nil {
-		ca = x509.NewCertPool()
+	tlsConfig, err := dialTLSConfig(cfg, host)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialTLS(ctx, cfg, address, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+
+	session, err := dialBind(ctx, cfg, host, conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return session, nil
+}
+
+func dialTLSConfig(cfg Config, host string) (*tls.Config, error) {
+	certificates, err := x509.SystemCertPool()
+	if err != nil {
+		certificates = x509.NewCertPool()
 	}
 	if cfg.CAFile != "" {
-		b, e := os.ReadFile(cfg.CAFile)
-		if e != nil {
-			return nil, fmt.Errorf("read CA certificate: %w", e)
+		data, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CA certificate: %w", err)
 		}
-		if !ca.AppendCertsFromPEM(b) {
+		if !certificates.AppendCertsFromPEM(data) {
 			return nil, errors.New("CA file contains no certificates")
 		}
 	}
-	tc := &tls.Config{ServerName: host, RootCAs: ca, MinVersion: tls.VersionTLS12}
-	raw, e := (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp", address)
-	if e != nil {
-		return nil, e
+	return &tls.Config{
+		ServerName: host, RootCAs: certificates, MinVersion: tls.VersionTLS12,
+	}, nil
+}
+
+func dialTLS(
+	ctx context.Context, cfg Config, address string, tlsConfig *tls.Config,
+) (*tls.Conn, error) {
+	raw, err := (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, err
 	}
 	success := false
 	defer func() {
@@ -119,28 +146,37 @@ func Dial(ctx context.Context, cfg Config) (Session, error) {
 			raw.Close()
 		}
 	}()
-	// Bound handshake as well as application requests. Never bind before TLS.
-	raw.SetDeadline(time.Now().Add(cfg.Timeout))
 	stop := context.AfterFunc(ctx, func() { raw.Close() })
 	defer stop()
+
+	// Bound StartTLS and handshake as well as application requests. Never bind
+	// before certificate verification; deadline failures must fail closed.
+	if err = raw.SetDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+		return nil, err
+	}
 	if cfg.Encryption == "starttls" {
-		if e = startTLS(raw); e != nil {
-			return nil, fmt.Errorf("LDAP StartTLS: %w", e)
+		if err = startTLS(raw); err != nil {
+			return nil, fmt.Errorf("LDAP StartTLS: %w", err)
 		}
 	}
-	conn := tls.Client(raw, tc)
-	if e = conn.HandshakeContext(ctx); e != nil {
-		return nil, fmt.Errorf("LDAP TLS certificate verification/handshake: %w", e)
+	conn := tls.Client(raw, tlsConfig)
+	if err = conn.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("LDAP TLS certificate verification/handshake: %w", err)
 	}
-	st := conn.ConnectionState()
-	if len(st.VerifiedChains) == 0 {
+	if len(conn.ConnectionState().VerifiedChains) == 0 {
 		return nil, errors.New("LDAP TLS certificate not verified")
 	}
+	success = true
+	return conn, nil
+}
+
+func dialBind(ctx context.Context, cfg Config, host string, conn *tls.Conn) (Session, error) {
 	var binding []byte
+	var err error
 	if cfg.Auth == "kerberos" || strings.Contains(cfg.User, `\`) {
-		binding, e = auth.ChannelBinding(st.PeerCertificates[0])
-		if e != nil {
-			return nil, e
+		binding, err = auth.ChannelBinding(conn.ConnectionState().PeerCertificates[0])
+		if err != nil {
+			return nil, err
 		}
 	}
 	ntlmBound := false
@@ -148,39 +184,40 @@ func Dial(ctx context.Context, cfg Config) (Session, error) {
 		if cfg.Password.Reveal() == "" {
 			return nil, errors.New("LDAP requires a nonempty password")
 		}
-		if e = bindNTLM(ctx, conn, cfg.User, cfg.Password, "ldap/"+host, binding); e != nil {
-			return nil, fmt.Errorf("LDAP NTLM bind: %w", e)
+		if err = bindNTLM(ctx, conn, cfg.User, cfg.Password, "ldap/"+host, binding); err != nil {
+			return nil, fmt.Errorf("LDAP NTLM bind: %w", err)
 		}
 		ntlmBound = true
 	}
-	raw.SetDeadline(time.Time{})
-	l := ldap.NewConn(conn, true)
-	l.SetTimeout(cfg.Timeout)
-	l.Start()
+	if err = conn.SetDeadline(time.Time{}); err != nil {
+		return nil, err
+	}
+	session := ldap.NewConn(conn, true)
+	session.SetTimeout(cfg.Timeout)
+	session.Start()
 	switch cfg.Auth {
 	case "", "password":
 		if cfg.Password.Reveal() == "" || cfg.User == "" {
-			e = errors.New("LDAP requires username and nonempty password")
-			break
-		}
-		if !ntlmBound {
-			e = l.Bind(cfg.User, cfg.Password.Reveal())
+			err = errors.New("LDAP requires username and nonempty password")
+		} else if !ntlmBound {
+			err = session.Bind(cfg.User, cfg.Password.Reveal())
 		}
 	case "kerberos":
-		var k *auth.Kerberos
-		k, e = auth.NewKerberos(ctx, cfg.Cache, cfg.KerberosConfig, cfg.CacheContents, binding, cfg.Timeout)
-		if e == nil {
-			e = l.GSSAPIBind(k, "ldap/"+host, "")
+		var kerberos *auth.Kerberos
+		kerberos, err = auth.NewKerberos(
+			ctx, cfg.Cache, cfg.KerberosConfig, cfg.CacheContents, binding, cfg.Timeout,
+		)
+		if err == nil {
+			err = session.GSSAPIBind(kerberos, "ldap/"+host, "")
 		}
 	default:
-		e = errors.New("LDAP auth must be password or kerberos")
+		err = errors.New("LDAP auth must be password or kerberos")
 	}
-	if e != nil {
-		l.Close()
-		return nil, fmt.Errorf("LDAP bind: %w", e)
+	if err != nil {
+		session.Close()
+		return nil, fmt.Errorf("LDAP bind: %w", err)
 	}
-	success = true
-	return l, nil
+	return session, nil
 }
 
 func (c *Client) with(ctx context.Context, f func(Session) error) error {
@@ -270,74 +307,104 @@ func normalize(e *ldap.Entry) Entry {
 	return out
 }
 
+const (
+	searchRowsMax     = 5000
+	searchPagesMax    = 10000
+	searchPageDefault = 200
+)
+
 func (c *Client) Search(ctx context.Context, base, kind, text string, limit int) ([]Entry, error) {
+	if limit < 0 || limit > searchRowsMax {
+		return nil, fmt.Errorf("LDAP row limit must be 0–%d", searchRowsMax)
+	}
 	if base == "" {
 		base = c.cfg.BaseDN
 	}
 	if !InScope(base, c.cfg.BaseDN) {
 		return nil, errors.New("LDAP search base outside configured scope")
 	}
-	filter, e := Filter(kind, text)
-	if e != nil {
-		return nil, e
+	filter, err := Filter(kind, text)
+	if err != nil {
+		return nil, err
 	}
 	scope := ldap.ScopeWholeSubtree
 	if kind == "containers" {
 		scope = ldap.ScopeSingleLevel
 	}
-	rows := []Entry{}
-	e = c.with(ctx, func(s Session) error {
-		page := c.cfg.PageSize
-		if page == 0 {
-			page = 200
-		}
-		control := ldap.NewControlPaging(page)
-		pages := 0
-		for {
-			if e := ctx.Err(); e != nil {
-				return e
-			}
-			req := ldap.NewSearchRequest(base, scope, ldap.NeverDerefAliases, 0, 0, false, filter, append([]string(nil), Attributes...), []ldap.Control{control, ldap.NewControlString(ldap.ControlTypeMicrosoftDomainScope, true, "")})
-			result, e := s.Search(req)
-			if e != nil {
-				return fmt.Errorf("LDAP search: %w", e)
-			}
-			if len(result.Referrals) > 0 {
-				return errors.New("LDAP search returned referrals; no automatic referral chasing or partial-success result is allowed. Select the appropriate individual DC")
-			}
-			for _, entry := range result.Entries {
-				if !InScope(entry.DN, base) {
-					return errors.New("LDAP server returned an entry outside the selected search scope")
-				}
-				if e := expandRanges(ctx, s, entry); e != nil {
-					return e
-				}
-				rows = append(rows, normalize(entry))
-				if limit > 0 && len(rows) >= limit {
-					return nil
-				}
-			}
-			pc := ldap.FindControl(result.Controls, ldap.ControlTypePaging)
-			if pc == nil {
-				return nil
-			}
-			p, ok := pc.(*ldap.ControlPaging)
-			if !ok {
-				return errors.New("LDAP malformed paging control")
-			}
-			if len(p.Cookie) == 0 {
-				return nil
-			}
-			pages++
-			if pages > 10000 {
-				return errors.New("LDAP paging exceeds 10000 pages")
-			}
-			// Cookies are opaque: Samba may reuse the same handle on successive pages.
-			control.SetCookie(append([]byte(nil), p.Cookie...))
-		}
+	pageSize := c.cfg.PageSize
+	if pageSize == 0 {
+		pageSize = searchPageDefault
+	}
+	if pageSize > searchRowsMax {
+		return nil, errors.New("LDAP page size exceeds read safety limit")
+	}
+	request := ldap.NewSearchRequest(
+		base, scope, ldap.NeverDerefAliases, 0, 0, false, filter,
+		append([]string(nil), Attributes...), nil,
+	)
+	var rows []Entry
+	err = c.with(ctx, func(session Session) error {
+		var err error
+		rows, err = searchPages(ctx, session, request, pageSize, limit)
+		return err
 	})
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
 	return rows, nil
+}
+
+func searchPages(
+	ctx context.Context, session Session, request *ldap.SearchRequest, pageSize uint32, limit int,
+) ([]Entry, error) {
+	control := ldap.NewControlPaging(pageSize)
+	request.Controls = []ldap.Control{
+		control, ldap.NewControlString(ldap.ControlTypeMicrosoftDomainScope, true, ""),
+	}
+	rows := []Entry{}
+	for page := 0; page < searchPagesMax; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result, err := session.Search(request)
+		if err != nil {
+			return nil, fmt.Errorf("LDAP search: %w", err)
+		}
+		if result == nil {
+			return nil, errors.New("LDAP search returned no result")
+		}
+		if len(result.Referrals) > 0 {
+			return nil, errors.New("LDAP search returned referrals; select the appropriate individual DC")
+		}
+		for _, entry := range result.Entries {
+			if entry == nil || !InScope(entry.DN, request.BaseDN) {
+				return nil, errors.New("LDAP server returned an entry outside the selected search scope")
+			}
+			// A zero caller limit requests a complete result, not unbounded memory.
+			if len(rows) == searchRowsMax {
+				return nil, errors.New("LDAP search exceeds read safety limit; no partial result returned")
+			}
+			if err := expandRanges(ctx, session, entry); err != nil {
+				return nil, err
+			}
+			rows = append(rows, normalize(entry))
+			if limit > 0 && len(rows) == limit {
+				return rows, nil
+			}
+		}
+		paging := ldap.FindControl(result.Controls, ldap.ControlTypePaging)
+		if paging == nil {
+			return rows, nil
+		}
+		next, ok := paging.(*ldap.ControlPaging)
+		if !ok || next == nil {
+			return nil, errors.New("LDAP malformed paging control")
+		}
+		if len(next.Cookie) == 0 {
+			return rows, nil
+		}
+		// Cookies are opaque: Samba may reuse the same handle on successive pages.
+		control.SetCookie(append([]byte(nil), next.Cookie...))
+	}
+	return nil, fmt.Errorf("LDAP paging exceeds %d pages", searchPagesMax)
 }
