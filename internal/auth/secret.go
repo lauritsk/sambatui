@@ -19,13 +19,25 @@ func NewSecret(value string) Secret {
 	return Secret{&secretValue{value}}
 }
 
-func (s Secret) Reveal() string {
-	if s.value == nil {
+func (secret Secret) Reveal() string {
+	if secret.value == nil {
 		return ""
 	}
-	return s.value.plaintext
+	return secret.value.plaintext
 }
-func (Secret) String() string                    { return "[redacted]" }
-func (Secret) GoString() string                  { return "[redacted]" }
-func (Secret) Format(state fmt.State, verb rune) { io.WriteString(state, "[redacted]") }
-func (Secret) MarshalJSON() ([]byte, error)      { return []byte(`"[redacted]"`), nil }
+
+func (Secret) String() string {
+	return "[redacted]"
+}
+
+func (Secret) GoString() string {
+	return "[redacted]"
+}
+
+func (Secret) Format(state fmt.State, verb rune) {
+	io.WriteString(state, "[redacted]")
+}
+
+func (Secret) MarshalJSON() ([]byte, error) {
+	return []byte(`"[redacted]"`), nil
+}

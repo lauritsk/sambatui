@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/oiweiwei/gokrb5.fork/v9/client"
-	"github.com/oiweiwei/gokrb5.fork/v9/config"
 	"github.com/oiweiwei/gokrb5.fork/v9/crypto"
 	"github.com/oiweiwei/gokrb5.fork/v9/gssapi"
 	"github.com/oiweiwei/gokrb5.fork/v9/iana/flags"
@@ -26,40 +24,48 @@ import (
 func CachePath(selector string) (string, error) {
 	path := strings.TrimPrefix(selector, "FILE:")
 	if path == "" || strings.Contains(path, ":") {
-		return "", errors.New("select an explicit FILE Kerberos cache; other cache types are unsupported")
+		return "", errors.New(
+			"select an explicit FILE Kerberos cache; other cache types " + "are unsupported",
+		)
 	}
 	return path, nil
 }
 
 type boundedKDC struct {
-	ctx     context.Context
+	context context.Context
 	timeout time.Duration
 }
 
-func (d boundedKDC) Dial(network, address string) (net.Conn, error) {
-	c, e := (&net.Dialer{Timeout: d.timeout}).DialContext(d.ctx, network, address)
-	if e != nil {
-		return nil, e
+func (dialer boundedKDC) Dial(network, address string) (net.Conn, error) {
+	connection, err := (&net.Dialer{Timeout: dialer.timeout}).DialContext(
+		dialer.context,
+		network,
+		address,
+	)
+	if err != nil {
+		return nil, err
 	}
-	end := time.Now().Add(d.timeout)
-	if t, ok := d.ctx.Deadline(); ok && t.Before(end) {
-		end = t
+	end := time.Now().Add(dialer.timeout)
+	if timestamp, ok := dialer.context.Deadline(); ok && timestamp.Before(end) {
+		end = timestamp
 	}
-	wrapped := &boundedConn{Conn: c, end: end}
-	wrapped.stop = context.AfterFunc(d.ctx, func() { c.Close() })
-	if e = wrapped.SetDeadline(end); e != nil {
+	wrapped := &boundedConn{Conn: connection, end: end}
+	wrapped.stop = context.AfterFunc(dialer.context, func() {
+		connection.Close()
+	})
+	if err = wrapped.SetDeadline(end); err != nil {
 		wrapped.Close()
-		return nil, e
+		return nil, err
 	}
 	return wrapped, nil
 }
 
 // NewKDCDialer provides cancellation and a deadline cap that protocol-library
 // SetDeadline calls cannot extend. It preserves UDP's PacketConn interface.
-func NewKDCDialer(ctx context.Context, timeout time.Duration) interface {
+func NewKDCDialer(operationContext context.Context, timeout time.Duration) interface {
 	Dial(string, string) (net.Conn, error)
 } {
-	return boundedKDC{ctx, timeout}
+	return boundedKDC{operationContext, timeout}
 }
 
 type boundedConn struct {
@@ -68,45 +74,53 @@ type boundedConn struct {
 	stop func() bool
 }
 
-func (c *boundedConn) cap(t time.Time) time.Time {
-	if t.IsZero() || t.After(c.end) {
-		return c.end
+func (connection *boundedConn) cap(timestamp time.Time) time.Time {
+	if timestamp.IsZero() || timestamp.After(connection.end) {
+		return connection.end
 	}
-	return t
-}
-func (c *boundedConn) SetDeadline(t time.Time) error     { return c.Conn.SetDeadline(c.cap(t)) }
-func (c *boundedConn) SetReadDeadline(t time.Time) error { return c.Conn.SetReadDeadline(c.cap(t)) }
-
-func (c *boundedConn) SetWriteDeadline(t time.Time) error { return c.Conn.SetWriteDeadline(c.cap(t)) }
-
-func (c *boundedConn) Close() error {
-	if c.stop != nil {
-		c.stop()
-	}
-	return c.Conn.Close()
+	return timestamp
 }
 
-func (c *boundedConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	p, ok := c.Conn.(net.PacketConn)
+func (connection *boundedConn) SetDeadline(timestamp time.Time) error {
+	return connection.Conn.SetDeadline(connection.cap(timestamp))
+}
+
+func (connection *boundedConn) SetReadDeadline(timestamp time.Time) error {
+	return connection.Conn.SetReadDeadline(connection.cap(timestamp))
+}
+
+func (connection *boundedConn) SetWriteDeadline(timestamp time.Time) error {
+	return connection.Conn.SetWriteDeadline(connection.cap(timestamp))
+}
+
+func (connection *boundedConn) Close() error {
+	if connection.stop != nil {
+		connection.stop()
+	}
+	return connection.Conn.Close()
+}
+
+func (connection *boundedConn) ReadFrom(data []byte) (int, net.Addr, error) {
+	packet, ok := connection.Conn.(net.PacketConn)
 	if !ok {
 		return 0, nil, errors.New("KDC connection is not UDP")
 	}
-	return p.ReadFrom(b)
+	return packet.ReadFrom(data)
 }
 
-func (c *boundedConn) WriteTo(b []byte, a net.Addr) (int, error) {
-	p, ok := c.Conn.(net.PacketConn)
+func (connection *boundedConn) WriteTo(data []byte, a net.Addr) (int, error) {
+	packet, ok := connection.Conn.(net.PacketConn)
 	if !ok {
 		return 0, errors.New("KDC connection is not UDP")
 	}
-	return p.WriteTo(b, a)
+	return packet.WriteTo(data, a)
 }
 
 // Kerberos implements go-ldap's GSSAPI client interface with channel binding
 // and server mutual authentication. We negotiate no SASL security layer only
 // because the enclosing LDAP connection is already certificate-verified TLS.
 type Kerberos struct {
-	ctx         context.Context
+	context     context.Context
 	client      *client.Client
 	binding     []byte
 	key, subkey types.EncryptionKey
@@ -118,148 +132,176 @@ func (Kerberos) Format(state fmt.State, verb rune) {
 	fmt.Fprint(state, "Kerberos{credentials:[redacted]}")
 }
 
-func NewKerberos(ctx context.Context, selector, configPath string, snapshot Secret, binding []byte, timeout time.Duration) (*Kerberos, error) {
-	cc, e := LoadCache(selector, snapshot)
-	if e != nil {
-		return nil, e
+func NewKerberos(
+	operationContext context.Context,
+	selector, configPath string,
+	snapshot Secret,
+	binding []byte,
+	timeout time.Duration,
+) (*Kerberos, error) {
+	cache, err := LoadCache(selector, snapshot)
+	if err != nil {
+		return nil, err
 	}
-	if configPath == "" {
-		configPath = os.Getenv("KRB5_CONFIG")
-	}
-	if configPath == "" {
-		configPath = "/etc/krb5.conf"
-	}
-	cfg, e := config.Load(configPath)
-	if e != nil {
-		return nil, fmt.Errorf("Kerberos configuration: %w", e)
+	settings, err := LoadKerberosConfig(configPath)
+	if err != nil {
+		return nil, err
 	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	cl, e := client.NewFromCCacheOptionalTGT(cc, cfg, client.DisablePAFXFAST(true), client.Dialer(boundedKDC{ctx, timeout}))
-	if e != nil {
-		return nil, fmt.Errorf("selected Kerberos cache: %w", e)
+	kerberosClient, err := client.NewFromCCacheOptionalTGT(
+		cache,
+		settings,
+		client.DisablePAFXFAST(true),
+		client.Dialer(boundedKDC{operationContext, timeout}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("selected Kerberos cache: %w", err)
 	}
-	return &Kerberos{ctx: ctx, client: cl, binding: append([]byte(nil), binding...)}, nil
+	return &Kerberos{
+		context: operationContext,
+		client:  kerberosClient,
+		binding: append([]byte(nil), binding...),
+	}, nil
 }
 
-func (k *Kerberos) InitSecContext(target string, input []byte) ([]byte, bool, error) {
-	return k.InitSecContextWithOptions(target, input, nil)
+func (kerberos *Kerberos) InitSecContext(target string, input []byte) ([]byte, bool, error) {
+	return kerberos.InitSecContextWithOptions(target, input, nil)
 }
 
-func (k *Kerberos) InitSecContextWithOptions(target string, input []byte, options []int) ([]byte, bool, error) {
-	if e := k.ctx.Err(); e != nil {
-		return nil, false, e
+func (kerberos *Kerberos) InitSecContextWithOptions(
+	target string,
+	input []byte,
+	options []int,
+) ([]byte, bool, error) {
+	if err := kerberos.context.Err(); err != nil {
+		return nil, false, err
 	}
 	if input == nil {
-		tkt, key, e := k.client.GetServiceTicket(target)
-		if e != nil {
-			return nil, false, e
+		serviceTicket, key, err := kerberos.client.GetServiceTicket(target)
+		if err != nil {
+			return nil, false, err
 		}
-		k.key = key
-		tok, e := spnego.NewKRB5TokenAPREQ(k.client, tkt, key, []int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf}, append(options, flags.APOptionMutualRequired))
-		if e != nil {
-			return nil, false, e
+		kerberos.key = key
+		securityToken, err := spnego.NewKRB5TokenAPREQ(
+			kerberos.client,
+			serviceTicket,
+			key,
+			[]int{gssapi.ContextFlagMutual, gssapi.ContextFlagInteg, gssapi.ContextFlagConf},
+			append(options, flags.APOptionMutualRequired),
+		)
+		if err != nil {
+			return nil, false, err
 		}
-		if e = tok.APReq.DecryptAuthenticator(key); e != nil {
-			return nil, false, e
+		if err = securityToken.APReq.DecryptAuthenticator(key); err != nil {
+			return nil, false, err
 		}
-		k.auth = tok.APReq.Authenticator
-		if len(k.auth.Cksum.Checksum) < 24 {
+		kerberos.auth = securityToken.APReq.Authenticator
+		if len(kerberos.auth.Cksum.Checksum) < 24 {
 			return nil, false, errors.New("invalid Kerberos GSS checksum")
 		}
-		copy(k.auth.Cksum.Checksum[4:20], bindingHash(k.binding))
-		ap, e := messages.NewAPReq(tkt, key, k.auth)
-		if e != nil {
-			return nil, false, e
+		copy(kerberos.auth.Cksum.Checksum[4:20], bindingHash(kerberos.binding))
+		ap, err := messages.NewAPReq(serviceTicket, key, kerberos.auth)
+		if err != nil {
+			return nil, false, err
 		}
-		ap.APOptions = tok.APReq.APOptions
-		tok.APReq = ap
-		b, e := tok.Marshal()
-		return b, true, e
+		ap.APOptions = securityToken.APReq.APOptions
+		securityToken.APReq = ap
+		data, err := securityToken.Marshal()
+		return data, true, err
 	}
-	var tok spnego.KRB5Token
-	if e := tok.Unmarshal(input); e != nil {
-		return nil, false, e
+	var securityToken spnego.KRB5Token
+	if err := securityToken.Unmarshal(input); err != nil {
+		return nil, false, err
 	}
-	if tok.IsKRBError() {
-		return nil, false, tok.KRBError
+	if securityToken.IsKRBError() {
+		return nil, false, securityToken.KRBError
 	}
-	if !tok.IsAPRep() {
+	if !securityToken.IsAPRep() {
 		return nil, false, errors.New("Kerberos server did not supply mutual authentication")
 	}
-	plain, e := crypto.DecryptEncPart(tok.APRep.EncPart, k.key, keyusage.AP_REP_ENCPART)
-	if e != nil {
-		return nil, false, e
+	plain, err := crypto.DecryptEncPart(
+		securityToken.APRep.EncPart,
+		kerberos.key,
+		keyusage.AP_REP_ENCPART,
+	)
+	if err != nil {
+		return nil, false, err
 	}
-	var rep messages.EncAPRepPart
-	if e = rep.Unmarshal(plain); e != nil {
-		return nil, false, e
+	var reply messages.EncAPRepPart
+	if err = reply.Unmarshal(plain); err != nil {
+		return nil, false, err
 	}
-	if !rep.CTime.Equal(k.auth.CTime) || rep.Cusec != k.auth.Cusec {
+	if !reply.CTime.Equal(kerberos.auth.CTime) || reply.Cusec != kerberos.auth.Cusec {
 		return nil, false, errors.New("Kerberos mutual authentication timestamp mismatch")
 	}
-	k.subkey = rep.Subkey
-	k.mutual = true
+	kerberos.subkey = reply.Subkey
+	kerberos.mutual = true
 	return []byte{}, false, nil
 }
 
-func (k *Kerberos) NegotiateSaslAuth(input []byte, authzid string) ([]byte, error) {
-	if !k.mutual {
+func (kerberos *Kerberos) NegotiateSaslAuth(input []byte, authzid string) ([]byte, error) {
+	if !kerberos.mutual {
 		return nil, errors.New("Kerberos server not authenticated")
 	}
-	var tok gssapi.WrapToken
-	if e := unmarshalWrap(&tok, input); e != nil {
-		return nil, e
+	var securityToken gssapi.WrapToken
+	if err := unmarshalWrap(&securityToken, input); err != nil {
+		return nil, err
 	}
-	if tok.Flags&1 == 0 {
+	if securityToken.Flags&1 == 0 {
 		return nil, errors.New("Kerberos SASL token is not from server")
 	}
-	key := k.key
-	if tok.Flags&4 != 0 {
-		key = k.subkey
+	key := kerberos.key
+	if securityToken.Flags&4 != 0 {
+		key = kerberos.subkey
 	}
-	if _, e := tok.Verify(key, keyusage.GSSAPI_ACCEPTOR_SEAL); e != nil {
+	if _, err := securityToken.Verify(key, keyusage.GSSAPI_ACCEPTOR_SEAL); err != nil {
 		return nil, errors.New("Kerberos SASL signature verification failed")
 	}
-	if len(tok.Payload) != 4 || tok.Payload[0]&1 == 0 {
+	if len(securityToken.Payload) != 4 || securityToken.Payload[0]&1 == 0 {
 		return nil, errors.New("Kerberos server does not allow TLS-only SASL layer")
 	}
-	et, e := crypto.GetEtype(key.KeyType)
-	if e != nil {
-		return nil, e
+	encryptionType, err := crypto.GetEtype(key.KeyType)
+	if err != nil {
+		return nil, err
 	}
-	out := gssapi.WrapToken{Flags: tok.Flags & 4, EC: uint16(et.GetHMACBitLength() / 8), SndSeqNum: 1, Payload: append([]byte{1, 0, 0, 0}, []byte(authzid)...)}
-	if e = out.SetCheckSum(key, keyusage.GSSAPI_INITIATOR_SEAL); e != nil {
-		return nil, e
+	out := gssapi.WrapToken{
+		Flags:     securityToken.Flags & 4,
+		EC:        uint16(encryptionType.GetHMACBitLength() / 8),
+		SndSeqNum: 1,
+		Payload:   append([]byte{1, 0, 0, 0}, []byte(authzid)...),
+	}
+	if err = out.SetCheckSum(key, keyusage.GSSAPI_INITIATOR_SEAL); err != nil {
+		return nil, err
 	}
 	return out.Marshal()
 }
 
 // RFC 4121 permits rotating the token body; gokrb5's decoder does not
 // unrotate it. Normalize without touching the authenticated header fields.
-func unmarshalWrap(tok *gssapi.WrapToken, input []byte) error {
+func unmarshalWrap(securityToken *gssapi.WrapToken, input []byte) error {
 	if len(input) <= 16 {
 		return errors.New("Kerberos SASL token too short")
 	}
-	b := append([]byte(nil), input...)
-	body := b[16:]
-	r := int(binary.BigEndian.Uint16(b[6:8])) % len(body)
-	rotated := append(append([]byte(nil), body[r:]...), body[:r]...)
+	data := append([]byte(nil), input...)
+	body := data[16:]
+	number := int(binary.BigEndian.Uint16(data[6:8])) % len(body)
+	rotated := append(append([]byte(nil), body[number:]...), body[:number]...)
 	copy(body, rotated)
-	binary.BigEndian.PutUint16(b[6:8], 0)
-	if e := tok.Unmarshal(b, true); e != nil {
-		return e
+	binary.BigEndian.PutUint16(data[6:8], 0)
+	if err := securityToken.Unmarshal(data, true); err != nil {
+		return err
 	}
-	if tok.Flags&2 != 0 {
+	if securityToken.Flags&2 != 0 {
 		return errors.New("sealed Kerberos SASL negotiation token unsupported")
 	}
 	return nil
 }
 
-func (k *Kerberos) DeleteSecContext() error {
-	k.key = types.EncryptionKey{}
-	k.subkey = types.EncryptionKey{}
-	k.client.Destroy()
+func (kerberos *Kerberos) DeleteSecContext() error {
+	kerberos.key = types.EncryptionKey{}
+	kerberos.subkey = types.EncryptionKey{}
+	kerberos.client.Destroy()
 	return nil
 }
