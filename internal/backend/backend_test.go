@@ -17,7 +17,6 @@ type fake struct {
 	settings config.Settings
 }
 
-func (f *fake) CheckLDAP(context.Context, config.Settings) error         { return nil }
 func (f *fake) Zones(context.Context, config.Settings) ([]string, error) { return nil, nil }
 func (f *fake) Records(_ context.Context, s config.Settings, z, n string, typ uint16) ([]dnsrpc.Row, error) {
 	f.reads++

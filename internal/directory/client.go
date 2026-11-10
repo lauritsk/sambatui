@@ -279,12 +279,6 @@ func (client *Client) with(operationContext context.Context, operation func(Sess
 	return operation(currentSession)
 }
 
-func (client *Client) Check(operationContext context.Context) error {
-	return client.with(operationContext, func(Session) error {
-		return nil
-	})
-}
-
 var (
 	Attributes = []string{
 		"cn",

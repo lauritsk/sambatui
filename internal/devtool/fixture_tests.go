@@ -23,16 +23,5 @@ func (tools *Tools) fixtureTests(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	_, err := tools.execute(ctx, command{
-		name: "docker", timeout: 30 * time.Second,
-		arguments: []string{
-			"exec", "--env", "SAMBATUI_SERVER=dc.lab.invalid",
-			"--env", "SAMBATUI_DOMAIN=lab.invalid",
-			"--env", "SAMBATUI_USER=Administrator@lab.invalid",
-			"--env", "SAMBATUI_PASSWORD=Disposable-test-only_42!",
-			"--env", "SAMBATUI_CA_FILE=/tmp/native-ad/cert.pem", name,
-			"/tmp/native-ad/sambatui", "-config", "/tmp/native-ad/cli.json", "-check",
-		},
-	})
-	return err
+	return nil
 }

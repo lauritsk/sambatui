@@ -1,17 +1,13 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/lauritsk/sambatui/internal/backend"
 	"github.com/lauritsk/sambatui/internal/config"
-	"github.com/lauritsk/sambatui/internal/directory"
 	"github.com/lauritsk/sambatui/internal/journal"
 	"github.com/lauritsk/sambatui/internal/tui"
 )
@@ -36,11 +32,6 @@ func run() error {
 		"native JSON preferences path (password stored separately)",
 	)
 	showVersion := flag.Bool("version", false, "show version")
-	check := flag.Bool(
-		"check",
-		false,
-		"check authentication, enumerate zones and verify LDAP "+"TLS/bind without writes",
-	)
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("sambatui", version)
@@ -59,29 +50,6 @@ func run() error {
 			value = strings.ReplaceAll(value, password, "[redacted]")
 		}
 		return fmt.Errorf("%s", value)
-	}
-	if *check {
-		if err = settings.Validate(true); err != nil {
-			return redact(err)
-		}
-		operationContext, cancel := context.WithTimeout(
-			context.Background(),
-			time.Duration(settings.TimeoutSeconds)*time.Second,
-		)
-		defer cancel()
-		zones, err := (backend.Native{}).Zones(operationContext, settings)
-		if err != nil {
-			return redact(err)
-		}
-		if err = directory.New(settings.LDAP()).Check(operationContext); err != nil {
-			return redact(err)
-		}
-		fmt.Printf(
-			"Authenticated DNS management: %d zones; certificate-verified "+
-				"LDAP bind succeeded. No writes performed.\n",
-			len(zones),
-		)
-		return nil
 	}
 	store, err := journal.Open(*configPath)
 	if err != nil {
