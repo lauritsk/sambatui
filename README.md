@@ -11,7 +11,7 @@ CGO_ENABLED=0 go build -o sambatui ./cmd/sambatui
 
 Use **Ctrl+O** to configure an individual DC, authentication, and verified LDAP
 TLS. **Ctrl+P** opens commands; **?** shows help. Use `-config PATH` for alternate
-preferences or `-check` to check connectivity/authentication without writes.
+preferences.
 
 **Writes require confirmation. Cancellation is not rollback.** Reconcile unknown
 outcomes with **R**; never delete the pending-write journal to bypass recovery.

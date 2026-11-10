@@ -81,9 +81,8 @@ explicit and protect it independently from ordinary application data.
 
 Reason about network, disk, memory, and CPU costs before implementing a design.
 Batch work, build reusable indexes, and avoid repeatedly copying growing data.
-Make externally visible output deterministic. For example, DNS health checks
-reuse the zone index to probe at most six IPv4 reverse-name suffixes per record,
-rather than scanning up to 10000 zones for each of up to 100000 records.
+Make externally visible output deterministic. Sort map keys before displaying
+LDAP attributes or write previews.
 
 Prefer the standard library and existing tools. Add dependencies only when their
 benefit justifies their complexity, security, and maintenance costs. Pin versions,

@@ -50,20 +50,18 @@ Verified on Samba **4.22.11** in this environment:
   cookie handles; all entry-add kinds;
   permission errors; a real committed add with a deliberately lost reply is
   uncertain and is not retried.
-- Unsupported conditional modify/delete/disable rejected before dispatch and
+- Unsupported conditional modify/delete rejected before dispatch and
   original entry unchanged. **Samba does not advertise RFC 4528.** Successful
   conditional writes are not claimed as live Samba functionality.
 - The actual static executable in a Go-driven pseudo-terminal: zones, optional
   matching PTR, DNS add/update/delete with confirmations, independent server
-  state checks, LDAP view, health dashboard, help and clean quit.
-- `sambatui -check` performs authenticated DNS enumeration and verified LDAP
-  binding without writes.
+  state checks, LDAP view, help and clean quit.
 
 ## Deterministic default checks versus live claims
 
 `go test ./...` defaults to local protocol fakes/loopback servers and skips all
 of the above opt-in mutations. Native tests verify critical assertion bytes,
-successful/stale/unsupported conditional responses, original UAC preservation,
+successful/stale/unsupported conditional responses,
 TLS-binding bytes/MIC, cancellation/timeout socket cleanup, snapshots, secret
 handling, write serialization/draining, durable uncertainty and UI transitions.
 
