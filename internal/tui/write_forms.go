@@ -49,22 +49,25 @@ func (model *Model) confirmPlan(plan backend.Plan) tea.Cmd {
 	if snapshot.Settings.Auth == "kerberos" {
 		identity = snapshot.Settings.CacheIdentity
 	}
-	description := "DC: " + Literal(snapshot.Settings.Server) + "\nLDAP base: " +
-		Literal(snapshot.Settings.BaseDN) +
-		"\nAuthentication: " +
-		snapshot.Settings.Auth +
-		"\nIdentity: " +
-		Literal(identity) +
-		"\n" +
-		plan.Preview()
+	description := "DC: " + Literal(snapshot.Settings.Server) +
+		"\nUser: " + Literal(identity)
+	for _, action := range plan.Actions {
+		account := action.EntryKind == "user" || action.EntryKind == "computer"
+		if action.Kind == "ldap_add" && account {
+			description += "\nNo password will be set."
+		}
+	}
+	description += "\n" + plan.Preview()
 	model.openForm(
-		"Confirm write — review original target",
+		"Confirm write",
 		description,
-		[]field{{"Type yes to execute exactly this plan", "", false}},
+		[]field{{"Type yes to execute", "", false}},
 		true,
 		func(values []string) tea.Cmd {
 			if values[0] != "yes" {
-				return model.rejectFlow(errors.New("Write not confirmed; nothing dispatched"))
+				model.rejectFlow(nil)
+				model.status = "Not confirmed"
+				return nil
 			}
 			return model.dispatchPlan(snapshot, plan)
 		},

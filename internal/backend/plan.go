@@ -133,6 +133,7 @@ func (plan Plan) Preview() string {
 			)
 		case "ldap_add":
 			fmt.Fprintf(&text, "Add %s %s below %s\n", action.EntryKind, action.Name, action.Parent)
+			previewAttributes(&text, action.Attributes)
 		case "ldap_modify":
 			fmt.Fprintf(&text, "Modify %s at revision %s\n", action.DN, action.Revision)
 			previewAttributes(&text, action.Attributes)

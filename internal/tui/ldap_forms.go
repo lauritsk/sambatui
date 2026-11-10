@@ -82,10 +82,9 @@ func (model *Model) ldapAddForm() tea.Cmd {
 	parent := model.base
 	model.openForm(
 		"Add LDAP entry",
-		"No password is set. Review the object kind and account name; "+
-			"computer flags use the existing Samba defaults.",
+		"",
 		[]field{
-			{"Kind: user/group/computer/ou", "group", false},
+			{"Kind", "group", false},
 			{"Parent DN", parent, false},
 			{"Name", "", false},
 			{"sAMAccountName (optional)", "", false},
@@ -97,14 +96,7 @@ func (model *Model) ldapAddForm() tea.Cmd {
 		},
 		true,
 		func(values []string) tea.Cmd {
-			attributes := map[string]string{
-				"sAMAccountName":    values[3],
-				"description":       values[4],
-				"mail":              values[5],
-				"displayName":       values[6],
-				"dNSHostName":       values[7],
-				"userPrincipalName": values[8],
-			}
+			attributes := ldapAddAttributes(values)
 			if !directory.InScope(values[1], model.flow.Snapshot.Settings.BaseDN) ||
 				!directory.InScope(values[1], parent) {
 				return model.rejectFlow(errors.New("parent outside configured LDAP base"))
@@ -133,5 +125,9 @@ func (model *Model) ldapAddForm() tea.Cmd {
 			)
 		},
 	)
+	if model.form != nil {
+		model.form.setChoices(ldapAddKindField, "user", "group", "computer", "ou")
+		model.form.VisibleFields = ldapAddFieldIndices
+	}
 	return nil
 }
