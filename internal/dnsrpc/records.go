@@ -12,6 +12,17 @@ import (
 	"github.com/oiweiwei/go-msrpc/msrpc/dnsp/record"
 )
 
+// SubtreeCollisionError identifies a DNS owner that Samba aliases to the zone apex.
+// A complete directory read is required; following the response would invent names.
+type SubtreeCollisionError struct {
+	Zone, Node string
+}
+
+func (failure *SubtreeCollisionError) Error() string {
+	return fmt.Sprintf("DNS zone %q subtree %q is ambiguous through Samba RPC",
+		failure.Zone, failure.Node)
+}
+
 type recordBranch struct {
 	name        string
 	includeSelf bool
@@ -87,6 +98,10 @@ func (client *Client) recordsRead(
 		return record.NodeList{}, 0, errors.New(
 			"fully qualified DNS enumeration name exceeds 253 bytes",
 		)
+	}
+	zoneName := strings.TrimSuffix(zone, ".")
+	if strings.EqualFold(strings.TrimSuffix(parent, "."), zoneName+"."+zoneName) {
+		return record.NodeList{}, 0, &SubtreeCollisionError{Zone: zone, Node: parent}
 	}
 	response, err := client.rpc.EnumRecords2(operationContext, &dnsserver.EnumRecords2Request{
 		ClientVersion: 0x70000, ServerName: client.server, Zone: zone,

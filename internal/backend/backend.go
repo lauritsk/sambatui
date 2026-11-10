@@ -57,7 +57,19 @@ func (Native) Records(
 		return nil, err
 	}
 	defer client.Close()
-	return client.Records(operationContext, zone, node, recordType)
+	rows, err := client.Records(operationContext, zone, node, recordType)
+	var collision *dnsrpc.SubtreeCollisionError
+	if !errors.As(err, &collision) {
+		return rows, err
+	}
+	client.Close()
+	rows, directoryErr := directory.New(settings.LDAP()).DNSRecords(
+		operationContext, zone, node, recordType,
+	)
+	if directoryErr != nil {
+		return nil, fmt.Errorf("%w; verified LDAP fallback failed: %w", err, directoryErr)
+	}
+	return rows, nil
 }
 
 func (Native) Search(

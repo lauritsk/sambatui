@@ -2,6 +2,7 @@ package dnsrpc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -216,6 +217,23 @@ func TestDisposableSamba(t *testing.T) {
 			if count != 1 {
 				t.Errorf("zone enumeration returned %d copies of %s; want one", count, name)
 			}
+		}
+	})
+	t.Run("shadowed zone name", func(t *testing.T) {
+		for _, name := range []string{"leaf.1", "shadow.lab.invalid.lab.invalid."} {
+			if err := c.Mutate(ctx, "lab.invalid", name, nil, a); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := c.Mutate(ctx, "lab.invalid", name, a, nil); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		rows, err := c.Records(ctx, "lab.invalid", "@", dns.TypeANY)
+		var collision *SubtreeCollisionError
+		if rows != nil || !errors.As(err, &collision) {
+			t.Fatalf("shadowed subtree was not detected: rows=%v error=%v", rows, err)
 		}
 	})
 	t.Run("kerberos selected cache", func(t *testing.T) {

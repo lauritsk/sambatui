@@ -93,6 +93,29 @@ func TestEnumerationIncludesBranchRecordsExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestEnumerationDetectsAZoneNamedDescendantBeforeFollowingPhantomChildren(t *testing.T) {
+	root := nodeBuffer(t, &record.Node{DNSNodeName: record.NewNodeName("invalid"), ChildCount: 1})
+	child := nodeBuffer(t, &record.Node{DNSNodeName: record.NewNodeName("lab"), ChildCount: 1})
+	calls := 0
+	client := &Client{sockets: &trackedDialer{}, rpc: fakeRPC{
+		enum: func(request *dnsserver.EnumRecords2Request) (*dnsserver.EnumRecords2Response, error) {
+			calls++
+			if request.NodeName == "@" {
+				return &dnsserver.EnumRecords2Response{Buffer: root}, nil
+			}
+			if request.NodeName != "invalid.lab.invalid." {
+				t.Fatal("zone-named descendant was interpreted as the apex", request.NodeName)
+			}
+			return &dnsserver.EnumRecords2Response{Buffer: child}, nil
+		},
+	}}
+	rows, err := client.Records(context.Background(), "lab.invalid", "@", 0)
+	var collision *SubtreeCollisionError
+	if rows != nil || !errors.As(err, &collision) || calls != 2 {
+		t.Fatalf("collision: rows=%v error=%v calls=%d", rows, err, calls)
+	}
+}
+
 func TestEnumerationRejectsOversizeQualifiedNamesBeforeRPC(t *testing.T) {
 	name := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." +
 		strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
