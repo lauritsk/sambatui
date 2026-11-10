@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,17 +14,22 @@ import (
 
 func (model *Model) searchForm() {
 	model.openForm(
-		"Filter current results",
-		"Literal case-insensitive local filter; LDAP server search is "+"available with l.",
-		[]field{{"Search", model.search, false}},
+		"Filter",
+		"",
+		[]field{{"", model.search, false}},
 		false,
 		func(values []string) tea.Cmd {
 			model.search = values[0]
 			model.cursor = 0
+			model.anchor = -1
 			model.selected = map[int]bool{}
 			return nil
 		},
 	)
+	if model.form != nil {
+		model.form.EnterSubmits = true
+		model.form.ShowScope = true
+	}
 }
 
 func (model *Model) queryForm() {
@@ -32,9 +38,9 @@ func (model *Model) queryForm() {
 		return
 	}
 	model.openForm(
-		"Query DNS management records",
-		"DC: "+model.settings.Server+"\nZone: "+model.zone,
-		[]field{{"Name", "@", false}, {"Type / ALL", "ALL", false}},
+		"Query DNS",
+		"Zone: "+model.zone,
+		[]field{{"Name", "@", false}, {"Type", "ALL", false}},
 		false,
 		func(values []string) tea.Cmd {
 			if !dnsdata.ValidName(values[0], true) {
@@ -55,10 +61,10 @@ func (model *Model) queryForm() {
 func (model *Model) ldapForm() {
 	model.openForm(
 		"LDAP search",
-		"Verified TLS; pinned to "+model.settings.Server,
+		"",
 		[]field{
 			{"Base DN", model.base, false},
-			{"Kind: users/groups/computers/ous/all", model.kind, false},
+			{"Kind", model.kind, false},
 			{"Search text", model.query, false},
 			{"Max entries 1–5000", strconv.Itoa(model.settings.LDAPMaxRows), false},
 		},
@@ -86,14 +92,43 @@ func (model *Model) ldapForm() {
 			return model.load("ldap")
 		},
 	)
+	if model.form != nil {
+		model.form.setChoices(1, "users", "groups", "computers", "ous", "all")
+	}
+}
+
+func (model *Model) commandNames() []string {
+	names := []string{"connection", "discover", "help"}
+	_, uncertain := model.state.Uncertain()
+	if model.settings.Server != "" {
+		names = append(names, "zones", "directory")
+		if model.flow == nil && !uncertain {
+			if model.mode == "ldap" || model.zone != "" {
+				names = append(names, "add")
+			}
+			if len(model.visible()) > 0 {
+				names = append(names, "update", "delete")
+			}
+		}
+	}
+	if model.zone != "" {
+		names = append(names, "query")
+	}
+	if uncertain && model.flow == nil {
+		names = append(names, "reconcile")
+	}
+	if model.lastError != "" {
+		names = append(names, "error")
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (model *Model) commandForm() {
 	model.openForm(
-		"Command palette",
-		"Commands: zones, directory, query, add, update, delete, "+
-			"connection, discover, reconcile, help",
-		[]field{{"Command", "", false}},
+		"Commands",
+		"",
+		[]field{{"", "", false}},
 		false,
 		func(values []string) tea.Cmd {
 			switch strings.ToLower(values[0]) {
@@ -116,11 +151,28 @@ func (model *Model) commandForm() {
 			case "reconcile":
 				return model.reconcile()
 			case "help":
-				model.showDetails(help)
+				model.showHelp()
+			case "error":
+				model.showLastError()
 			default:
 				model.status = "Unknown command"
 			}
 			return nil
 		},
 	)
+	if model.form != nil {
+		model.form.Items = model.commandNames()
+		model.form.ItemLabels = map[string]string{
+			"connection": "Connection", "discover": "Discover DC", "help": "Help",
+			"zones": "DNS zones", "directory": "LDAP search", "query": "DNS query",
+			"add": "Add", "update": "Edit", "delete": "Delete",
+			"reconcile": "Reconcile write", "error": "Last error",
+		}
+		items, labels := model.form.Items, model.form.ItemLabels
+		sort.SliceStable(items, func(left, right int) bool {
+			return strings.ToLower(labels[items[left]]) < strings.ToLower(labels[items[right]])
+		})
+		model.form.EnterSubmits = true
+		model.form.ShowScope = true
+	}
 }
