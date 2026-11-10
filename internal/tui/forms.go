@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lauritsk/sambatui/internal/auth"
 	"github.com/lauritsk/sambatui/internal/invariant"
+	"github.com/lauritsk/sambatui/internal/lifecycle"
 )
 
 type field struct {
@@ -66,6 +67,15 @@ type form struct {
 	ContextOffset  int
 	Accept         func([]string) tea.Cmd
 	Write          bool
+	EnterSubmits   bool
+	ShowScope      bool
+	VisibleFields  func([]field) []int
+	Choices        map[int][]string
+	Items          []string
+	ItemLabels     map[string]string
+	ItemCursor     int
+	Owner          *lifecycle.Flow
+	Carets         map[int]int
 }
 
 func newSecret(text string) auth.Secret {
@@ -117,6 +127,13 @@ func (model *Model) closeForm() {
 const formFieldBytesMax = 1 << 20
 
 func (model *Model) updateForm(message tea.KeyMsg) tea.Cmd {
+	if model.form.Items != nil {
+		return model.updatePicker(message)
+	}
+	return model.updateFormField(message)
+}
+
+func (model *Model) updateFormField(message tea.KeyMsg) tea.Cmd {
 	currentForm := model.form
 	currentForm.assertValid()
 	switch message.String() {
@@ -132,12 +149,7 @@ func (model *Model) updateForm(message tea.KeyMsg) tea.Cmd {
 		model.closeForm()
 		return nil
 	case "ctrl+s":
-		values := make([]string, 0, len(currentForm.Fields))
-		for _, currentField := range currentForm.Fields {
-			values = append(values, currentField.text())
-		}
-		model.form = nil
-		return currentForm.Accept(values)
+		return model.submitForm()
 	case "tab", "enter":
 		currentForm.Cursor = (currentForm.Cursor + 1) % len(currentForm.Fields)
 	case "shift+tab":
@@ -236,4 +248,15 @@ func (model *Model) formView() string {
 	}
 	output.WriteString("Tab/Enter next · Ctrl+S submit · Ctrl+U clear · Esc cancel")
 	return output.String()
+}
+
+func (model *Model) submitForm() tea.Cmd {
+	current := model.form
+	current.assertValid()
+	values := make([]string, 0, len(current.Fields))
+	for _, field := range current.Fields {
+		values = append(values, field.text())
+	}
+	model.form = nil
+	return current.Accept(values)
 }
