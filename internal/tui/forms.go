@@ -69,6 +69,14 @@ type form struct {
 
 func newSecret(s string) auth.Secret { return auth.NewSecret(s) }
 func (m *Model) openForm(title, context string, fields []field, write bool, accept func([]string) tea.Cmd) {
+	// Form shape is a programmer invariant, not untrusted input. A malformed
+	// form must fail here, before cursor arithmetic can divide by zero.
+	if len(fields) == 0 {
+		panic("form requires at least one field")
+	}
+	if accept == nil {
+		panic("form requires an accept callback")
+	}
 	for i := range fields {
 		if _, ok := fields[i].Value.(auth.Secret); ok {
 			fields[i].Secret = true
@@ -89,6 +97,8 @@ func (m *Model) closeForm() {
 	m.form = nil
 	m.status = "Form cancelled; no write dispatched."
 }
+
+const formFieldBytesMax = 1 << 20
 
 func (m *Model) updateForm(k tea.KeyMsg) tea.Cmd {
 	f := m.form
@@ -122,14 +132,34 @@ func (m *Model) updateForm(k tea.KeyMsg) tea.Cmd {
 		}
 	default:
 		if k.Type == tea.KeyRunes {
-			for _, r := range k.Runes {
-				if f.Fields[f.Cursor].Secret || (!unicode.IsControl(r) && !unicode.Is(unicode.Cf, r)) {
-					f.Fields[f.Cursor].setText(f.Fields[f.Cursor].text() + string(r))
-				}
+			value, err := formInput(f.Fields[f.Cursor], k.Runes)
+			if err != nil {
+				m.error(err)
+				return nil
 			}
+			f.Fields[f.Cursor].setText(value)
 		}
 	}
 	return nil
+}
+
+// Batch each input message into one copy. Repeated string concatenation made
+// a large paste quadratic, and a partial paste must never change a confirmation.
+func formInput(current field, input []rune) (string, error) {
+	if len(input) > formFieldBytesMax {
+		return "", errors.New("form input exceeds 1 MiB")
+	}
+	var value strings.Builder
+	value.WriteString(current.text())
+	for _, character := range input {
+		if current.Secret || (!unicode.IsControl(character) && !unicode.Is(unicode.Cf, character)) {
+			value.WriteRune(character)
+		}
+		if value.Len() > formFieldBytesMax {
+			return "", errors.New("form input exceeds 1 MiB")
+		}
+	}
+	return value.String(), nil
 }
 
 func (m *Model) formView() string {
@@ -442,7 +472,9 @@ func (m *Model) confirmPlan(plan backend.Plan) tea.Cmd {
 			if store != nil && !out.Uncertain {
 				if e := store.Clear(); e != nil {
 					out = lifecycle.Outcome{Err: fmt.Errorf("cannot clear pending-write journal; reconcile before retrying: %w", e), Uncertain: true}
-					flow.RetainUncertain()
+					if err := flow.RetainUncertain(); err != nil {
+						out.Err = errors.Join(out.Err, err)
+					}
 				}
 			}
 			return writeResult{snapshot.Generation, out}
@@ -472,85 +504,94 @@ func (m *Model) writeForm(key string) tea.Cmd {
 		return m.rejectFlow(errors.New("Guided fixes are available in findings views"))
 	}
 	indices := m.selectedIndices()
-	if m.mode == "dns" {
-		if m.zone == "" {
-			return m.rejectFlow(errors.New("select a zone first"))
-		}
-		if key == "a" {
-			return m.dnsAddForm()
-		}
-		if len(indices) == 0 {
-			return m.rejectFlow(errors.New("select a real DNS record first"))
-		}
-		if key == "d" {
-			p := backend.Plan{Title: "Delete selected DNS records"}
-			for _, i := range indices {
-				r := m.records[i]
-				p.Actions = append(p.Actions, backend.Action{Kind: "dns_delete", Zone: m.zone, Name: r.Name, Type: r.Type, Value: r.Value})
-			}
-			return m.confirmPlan(p)
-		}
-		if len(indices) != 1 {
-			return m.rejectFlow(errors.New("update requires exactly one selected record"))
-		}
-		r := m.records[indices[0]]
-		zone := m.zone
-		m.openForm("Update selected DNS record", "Name and type fixed: "+r.Name+" "+r.Type, []field{{"New value", r.Value, false}}, true, func(v []string) tea.Cmd {
-			if _, e := dnsdata.Parse(r.Name, r.Type, v[0]); e != nil {
-				return m.rejectFlow(e)
-			}
-			return m.confirmPlan(backend.Plan{Title: "Update DNS record", Actions: []backend.Action{{Kind: "dns_update", Zone: zone, Name: r.Name, Type: r.Type, OldValue: r.Value, Value: v[0]}}})
-		})
-		return nil
+	switch m.mode {
+	case "dns":
+		return m.dnsWriteForm(key, indices)
+	case "ldap":
+		return m.ldapWriteForm(key, indices)
+	default:
+		return m.rejectFlow(errors.New("no writable view active"))
 	}
-	if m.mode == "ldap" {
-		if key == "a" {
-			return m.ldapAddForm()
-		}
-		if len(indices) == 0 {
-			return m.rejectFlow(errors.New("select a directory entry first"))
-		}
-		if key == "d" {
-			p := backend.Plan{Title: "Delete selected directory entries"}
-			for _, i := range indices {
-				r := m.entries[i]
-				if r.Revision == "" || directory.EqualDN(r.DN, m.cfg.BaseDN) {
-					return m.rejectFlow(errors.New("missing revision or protected base DN; deletion refused"))
-				}
-				p.Actions = append(p.Actions, backend.Action{Kind: "ldap_delete", DN: r.DN, Revision: r.Revision})
-			}
-			return m.confirmPlan(p)
-		}
-		if len(indices) != 1 {
-			return m.rejectFlow(errors.New("update requires one directory entry"))
-		}
-		r := m.entries[indices[0]]
-		if r.Revision == "" {
-			return m.rejectFlow(errors.New("entry has no unique revision; refresh before writing"))
-		}
-		attrs := directory.Editable[r.Kind]
-		if len(attrs) == 0 {
-			return m.rejectFlow(errors.New("entry kind not editable"))
-		}
-		fields := []field{}
-		for _, a := range attrs {
-			fields = append(fields, field{a, r.First(a), false})
-		}
-		m.openForm("Edit LDAP entry", r.DN+"\nRevision: "+r.Revision, fields, true, func(v []string) tea.Cmd {
-			changes := map[string]string{}
-			for i, a := range attrs {
-				if v[i] != r.First(a) {
-					changes[a] = v[i]
-				}
-			}
-			if len(changes) == 0 {
-				return m.rejectFlow(errors.New("no attributes changed"))
-			}
-			return m.confirmPlan(backend.Plan{Title: "Modify selected LDAP entry", Actions: []backend.Action{{Kind: "ldap_modify", DN: r.DN, EntryKind: r.Kind, Revision: r.Revision, Attributes: changes}}})
-		})
-		return nil
+}
+
+func (m *Model) dnsWriteForm(key string, indices []int) tea.Cmd {
+	if m.zone == "" {
+		return m.rejectFlow(errors.New("select a zone first"))
 	}
-	return m.rejectFlow(errors.New("no writable view active"))
+	if key == "a" {
+		return m.dnsAddForm()
+	}
+	if len(indices) == 0 {
+		return m.rejectFlow(errors.New("select a real DNS record first"))
+	}
+	if key == "d" {
+		p := backend.Plan{Title: "Delete selected DNS records"}
+		for _, i := range indices {
+			r := m.records[i]
+			p.Actions = append(p.Actions, backend.Action{Kind: "dns_delete", Zone: m.zone, Name: r.Name, Type: r.Type, Value: r.Value})
+		}
+		return m.confirmPlan(p)
+	}
+	if len(indices) != 1 {
+		return m.rejectFlow(errors.New("update requires exactly one selected record"))
+	}
+	r := m.records[indices[0]]
+	zone := m.zone
+	m.openForm("Update selected DNS record", "Name and type fixed: "+r.Name+" "+r.Type, []field{{"New value", r.Value, false}}, true, func(v []string) tea.Cmd {
+		if _, e := dnsdata.Parse(r.Name, r.Type, v[0]); e != nil {
+			return m.rejectFlow(e)
+		}
+		return m.confirmPlan(backend.Plan{Title: "Update DNS record", Actions: []backend.Action{{Kind: "dns_update", Zone: zone, Name: r.Name, Type: r.Type, OldValue: r.Value, Value: v[0]}}})
+	})
+	return nil
+}
+
+func (m *Model) ldapWriteForm(key string, indices []int) tea.Cmd {
+	if key == "a" {
+		return m.ldapAddForm()
+	}
+	if len(indices) == 0 {
+		return m.rejectFlow(errors.New("select a directory entry first"))
+	}
+	if key == "d" {
+		p := backend.Plan{Title: "Delete selected directory entries"}
+		for _, i := range indices {
+			r := m.entries[i]
+			if r.Revision == "" || directory.EqualDN(r.DN, m.cfg.BaseDN) {
+				return m.rejectFlow(errors.New("missing revision or protected base DN; deletion refused"))
+			}
+			p.Actions = append(p.Actions, backend.Action{Kind: "ldap_delete", DN: r.DN, Revision: r.Revision})
+		}
+		return m.confirmPlan(p)
+	}
+	if len(indices) != 1 {
+		return m.rejectFlow(errors.New("update requires one directory entry"))
+	}
+	r := m.entries[indices[0]]
+	if r.Revision == "" {
+		return m.rejectFlow(errors.New("entry has no unique revision; refresh before writing"))
+	}
+	attrs := directory.Editable[r.Kind]
+	if len(attrs) == 0 {
+		return m.rejectFlow(errors.New("entry kind not editable"))
+	}
+	fields := []field{}
+	for _, a := range attrs {
+		fields = append(fields, field{a, r.First(a), false})
+	}
+	m.openForm("Edit LDAP entry", r.DN+"\nRevision: "+r.Revision, fields, true, func(v []string) tea.Cmd {
+		changes := map[string]string{}
+		for i, a := range attrs {
+			if v[i] != r.First(a) {
+				changes[a] = v[i]
+			}
+		}
+		if len(changes) == 0 {
+			return m.rejectFlow(errors.New("no attributes changed"))
+		}
+		return m.confirmPlan(backend.Plan{Title: "Modify selected LDAP entry", Actions: []backend.Action{{Kind: "ldap_modify", DN: r.DN, EntryKind: r.Kind, Revision: r.Revision, Attributes: changes}}})
+	})
+	return nil
 }
 
 func (m *Model) dnsAddForm() tea.Cmd {
