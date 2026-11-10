@@ -193,8 +193,20 @@ func (model *Model) submitForm() tea.Cmd {
 	for index, field := range current.Fields {
 		values[index] = field.text()
 	}
+	generation, readID := model.state.Snapshot().Generation, model.readID
 	model.form = nil
-	return current.Accept(values)
+	model.submitting = current
+	defer func() { model.submitting = nil }()
+	command := current.Accept(values)
+	if command == nil && model.form == nil && model.status != "" &&
+		model.status == model.lastError && model.state.Current(generation) &&
+		model.readID == readID {
+		if !current.Write || current.Owner == model.flow {
+			model.form = current
+			model.errorUnread = false
+		}
+	}
+	return command
 }
 
 // Reject pastes atomically; never partially change a confirmation.

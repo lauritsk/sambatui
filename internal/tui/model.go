@@ -52,7 +52,7 @@ type Model struct {
 	readID                                        uint64
 	readCancel, writeCancel                       context.CancelFunc
 	flow                                          *lifecycle.Flow
-	form                                          *form
+	form, submitting                              *form
 	detail, detailTitle                           string
 	writeCancelling, errorUnread                  bool
 	detailOffset                                  int

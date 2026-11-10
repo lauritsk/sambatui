@@ -25,7 +25,10 @@ func (model *Model) selectedIndices() []int {
 }
 
 func (model *Model) rejectFlow(err error) tea.Cmd {
-	if model.flow != nil {
+	retryingDraft := err != nil && model.submitting != nil && model.submitting.Write &&
+		model.flow != nil && model.submitting.Owner == model.flow &&
+		model.state.Current(model.flow.Snapshot.Generation)
+	if model.flow != nil && !retryingDraft {
 		model.flow.Abort()
 		model.flow = nil
 	}
