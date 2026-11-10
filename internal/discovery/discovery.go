@@ -10,6 +10,8 @@ import (
 	"github.com/lauritsk/sambatui/internal/dnsdata"
 )
 
+const servicesMax = 4096
+
 type Service struct {
 	Kind, Target           string
 	Port, Priority, Weight uint16
@@ -27,9 +29,9 @@ func NormalizeDomain(domain string) (string, error) {
 }
 
 func Preferred(services []Service) (Service, bool) {
-	for _, s := range services {
-		if s.Kind == "ldap" {
-			return s, true
+	for _, service := range services {
+		if service.Kind == "ldap" {
+			return service, true
 		}
 	}
 	if len(services) > 0 {
@@ -38,7 +40,14 @@ func Preferred(services []Service) (Service, bool) {
 	return Service{}, false
 }
 
-func Discover(ctx context.Context, domain string, resolver Resolver) ([]Service, error) {
+func Discover(
+	operationContext context.Context,
+	domain string,
+	resolver Resolver,
+) ([]Service, error) {
+	if err := operationContext.Err(); err != nil {
+		return nil, err
+	}
 	var err error
 	domain, err = NormalizeDomain(domain)
 	if err != nil {
@@ -47,37 +56,63 @@ func Discover(ctx context.Context, domain string, resolver Resolver) ([]Service,
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	services := []Service{}
-	for _, q := range []struct{ kind, name string }{{"ldap", "_ldap._tcp.dc._msdcs." + domain}, {"kerberos", "_kerberos._tcp." + domain}} {
-		_, rows, e := resolver.LookupSRV(ctx, "", "", q.name)
-		if e != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
+	services := make([]Service, 0, 16)
+	var lookupErrors error
+	for _, query := range []struct{ kind, name string }{
+		{"ldap", "_ldap._tcp.dc._msdcs." + domain},
+		{"kerberos", "_kerberos._tcp." + domain},
+	} {
+		_, rows, currentErr := resolver.LookupSRV(operationContext, "", "", query.name)
+		if currentErr != nil {
+			if operationContext.Err() != nil {
+				return nil, operationContext.Err()
 			}
+			lookupErrors = errors.Join(lookupErrors, currentErr)
 			continue
 		}
-		for _, r := range rows {
-			target := strings.TrimSuffix(r.Target, ".")
-			if target != "" && dnsdata.ValidName(target, false) && r.Port > 0 {
-				services = append(services, Service{q.kind, target, r.Port, r.Priority, r.Weight})
+		if len(rows) > servicesMax-len(services) {
+			return nil, errors.New("AD discovery exceeds service safety limit")
+		}
+		for _, record := range rows {
+			if record == nil {
+				return nil, errors.New("AD discovery returned a missing service")
+			}
+			target := strings.TrimSuffix(record.Target, ".")
+			if target != "" && dnsdata.ValidName(target, false) && record.Port > 0 {
+				services = append(services, Service{
+					query.kind, target, record.Port, record.Priority, record.Weight,
+				})
 			}
 		}
 	}
-	sort.Slice(services, func(i, j int) bool {
-		a, b := services[i], services[j]
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
-		}
-		if a.Kind != b.Kind {
-			return a.Kind == "ldap"
-		}
-		if a.Weight != b.Weight {
-			return a.Weight > b.Weight
-		}
-		return a.Target < b.Target
-	})
+	if err := operationContext.Err(); err != nil {
+		return nil, err
+	}
+	sortServices(services)
 	if len(services) == 0 {
-		return nil, errors.New("no AD SRV records found; check AD DNS domain or enter individual DC hostname")
+		return nil, errors.Join(
+			errors.New("no AD SRV records found; check domain or enter a DC"),
+			lookupErrors,
+		)
 	}
 	return services, nil
+}
+
+func sortServices(services []Service) {
+	sort.Slice(services, func(index, rightIndex int) bool {
+		leftService, rightService := services[index], services[rightIndex]
+		if leftService.Priority != rightService.Priority {
+			return leftService.Priority < rightService.Priority
+		}
+		if leftService.Kind != rightService.Kind {
+			return leftService.Kind == "ldap"
+		}
+		if leftService.Weight != rightService.Weight {
+			return leftService.Weight > rightService.Weight
+		}
+		if leftService.Target != rightService.Target {
+			return leftService.Target < rightService.Target
+		}
+		return leftService.Port < rightService.Port
+	})
 }
