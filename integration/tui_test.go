@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -114,13 +115,13 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 		}
 		time.Sleep(60 * time.Millisecond)
 	}
-	wait("sambatui")
+	wait("dc.lab.invalid")
 	time.Sleep(500 * time.Millisecond)
 	send("z")
-	wait("records from")
+	wait("SOA")
 	// Zones are sorted: reverse, _msdcs.lab.invalid, lab.invalid.
 	send("\tjj\r")
-	wait("records from lab.invalid")
+	wait("SOA")
 	send("a")
 	wait("Choose DNS record type")
 	send("\x13")
@@ -130,24 +131,24 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 	send("\x15yes\x13")
 	wait("Confirm write")
 	send("yes\x13")
-	wait("Write acknowledged")
+	wait("Saved")
 	send("r")
-	wait("records from lab.invalid")
+	wait("SOA")
 	send("/")
-	wait("Filter current")
+	wait("Filter")
 	send("native-tui-proof\x13")
 	send("\tu")
 	wait("Update selected DNS record")
 	send("\x15192.0.2.151\x13")
 	wait("Confirm write")
 	send("yes\x13")
-	wait("Write acknowledged")
+	wait("Saved")
 	send("r")
-	wait("records from lab.invalid")
+	wait("192.0.2.151")
 	send("d")
 	wait("Confirm write")
 	send("yes\x13")
-	wait("Write acknowledged")
+	wait("Saved")
 	c, e := dnsrpc.Dial(ctx, cfg)
 	if e != nil {
 		t.Fatal(e)
@@ -162,17 +163,17 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 		t.Fatalf("terminal delete not reflected on server: %+v", rows)
 	}
 	if e != nil {
-		st, ok := e.(*dnsrpc.StatusError)
-		if !ok || st.Code != 9714 {
+		var status *dnsrpc.StatusError
+		if !errors.As(e, &status) || status.Code != 9714 {
 			t.Fatal(e)
 		}
 	}
 	send("l")
 	wait("LDAP search")
 	send("\x13")
-	wait("entries (limit")
+	wait("Administrator")
 	send("?")
-	wait("sambatui — native Go client")
+	wait("Ctrl+O")
 	send("\x1b")
 	send("Q")
 	if e = cmd.Wait(); e != nil {

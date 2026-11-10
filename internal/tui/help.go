@@ -1,50 +1,44 @@
 package tui
 
-const help = `sambatui — native Go client
+const help = `Ctrl+O  Connection (individual DC, verified TLS)
+Ctrl+P  Commands and AD service discovery
+z       DNS zones
+l       LDAP search
+q       DNS query
 
-Ctrl+O  Connection setup and private preferences
-Ctrl+P  Command palette (also AD service discovery)
-z       Enumerate DNS zones
-l       LDAP search (base, kind, text, row limit)
-q       Query DNS management records by name/type
+Tab     Switch panes (Shift+Tab also works)
+↑/↓     Move (j/k also work in the browser)
+PgUp/Dn Page; Ctrl+U/D half page
+g/G     First/last (Home/End also work)
+Enter   Open a sidebar item or row details
+/       Local, case-insensitive literal filter
+s       Change sort column/direction
+Space   Toggle batch selection (*)
+·       Active navigation choice (independent of keyboard focus)
+v       Set a range start, then select through the current row
+Esc     Clear selection/filter or close a dialog
+m       Load 200 more LDAP rows (maximum 5000)
+r       Refresh; clears selection
+!       Last error
 
-Tab     Switch sidebar/results focus
-j/k     Move; arrows also work
-PgUp/Dn Page movement; Ctrl+U/D half page
-g/G     First/last; Home/End also work
-Enter   Open sidebar item or row details; j/k scroll details
-/       Local literal filter
-s       Cycle sort field/direction
-Space   Toggle selection; v sets range anchor then selects range
-Esc     Clear selections/filter or dismiss form/details
-m       Load more LDAP rows (+200, maximum 5000)
-r       Refresh current view
+a       Add
+u/e     Edit one record/entry
+d       Delete selected records/entries
 
- a      Guided add (DNS type-specific fields or LDAP entry)
- u/e    Edit one selected record/entry
- d      Delete selected records/entries
+Forms: Tab next, Shift+Tab previous, Ctrl+U clear,
+Backspace erase, Ctrl+S submit, Esc cancel.
+Enter runs the selected command or applies a filter.
+Other forms: ↑/↓ or Tab to move, ←/→ to choose an option.
+Text fields: ←/→, Home/End and Delete edit at the caret.
+Passwords preserve whitespace. Writes require typing yes.
 
-Forms: Tab/Enter next field, Ctrl+U clear, Backspace erase,
-Ctrl+S preview/submit, Esc cancel. Password whitespace is preserved.
-All writes require typing yes after reviewing the original target.
-A form reservation prevents overlapping keyboard/palette/guided flows.
+Ctrl+C  Cancel a running write and wait for cleanup.
+        Cancellation is not rollback.
+R       Inspect an unknown outcome on the original DC.
+        Reconcile only after verifying the outcome and that
+        the remote operation has stopped.
 
-Ctrl+C  Request cancellation during writes; waits for worker cleanup.
-        Cancellation is NOT rollback. A lost response is NOT failure
-        to commit. Unknown outcomes block subsequent writes.
-R       Inspect uncertain write on original DC, then explicit manual
-        reconciliation. If the original operation might still be
-        pending, DO NOT acknowledge; investigate that DC first.
-
-LDAP conditional edits/deletes require advertised RFC 4528
-support AND a critical revision assertion. No unsafe fallback. Samba
-4.22 does not advertise this control; these writes are refused there.
-Reads/adds and DNS operations remain available.
-
-p       Load private password file (first line minus CR/LF)
-P       Save password privately after confirmation (not encrypted)
-Q       Quit only when no write flow is pending
-
-No telemetry, Python, Docker, samba-tool, klist, or native GSSAPI is
-used by the client. The existing remote DC is the server, not a client
-runtime dependency. Never point disposable integration tests at it.`
+p       Load the private password file
+P       Save the password unencrypted (0600)
+Ctrl+Z  Suspend/resume (not during a write)
+Q       Quit (not during a write)`
