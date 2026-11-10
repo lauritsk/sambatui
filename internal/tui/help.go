@@ -3,13 +3,10 @@ package tui
 const help = `sambatui — native Go client
 
 Ctrl+O  Connection setup and private preferences
-Ctrl+P  Command palette (also discovery and smart-view thresholds)
+Ctrl+P  Command palette (also AD service discovery)
 z       Enumerate DNS zones
 l       LDAP search (base, kind, text, row limit)
 q       Query DNS management records by name/type
-1–3     DNS duplicate/CNAME, A/PTR, PTR/A checks
-4–7     Inactive users, cleanup candidates, stale computers, groups
-8       Full health checks; failed/limited checks are explicit notices
 
 Tab     Switch sidebar/results focus
 j/k     Move; arrows also work
@@ -20,13 +17,12 @@ Enter   Open sidebar item or row details; j/k scroll details
 s       Cycle sort field/direction
 Space   Toggle selection; v sets range anchor then selects range
 Esc     Clear selections/filter or dismiss form/details
-m       Load more LDAP/smart rows (+200, maximum 5000)
+m       Load more LDAP rows (+200, maximum 5000)
 r       Refresh current view
 
  a      Guided add (DNS type-specific fields or LDAP entry)
  u/e    Edit one selected record/entry
  d      Delete selected records/entries
- f      Guided fix for one finding (PTR add / account disable)
 
 Forms: Tab/Enter next field, Ctrl+U clear, Backspace erase,
 Ctrl+S preview/submit, Esc cancel. Password whitespace is preserved.
@@ -40,7 +36,7 @@ R       Inspect uncertain write on original DC, then explicit manual
         reconciliation. If the original operation might still be
         pending, DO NOT acknowledge; investigate that DC first.
 
-LDAP conditional edits/deletes/disables require advertised RFC 4528
+LDAP conditional edits/deletes require advertised RFC 4528
 support AND a critical revision assertion. No unsafe fallback. Samba
 4.22 does not advertise this control; these writes are refused there.
 Reads/adds and DNS operations remain available.

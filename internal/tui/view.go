@@ -8,8 +8,8 @@ import (
 	"github.com/lauritsk/sambatui/internal/invariant"
 )
 
-const navigationHelp = "Tab pane · Enter details/open · z DNS · l LDAP · 1–8 findings · " +
-	"a/u/d write · f fix\n/ search · space select · v range · s sort · r refresh · " +
+const navigationHelp = "Tab pane · Enter details/open · z DNS · l LDAP · a/u/d write\n" +
+	"/ search · space select · v range · s sort · r refresh · " +
 	"R reconcile · Ctrl+O setup · ? help · Q quit"
 
 func (model *Model) View() string {

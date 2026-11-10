@@ -13,7 +13,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/config"
 	"github.com/lauritsk/sambatui/internal/directory"
 	"github.com/lauritsk/sambatui/internal/dnsrpc"
-	"github.com/lauritsk/sambatui/internal/health"
 	"github.com/lauritsk/sambatui/internal/journal"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
 )
@@ -24,7 +23,6 @@ type fakeService struct {
 	records  func(context.Context, config.Settings, string, string, uint16) ([]dnsrpc.Row, error)
 }
 
-func (f *fakeService) CheckLDAP(context.Context, config.Settings) error { return nil }
 func (f *fakeService) Zones(context.Context, config.Settings) ([]string, error) {
 	return []string{"lab.invalid", "2.0.192.in-addr.arpa"}, nil
 }
@@ -165,7 +163,7 @@ func TestFormsPreservePasswordWhitespaceAndCancelUndispatchedFlow(t *testing.T) 
 	f.Abort()
 }
 
-func TestGuidedPTRPlan(t *testing.T) {
+func TestOptionalPTRPlan(t *testing.T) {
 	m := testModel()
 	m.zone = "lab.invalid"
 	m.zones = []string{"lab.invalid", "2.0.192.in-addr.arpa"}
@@ -187,7 +185,7 @@ func TestGuidedPTRPlan(t *testing.T) {
 	}
 }
 
-func TestLDAPFormsMutationsAndGuidedDisable(t *testing.T) {
+func TestLDAPFormsMutations(t *testing.T) {
 	m := testModel()
 	m.mode = "ldap"
 	m.entries = []directory.Entry{{DN: "CN=Alice,DC=lab,DC=invalid", Name: "Alice", Kind: "user", Revision: "42", Attributes: map[string][]string{"displayname": {"Alice"}, "mail": {"old@lab.invalid"}, "description": {"before"}}}}
@@ -212,20 +210,6 @@ func TestLDAPFormsMutationsAndGuidedDisable(t *testing.T) {
 	p = m.service.(*fakeService).plans[1]
 	if p.Actions[0].Attributes["userPrincipalName"] != "new-user@lab.invalid" {
 		t.Fatal("UPN field lost")
-	}
-	m.mode = "health"
-	m.findings = []health.Finding{{Fix: "ldap_disable_account", Entry: m.entries[0], Flags: 66048}}
-	m.writeForm("f")
-	cmd = submit(m, "yes")
-	m.Update(cmd())
-	p = m.service.(*fakeService).plans[2]
-	if p.Actions[0].Flags != 66048 || p.Actions[0].Revision != "42" {
-		t.Fatal("disable did not preserve flags/revision")
-	}
-	m.findings[0].Fix = ""
-	m.writeForm("f")
-	if m.form != nil || m.flow != nil {
-		t.Fatal("unsupported fix reserved a mutation")
 	}
 }
 
@@ -255,27 +239,6 @@ func TestNavigationFiltersRangeSelectionAndPendingTargetInvalidation(t *testing.
 	m.Update(cmd())
 	if m.zone != "new.invalid" {
 		t.Fatal("wrong zone activation")
-	}
-}
-
-func TestDashboardSurfacesFailedChecks(t *testing.T) {
-	m := testModel()
-	m.healthCheck = 8
-	m.service.(*fakeService).records = func(context.Context, config.Settings, string, string, uint16) ([]dnsrpc.Row, error) {
-		return nil, errors.New("zone unavailable")
-	}
-	cmd := m.load("health")
-	if cmd == nil {
-		t.Fatal("dashboard not scheduled")
-	}
-	m.Update(cmd())
-	if m.mode != "health" || len(m.findings) < 7 {
-		t.Fatal("dashboard summaries missing")
-	}
-	for _, r := range m.findings[:3] {
-		if !strings.Contains(r.Finding, "incomplete") {
-			t.Fatal("failed zone presented as clean", r)
-		}
 	}
 }
 
@@ -322,10 +285,6 @@ func TestFiltersBelongToTheirView(t *testing.T) {
 		t.Fatal("DNS filter hid LDAP entries")
 	}
 	m.search = "directory-only"
-	m.setMode("health")
-	if m.search != "" {
-		t.Fatal("directory filter hid dashboard")
-	}
 	m.setMode("dns")
 	if m.search != "dns-only" {
 		t.Fatal("DNS filter was not restored")

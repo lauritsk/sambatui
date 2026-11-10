@@ -83,12 +83,6 @@ func (model *Model) writeForm(key string) tea.Cmd {
 	if err = flow.Snapshot.Settings.Validate(true); err != nil {
 		return model.rejectFlow(err)
 	}
-	if model.mode == "health" {
-		return model.fixForm(key)
-	}
-	if key == "f" {
-		return model.rejectFlow(errors.New("Guided fixes are available in findings views"))
-	}
 	indices := model.selectedIndices()
 	switch model.mode {
 	case "dns":

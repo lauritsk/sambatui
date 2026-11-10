@@ -86,8 +86,6 @@ func (model *Model) updateActionKey(key string) tea.Cmd {
 		return tea.Quit
 	case "?":
 		model.showDetails(help)
-	case "h":
-		model.findingsForm()
 	case "ctrl+o":
 		model.connectionForm()
 	case "ctrl+p":
@@ -110,7 +108,7 @@ func (model *Model) updateActionKey(key string) tea.Cmd {
 			return model.activateSide()
 		}
 		model.details()
-	case "a", "u", "e", "d", "f":
+	case "a", "u", "e", "d":
 		return model.writeForm(key)
 	case "m":
 		return model.loadMore()
@@ -118,9 +116,6 @@ func (model *Model) updateActionKey(key string) tea.Cmd {
 		model.loadPassword()
 	case "P":
 		model.savePasswordForm()
-	case "1", "2", "3", "4", "5", "6", "7", "8":
-		model.healthCheck = int(key[0] - '0')
-		return model.load("health")
 	default:
 		model.updateNavigationKey(key)
 	}
@@ -175,15 +170,11 @@ func (model *Model) updateNavigationKey(key string) {
 }
 
 func (model *Model) loadMore() tea.Cmd {
-	switch model.mode {
-	case "health":
-		model.settings.MaxRows = min(5000, model.settings.MaxRows+200)
-	case "ldap":
-		model.settings.LDAPMaxRows = min(5000, model.settings.LDAPMaxRows+200)
-	default:
-		model.status = "Load more is available for directory/findings views"
+	if model.mode != "ldap" {
+		model.status = "Load more is available for the directory view"
 		return nil
 	}
+	model.settings.LDAPMaxRows = min(5000, model.settings.LDAPMaxRows+200)
 	model.state.Change(model.settings)
 	model.selected = map[int]bool{}
 	return model.load(model.mode)

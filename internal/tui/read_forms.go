@@ -2,7 +2,6 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/backend"
 	"github.com/lauritsk/sambatui/internal/directory"
 	"github.com/lauritsk/sambatui/internal/dnsdata"
-	"github.com/lauritsk/sambatui/internal/health"
 )
 
 func (model *Model) searchForm() {
@@ -93,8 +91,8 @@ func (model *Model) ldapForm() {
 func (model *Model) commandForm() {
 	model.openForm(
 		"Command palette",
-		"Commands: zones, directory, query, add, update, delete, fix, "+
-			"health, connection, discover, thresholds, reconcile, help",
+		"Commands: zones, directory, query, add, update, delete, "+
+			"connection, discover, reconcile, help",
 		[]field{{"Command", "", false}},
 		false,
 		func(values []string) tea.Cmd {
@@ -111,17 +109,10 @@ func (model *Model) commandForm() {
 				return model.writeForm("u")
 			case "delete":
 				return model.writeForm("d")
-			case "fix":
-				return model.writeForm("f")
-			case "health":
-				model.healthCheck = 8
-				return model.load("health")
 			case "connection":
 				model.connectionForm()
 			case "discover":
 				return model.discoverForm()
-			case "thresholds":
-				model.thresholdForm()
 			case "reconcile":
 				return model.reconcile()
 			case "help":
@@ -130,28 +121,6 @@ func (model *Model) commandForm() {
 				model.status = "Unknown command"
 			}
 			return nil
-		},
-	)
-}
-
-func (model *Model) findingsForm() {
-	text := ""
-	for index, label := range health.Labels {
-		text += fmt.Sprintf("%d: %s\n", index+1, label)
-	}
-	model.openForm(
-		"Choose findings view",
-		text,
-		[]field{{"View number 1–8", "8", false}},
-		false,
-		func(values []string) tea.Cmd {
-			count, err := strconv.Atoi(values[0])
-			if err != nil || count < 1 || count > 8 {
-				model.error(errors.New("choose view 1–8"))
-				return nil
-			}
-			model.healthCheck = count
-			return model.load("health")
 		},
 	)
 }

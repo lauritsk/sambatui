@@ -155,7 +155,7 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 	defer c.Close()
 	ptr, e := c.Records(ctx, "2.0.192.in-addr.arpa", "150", dns.TypePTR)
 	if e != nil || len(ptr) != 1 || ptr[0].Value != "native-tui-proof.lab.invalid." {
-		t.Fatalf("guided PTR not reflected on server: %+v %v", ptr, e)
+		t.Fatalf("optional PTR not reflected on server: %+v %v", ptr, e)
 	}
 	rows, e := c.Records(ctx, "lab.invalid", "native-tui-proof", dns.TypeANY)
 	if e == nil && len(rows) != 0 {
@@ -171,10 +171,6 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 	wait("LDAP search")
 	send("\x13")
 	wait("entries (limit")
-	send("h")
-	wait("Choose findings view")
-	send("\x13")
-	wait("findings/check notices")
 	send("?")
 	wait("sambatui — native Go client")
 	send("\x1b")
@@ -188,5 +184,5 @@ func TestDisposableTerminalWriteLifecycle(t *testing.T) {
 	if strings.Contains(transcript, "Disposable-test-only") {
 		t.Fatal("credential exposed by terminal")
 	}
-	fmt.Println("Native PTY: DNS add/update/delete, LDAP paging view, dashboard, help and clean quit verified")
+	fmt.Println("Native PTY: DNS add/update/delete, LDAP paging view, help and clean quit verified")
 }

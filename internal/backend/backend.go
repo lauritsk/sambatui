@@ -31,17 +31,12 @@ type Plan struct {
 }
 
 type Service interface {
-	CheckLDAP(context.Context, config.Settings) error
 	Zones(context.Context, config.Settings) ([]string, error)
 	Records(context.Context, config.Settings, string, string, uint16) ([]dnsrpc.Row, error)
 	Search(context.Context, config.Settings, string, string, string, int) ([]directory.Entry, error)
 	Execute(context.Context, config.Settings, Plan) lifecycle.Outcome
 }
 type Native struct{}
-
-func (Native) CheckLDAP(operationContext context.Context, settings config.Settings) error {
-	return directory.New(settings.LDAP()).Check(operationContext)
-}
 
 func (Native) Zones(operationContext context.Context, settings config.Settings) ([]string, error) {
 	client, err := dnsrpc.Dial(operationContext, settings.DNS())

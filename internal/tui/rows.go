@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/config"
-	"github.com/lauritsk/sambatui/internal/health"
 )
 
 func (model *Model) visible() []int {
@@ -43,15 +42,7 @@ func (model *Model) sortKey(index int) string {
 		entry := model.entries[index]
 		return []string{entry.Name, entry.Kind, entry.DN}[model.sortField]
 	default:
-		finding := model.findings[index]
-		if model.healthCheck == 8 {
-			return fmt.Sprintf("%02d:%09d", finding.Check, index)
-		}
-		return []string{
-			fmt.Sprint(health.Rank(finding.Severity)),
-			finding.Object,
-			finding.Finding,
-		}[model.sortField]
+		panic("unknown view mode")
 	}
 }
 
@@ -74,14 +65,6 @@ func (model *Model) rowTexts() []string {
 	case "ldap":
 		for _, entry := range model.entries {
 			out = append(out, Literal(entry.Name)+"  "+Literal(entry.Kind)+"  "+Literal(entry.DN))
-		}
-	case "health":
-		for _, finding := range model.findings {
-			out = append(
-				out,
-				Literal(finding.Severity)+"  "+Literal(finding.Object)+"  "+
-					Literal(finding.Finding),
-			)
 		}
 	}
 	return out
@@ -166,12 +149,6 @@ func (model *Model) details() {
 		for _, key := range keys {
 			text += key + ": " + strings.Join(entry.Attributes[key], "; ") + "\n"
 		}
-	case "health":
-		finding := model.findings[index]
-		text = finding.Object + "\n" + finding.Finding + "\n" + finding.Evidence + "\nSuggested: " +
-			finding.Action +
-			"\nGuided fix: " +
-			finding.Fix
 	}
 	model.showDetails(text)
 }

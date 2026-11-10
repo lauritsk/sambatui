@@ -13,7 +13,6 @@ import (
 	"github.com/lauritsk/sambatui/internal/directory"
 	"github.com/lauritsk/sambatui/internal/discovery"
 	"github.com/lauritsk/sambatui/internal/dnsrpc"
-	"github.com/lauritsk/sambatui/internal/health"
 	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/journal"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
@@ -25,7 +24,6 @@ type readResult struct {
 	zones                 []string
 	records               []dnsrpc.Row
 	entries, folders      []directory.Entry
-	findings              []health.Finding
 	err                   error
 }
 type writeResult struct {
@@ -46,8 +44,6 @@ type Model struct {
 	zones                                         []string
 	records                                       []dnsrpc.Row
 	entries, folders                              []directory.Entry
-	findings                                      []health.Finding
-	healthCheck                                   int
 	selected                                      map[int]bool
 	cursor, sideCursor                            int
 	sidebar                                       bool
@@ -166,7 +162,6 @@ func (model *Model) clear() {
 	model.records = nil
 	model.entries = nil
 	model.folders = nil
-	model.findings = nil
 	model.selected = map[int]bool{}
 	model.cursor = 0
 	model.sideCursor = 0
@@ -205,7 +200,7 @@ func (model *Model) load(kind string) tea.Cmd {
 	model.readCancel = cancel
 	request := readRequest{
 		snapshot: snapshot, requestID: model.readID, kind: kind, zone: model.zone, base: model.base,
-		searchKind: model.kind, query: model.query, check: model.healthCheck,
+		searchKind: model.kind, query: model.query,
 		queryType: model.dnsQueryType, queryName: model.dnsQueryName,
 	}
 	model.selected = map[int]bool{}
@@ -219,9 +214,6 @@ func (model *Model) load(kind string) tea.Cmd {
 		model.setMode("ldap")
 		model.entries = nil
 		model.folders = nil
-	case "health":
-		model.setMode("health")
-		model.findings = nil
 	}
 	service := model.service
 	model.status = "Loading " + kind + "…"
@@ -265,7 +257,7 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 	model.cursor = 0
 	model.anchor = -1
 	switch result.kind {
-	case "zones", "setup":
+	case "zones":
 		model.zones = result.zones
 		model.status = fmt.Sprintf("Loaded %d zones", len(result.zones))
 		if len(result.zones) > 0 {
@@ -287,10 +279,6 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 			len(result.entries),
 			model.settings.LDAPMaxRows,
 		)
-	case "health":
-		model.setMode("health")
-		model.findings = result.findings
-		model.status = fmt.Sprintf("%d findings/check notices", len(result.findings))
 	}
 	return nil
 }

@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,46 +71,7 @@ func (model *Model) connectionForm() {
 			if err := config.Save(model.configPath, settings); err != nil {
 				model.error(err)
 			}
-			return model.load("setup")
-		},
-	)
-}
-
-func (model *Model) thresholdForm() {
-	settings := model.settings
-	model.openForm(
-		"Smart-view thresholds",
-		"Days are conservative hygiene hints, not automatic deletion policy.",
-		[]field{
-			{"Inactive days", formatSetting(settings.Days), false},
-			{"Disabled retention days", formatSetting(settings.DisabledDays), false},
-			{"Never logged in days", formatSetting(settings.NeverLoggedDays), false},
-			{"Max rows", strconv.Itoa(settings.MaxRows), false},
-		},
-		false,
-		func(values []string) tea.Cmd {
-			var err error
-			settings.Days, err = parseSetting(values[0])
-			if err == nil {
-				settings.DisabledDays, err = parseSetting(values[1])
-			}
-			if err == nil {
-				settings.NeverLoggedDays, err = parseSetting(values[2])
-			}
-			if err == nil {
-				settings.MaxRows, err = strconv.Atoi(values[3])
-			}
-			if err == nil {
-				err = settings.Validate(false)
-			}
-			if err != nil {
-				model.error(err)
-				return nil
-			}
-			model.settings = settings
-			model.state.Change(settings)
-			model.error(config.Save(model.configPath, settings))
-			return nil
+			return model.load("zones")
 		},
 	)
 }
