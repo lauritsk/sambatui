@@ -72,7 +72,7 @@ func TestAssertionControlOnActualLDAPWire(t *testing.T) {
 				}
 				mu.Lock()
 				defer mu.Unlock()
-				expected, _ := Assertion(revision, nil)
+				expected, _ := Assertion(revision)
 				matches := bytes.Equal(control.Bytes(), expected.Encode().Bytes())
 				if !matches {
 					return reply(server, id, ldap.ApplicationModifyResponse, 122, nil)

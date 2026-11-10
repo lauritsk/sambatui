@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -25,15 +24,11 @@ func decimal(text string) bool {
 	return true
 }
 
-func Assertion(revision string, flags *uint32) (ldap.Control, error) {
+func Assertion(revision string) (ldap.Control, error) {
 	if len(revision) > 20 || !decimal(revision) {
 		return nil, errors.New("missing or invalid LDAP revision; refresh before writing")
 	}
-	filter := "(&(uSNChanged=" + revision + ")"
-	if flags != nil {
-		filter += "(userAccountControl=" + strconv.FormatUint(uint64(*flags), 10) + ")"
-	}
-	filter += ")"
+	filter := "(uSNChanged=" + revision + ")"
 	packet, err := ldap.CompileFilter(filter)
 	if err != nil {
 		return nil, err
@@ -203,7 +198,7 @@ func (client *Client) Modify(
 	if currentErr := client.scope(dn); currentErr != nil {
 		return currentErr
 	}
-	control, currentErr := Assertion(revision, nil)
+	control, currentErr := Assertion(revision)
 	if currentErr != nil {
 		return currentErr
 	}
@@ -238,32 +233,13 @@ func (client *Client) Delete(operationContext context.Context, dn, revision stri
 	if EqualDN(dn, client.settings.BaseDN) {
 		return errors.New("refusing to delete LDAP base DN")
 	}
-	control, err := Assertion(revision, nil)
+	control, err := Assertion(revision)
 	if err != nil {
 		return err
 	}
 	request := ldap.NewDelRequest(dn, []ldap.Control{control})
 	return client.write(operationContext, true, func(session Session) error {
 		return session.Del(request)
-	})
-}
-
-func (client *Client) Disable(
-	operationContext context.Context,
-	dn, revision string,
-	flags uint32,
-) error {
-	if err := client.scope(dn); err != nil {
-		return err
-	}
-	control, err := Assertion(revision, &flags)
-	if err != nil {
-		return err
-	}
-	request := ldap.NewModifyRequest(dn, []ldap.Control{control})
-	request.Replace("userAccountControl", []string{strconv.FormatUint(uint64(flags|2), 10)})
-	return client.write(operationContext, true, func(session Session) error {
-		return session.Modify(request)
 	})
 }
 

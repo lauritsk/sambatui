@@ -41,7 +41,7 @@ func TestDisposableSamba(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			c := cfg
 			c.Encryption = mode
-			if e := New(c).Check(ctx); e != nil {
+			if _, e := New(c).Search(ctx, "", "users", "", 1); e != nil {
 				t.Fatal(e)
 			}
 		})
@@ -49,21 +49,21 @@ func TestDisposableSamba(t *testing.T) {
 	t.Run("untrusted certificate", func(t *testing.T) {
 		c := cfg
 		c.CAFile = ""
-		if e := New(c).Check(ctx); e == nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e == nil {
 			t.Fatal("untrusted certificate accepted")
 		}
 	})
 	t.Run("hostname verification", func(t *testing.T) {
 		c := cfg
 		c.Server = "localhost"
-		if e := New(c).Check(ctx); e == nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e == nil {
 			t.Fatal("wrong hostname accepted")
 		}
 	})
 	t.Run("wrong password", func(t *testing.T) {
 		c := cfg
 		c.Password = auth.NewSecret("wrong")
-		if e := New(c).Check(ctx); e == nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e == nil {
 			t.Fatal("wrong password accepted")
 		}
 	})
@@ -71,18 +71,18 @@ func TestDisposableSamba(t *testing.T) {
 		c := cfg
 		c.User = "Whitespace@lab.invalid"
 		c.Password = auth.NewSecret("  Disposable-test-only_42!  ")
-		if e := New(c).Check(ctx); e != nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e != nil {
 			t.Fatal(e)
 		}
 		c.Password = auth.NewSecret("Disposable-test-only_42!")
-		if e := New(c).Check(ctx); e == nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e == nil {
 			t.Fatal("trimmed password accepted")
 		}
 	})
 	t.Run("NTLM with channel binding", func(t *testing.T) {
 		c := cfg
 		c.User = `LAB\Administrator`
-		if e := New(c).Check(ctx); e != nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e != nil {
 			t.Fatal(e)
 		}
 	})
@@ -99,7 +99,7 @@ func TestDisposableSamba(t *testing.T) {
 		c.KerberosConfig = "/tmp/native-ad/krb5.conf"
 		c.User = "Administrator@lab.invalid"
 		c.Password = auth.NewSecret("")
-		if e := New(c).Check(ctx); e != nil {
+		if _, e := New(c).Search(ctx, "", "users", "", 1); e != nil {
 			t.Fatal(e)
 		}
 		_, e = New(c).Add(ctx, "group", cfg.BaseDN, "NoPermission", nil)
@@ -109,7 +109,7 @@ func TestDisposableSamba(t *testing.T) {
 		t.Log(e)
 		c.Cache = "FILE:/tmp/native-ad/missing"
 		c.CacheContents = auth.Secret{}
-		if e = New(c).Check(ctx); e == nil {
+		if _, e = New(c).Search(ctx, "", "users", "", 1); e == nil {
 			t.Fatal("missing selected cache accepted")
 		}
 	})
@@ -173,9 +173,6 @@ func TestDisposableSamba(t *testing.T) {
 		t.Fatal("Samba unexpectedly supports assertion delete")
 	} else {
 		t.Log("conditional delete:", e)
-	}
-	if e = cl.Disable(ctx, dn, groups[0].Revision, 512); e == nil {
-		t.Fatal("unsupported conditional disable succeeded")
 	}
 	groups, e = cl.Search(ctx, "", "groups", name, 10)
 	if e != nil || len(groups) != 1 || groups[0].First("description") != "before" {

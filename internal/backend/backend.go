@@ -19,7 +19,6 @@ import (
 type Action struct {
 	Kind, Zone, Name, Type, Value, OldValue, DN, Revision, EntryKind, Parent string
 	Attributes                                                               map[string]string
-	Flags                                                                    uint32
 }
 
 // MaxActions bounds confirmation size and sequential remote work per write flow.
@@ -141,8 +140,6 @@ func executeAction(
 		)
 	case "ldap_delete":
 		return client.Delete(operationContext, action.DN, action.Revision)
-	case "ldap_disable":
-		return client.Disable(operationContext, action.DN, action.Revision, action.Flags)
 	default:
 		panic("validated write action has unknown kind")
 	}

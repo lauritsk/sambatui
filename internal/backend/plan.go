@@ -70,11 +70,11 @@ func (action Action) validate(settings config.Settings) error {
 			action.Attributes,
 		)
 		return err
-	case "ldap_modify", "ldap_delete", "ldap_disable":
+	case "ldap_modify", "ldap_delete":
 		if !directory.InScope(action.DN, settings.BaseDN) {
 			return errors.New("LDAP target outside configured base")
 		}
-		if _, err := directory.Assertion(action.Revision, nil); err != nil {
+		if _, err := directory.Assertion(action.Revision); err != nil {
 			return err
 		}
 		if action.Kind == "ldap_delete" && directory.EqualDN(action.DN, settings.BaseDN) {
@@ -138,15 +138,6 @@ func (plan Plan) Preview() string {
 			previewAttributes(&text, action.Attributes)
 		case "ldap_delete":
 			fmt.Fprintf(&text, "DELETE %s at revision %s\n", action.DN, action.Revision)
-		case "ldap_disable":
-			fmt.Fprintf(
-				&text,
-				"Disable %s at revision %s; UAC %d -> %d\n",
-				action.DN,
-				action.Revision,
-				action.Flags,
-				action.Flags|2,
-			)
 		}
 	}
 	text.WriteString(

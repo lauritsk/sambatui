@@ -101,8 +101,8 @@ func TestConditionalCapabilitiesFailClosedOnMalformedResults(t *testing.T) {
 			t.Fatal("malformed capability check dispatched a write")
 			return nil
 		}}
-		if err := fakeClient(session).Disable(context.Background(),
-			"CN=x,DC=lab,DC=invalid", "1", 512); err == nil {
+		if err := fakeClient(session).Modify(context.Background(),
+			"CN=x,DC=lab,DC=invalid", "user", "1", map[string]string{"mail": "x@lab.invalid"}); err == nil {
 			t.Fatal("accepted malformed capabilities")
 		}
 	}

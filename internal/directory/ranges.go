@@ -16,7 +16,7 @@ const (
 )
 
 // Drain AD's ranged attributes on the same session: treating a ranged memberOf
-// as absent would produce false hygiene findings. Publish only complete entries.
+// as absent would hide directory memberships. Publish only complete entries.
 func expandRanges(operationContext context.Context, session Session, entry *ldap.Entry) error {
 	return expandRangesBudget(operationContext, session, entry, newReadBudget())
 }

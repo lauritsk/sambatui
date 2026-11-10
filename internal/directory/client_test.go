@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +59,7 @@ func asserted(t *testing.T, controls []ldap.Control, want string) {
 	}
 }
 
-func TestConditionalWritesAndPreservedFlags(t *testing.T) {
+func TestConditionalWrites(t *testing.T) {
 	writes := 0
 	f := &fakeSession{search: advertised}
 	c := fakeClient(f)
@@ -69,30 +68,21 @@ func TestConditionalWritesAndPreservedFlags(t *testing.T) {
 		if r.DN != "CN=Alice,DC=lab,DC=invalid" {
 			t.Fatal("wrong DN")
 		}
-		if writes == 1 {
-			asserted(t, r.Controls, "(&(uSNChanged=42))")
-			if r.Changes[0].Operation != ldap.ReplaceAttribute {
-				t.Fatal("modify operation")
-			}
-		} else {
-			asserted(t, r.Controls, "(&(uSNChanged=43)(userAccountControl=66048))")
-			if !reflect.DeepEqual(r.Changes[0].Modification.Vals, []string{"66050"}) {
-				t.Fatal("unrelated UAC flags lost")
-			}
+		asserted(t, r.Controls, "(uSNChanged=42)")
+		if r.Changes[0].Operation != ldap.ReplaceAttribute ||
+			r.Changes[0].Modification.Type != "mail" {
+			t.Fatal("unexpected modify operation")
 		}
 		return nil
 	}
 	if e := c.Modify(context.Background(), "CN=Alice,DC=lab,DC=invalid", "user", "42", map[string]string{"mail": "alice@lab.invalid"}); e != nil {
 		t.Fatal(e)
 	}
-	if e := c.Disable(context.Background(), "CN=Alice,DC=lab,DC=invalid", "43", 66048); e != nil {
-		t.Fatal(e)
-	}
-	f.del = func(r *ldap.DelRequest) error { writes++; asserted(t, r.Controls, "(&(uSNChanged=44))"); return nil }
+	f.del = func(r *ldap.DelRequest) error { writes++; asserted(t, r.Controls, "(uSNChanged=44)"); return nil }
 	if e := c.Delete(context.Background(), "CN=Alice,DC=lab,DC=invalid", "44"); e != nil {
 		t.Fatal(e)
 	}
-	if writes != 3 || f.closed != 3 {
+	if writes != 2 || f.closed != 2 {
 		t.Fatalf("writes %d closes %d", writes, f.closed)
 	}
 }
@@ -109,7 +99,7 @@ func TestServerRejectsCriticalControlNoRetry(t *testing.T) {
 		calls := 0
 		f := &fakeSession{search: advertised, modify: func(r *ldap.ModifyRequest) error {
 			calls++
-			asserted(t, r.Controls, "(&(uSNChanged=1))")
+			asserted(t, r.Controls, "(uSNChanged=1)")
 			return ldap.NewError(code, errors.New("synthetic refusal"))
 		}}
 		e := fakeClient(f).Modify(context.Background(), "CN=x,DC=lab,DC=invalid", "group", "1", map[string]string{"description": "value"})
