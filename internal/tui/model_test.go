@@ -137,18 +137,19 @@ func TestFormsPreservePasswordWhitespaceAndCancelUndispatchedFlow(t *testing.T) 
 	m.connectionForm()
 	m.form.Cursor = 5
 	m.form.Fields[5].Value = ""
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("  password \t")})
-	if m.form.Fields[5].text() != "  password \t" {
+	// Distinct from the visible "password" authentication method label.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("  private-passphrase \t")})
+	if m.form.Fields[5].text() != "  private-passphrase \t" {
 		t.Fatal("password spaces lost")
 	}
-	if strings.Contains(m.formView(), "  password ") {
+	if strings.Contains(m.formView(), "  private-passphrase ") {
 		t.Fatal("password shown in clear")
 	}
 	for _, format := range []string{"%v", "%#v", "%d", "%f", "%p"} {
-		if strings.Contains(fmt.Sprintf(format, *m), "  password ") {
+		if strings.Contains(fmt.Sprintf(format, *m), "  private-passphrase ") {
 			t.Fatal("password leaked through model debug formatting")
 		}
-		if strings.Contains(fmt.Sprintf(format, m.form.Fields[5]), "  password ") {
+		if strings.Contains(fmt.Sprintf(format, m.form.Fields[5]), "  private-passphrase ") {
 			t.Fatal("password leaked through form-field formatting")
 		}
 	}

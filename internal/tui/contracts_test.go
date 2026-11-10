@@ -6,6 +6,35 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func TestRenderingContractsRejectInvalidArguments(t *testing.T) {
+	model := testModel()
+	for _, test := range []struct {
+		name    string
+		invalid func()
+	}{
+		{"frame width", func() { frame(nil, 0, 1) }},
+		{"frame height", func() { frame(nil, 1, terminalRowsMax+1) }},
+		{"preview width", func() { wrappedPage("", 0, 0, 1) }},
+		{"preview height", func() { wrappedPage("", 20, 0, 0) }},
+		{"preview offset", func() { wrappedPage("", 20, -1, 1) }},
+		{"detail height", func() { model.detailLines(1) }},
+		{"missing form", func() { model.formLines(2) }},
+		{"cell width", func() { cell("text", 0) }},
+		{"negative row", func() { model.rowColumns(-1, tableGeometry{width: 20}) }},
+		{"field width", func() { fieldValue(field{Value: "text"}, 2, true) }},
+		{"browser height", func() { model.browserLines(terminalRowsMax+1, nil) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid programmer argument did not fail its contract")
+				}
+			}()
+			test.invalid()
+		})
+	}
+}
+
 func TestTerminalDimensionsAreBounded(t *testing.T) {
 	model := testModel()
 	for _, size := range []int{-1, 0, 1, int(^uint(0) >> 1)} {

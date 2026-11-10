@@ -31,9 +31,8 @@ type writeResult struct {
 	flow       *lifecycle.Flow
 }
 type Model struct {
-	lastError                                     string
-	errorUnread                                   bool
 	theme                                         theme
+	lastError, loading                            string
 	state                                         *lifecycle.State
 	journal                                       *journal.Store
 	restarted                                     *journal.Record
@@ -54,7 +53,8 @@ type Model struct {
 	readCancel, writeCancel                       context.CancelFunc
 	flow                                          *lifecycle.Flow
 	form                                          *form
-	detail                                        string
+	detail, detailTitle                           string
+	writeCancelling, errorUnread                  bool
 	detailOffset                                  int
 	lastPlan                                      backend.Plan
 	lastWrite                                     lifecycle.Snapshot
@@ -84,7 +84,6 @@ func New(settings config.Settings, path string, service backend.Service) *Model 
 		kind:         "users",
 		selected:     map[int]bool{},
 		filterByMode: map[string]string{},
-		status:       "Ctrl+O setup · z zones · l directory · ? help",
 		theme:        newTheme(false),
 		width:        100,
 		height:       30,
@@ -184,6 +183,7 @@ func (model *Model) clear() {
 	model.zone = ""
 	model.anchor = -1
 	model.detail = ""
+	model.loading = ""
 	model.readID = invariant.Next(model.readID)
 	if model.readCancel != nil {
 		model.readCancel()
@@ -195,7 +195,7 @@ func (model *Model) setConnection(settings config.Settings) {
 	model.state.Change(settings)
 	model.clear()
 	model.base = settings.BaseDN
-	model.status = "Connection changed; all loaded data and selections invalidated."
+	model.status = ""
 }
 
 func (model *Model) load(kind string) tea.Cmd {
@@ -225,7 +225,8 @@ func (model *Model) load(kind string) tea.Cmd {
 		model.folders = nil
 	}
 	service := model.service
-	model.status = "Loading " + kind + "…"
+	model.loading = kind
+	model.status = ""
 	return func() tea.Msg {
 		defer cancel()
 		return runRead(operationContext, service, request)
@@ -237,7 +238,6 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	defer model.assertValid()
 	switch value := message.(type) {
 	case tea.WindowSizeMsg:
-		// Terminal dimensions are external input; cap rendering and arithmetic.
 		model.width = max(1, min(value.Width, terminalColumnsMax))
 		model.height = max(1, min(value.Height, terminalRowsMax))
 	case readResult:
@@ -258,6 +258,10 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 	if !model.readCurrent(result.generation, result.requestID) {
 		return nil
 	}
+	model.loading = ""
+	defer func() {
+		model.sideCursor = min(model.sideCursor, max(0, len(model.sideLabels())-1))
+	}()
 	if result.err != nil {
 		model.error(result.err)
 		return nil
@@ -265,10 +269,10 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 	model.selected = map[int]bool{}
 	model.cursor = 0
 	model.anchor = -1
+	model.status = ""
 	switch result.kind {
 	case "zones":
 		model.zones = result.zones
-		model.status = fmt.Sprintf("Loaded %d zones", len(result.zones))
 		if len(result.zones) > 0 {
 			if !contains(result.zones, model.zone) {
 				model.zone = result.zones[0]
@@ -278,16 +282,10 @@ func (model *Model) updateRead(result readResult) tea.Cmd {
 	case "dns", "query":
 		model.setMode("dns")
 		model.records = result.records
-		model.status = fmt.Sprintf("%d records from %s", len(result.records), model.zone)
 	case "ldap":
 		model.setMode("ldap")
 		model.entries = result.entries
 		model.folders = result.folders
-		model.status = fmt.Sprintf(
-			"%d entries (limit %d)",
-			len(result.entries),
-			model.settings.LDAPMaxRows,
-		)
 	}
 	return nil
 }
@@ -301,12 +299,13 @@ func (model *Model) updateWrite(result writeResult) {
 	}
 	model.flow = nil
 	model.writeCancel = nil
+	model.writeCancelling = false
 	if result.out.Err != nil {
 		model.error(result.out.Err)
 	} else {
-		model.status = "Write acknowledged by original DC. Refresh to inspect current state."
-	}
-	if result.out.Uncertain {
-		model.status += " OUTCOME UNCERTAIN: further writes blocked. Press R to inspect/reconcile."
+		model.status = "Saved · r refresh"
+		if model.lastWrite.Settings.Server != model.settings.Server {
+			model.status = "Saved on " + model.lastWrite.Settings.Server
+		}
 	}
 }

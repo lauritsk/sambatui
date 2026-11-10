@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lauritsk/sambatui/internal/config"
 )
@@ -36,11 +34,21 @@ func (model *Model) updateKey(key tea.KeyMsg) tea.Cmd {
 
 func (model *Model) updateSingleKey(message tea.KeyMsg) tea.Cmd {
 	key := message.String()
+	if model.writeCancel == nil {
+		model.status = ""
+	}
+	if key == "ctrl+z" {
+		if model.writeCancel != nil {
+			model.status = "Cannot suspend during a write; cancel and drain it first."
+			return nil
+		}
+		return tea.Suspend
+	}
 	if key == "ctrl+c" {
 		if model.writeCancel != nil {
 			model.writeCancel()
-			model.status = "Cancellation requested; waiting for worker cleanup. This is " +
-				"not rollback."
+			model.writeCancelling = true
+			model.status = "Cancelling · not rollback"
 			return nil
 		}
 		if model.form != nil {
@@ -60,19 +68,20 @@ func (model *Model) updateSingleKey(message tea.KeyMsg) tea.Cmd {
 }
 
 func (model *Model) updateDetailKey(key string) {
+	width, page := model.detailViewport()
+	last := max(0, wrappedPage(model.detail, width, 0, page).totalRows-page)
+	offset := min(model.detailOffset, last)
 	switch key {
 	case "esc", "enter", "q":
 		model.detail = ""
 	case "j", "down":
-		model.detailOffset = min(model.detailOffset+1, strings.Count(model.detail, "\n"))
+		model.detailOffset = min(offset+1, last)
 	case "k", "up":
-		model.detailOffset = max(0, model.detailOffset-1)
+		model.detailOffset = max(0, offset-1)
 	case "pgdown":
-		model.detailOffset = min(
-			model.detailOffset+max(1, model.height-8), strings.Count(model.detail, "\n"),
-		)
+		model.detailOffset = min(offset+page, last)
 	case "pgup":
-		model.detailOffset = max(0, model.detailOffset-max(1, model.height-8))
+		model.detailOffset = max(0, offset-page)
 	}
 }
 
@@ -85,7 +94,9 @@ func (model *Model) updateActionKey(key string) tea.Cmd {
 		}
 		return tea.Quit
 	case "?":
-		model.showDetails(help)
+		model.showHelp()
+	case "!":
+		model.showLastError()
 	case "ctrl+o":
 		model.connectionForm()
 	case "ctrl+p":
@@ -124,7 +135,7 @@ func (model *Model) updateActionKey(key string) tea.Cmd {
 
 func (model *Model) updateNavigationKey(key string) {
 	switch key {
-	case "tab":
+	case "tab", "shift+tab":
 		model.sidebar = !model.sidebar
 	case "j", "down":
 		model.move(1)

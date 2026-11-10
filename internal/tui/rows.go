@@ -106,8 +106,27 @@ func (model *Model) move(delta int) {
 }
 
 func (model *Model) showDetails(text string) {
+	if err := validateViewText(text); err != nil {
+		model.error(err)
+		return
+	}
 	model.detail = text
+	model.detailTitle = "Details"
 	model.detailOffset = 0
+}
+
+func (model *Model) showHelp() {
+	model.showDetails(help)
+	model.detailTitle = "Help"
+}
+
+func (model *Model) showLastError() {
+	if model.lastError != "" {
+		model.showDetails(model.lastError)
+		model.detailTitle = "Last error"
+		model.errorUnread = false
+		model.status = ""
+	}
 }
 
 func (model *Model) details() {

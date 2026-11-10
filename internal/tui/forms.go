@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/lauritsk/sambatui/internal/auth"
 	"github.com/lauritsk/sambatui/internal/invariant"
 	"github.com/lauritsk/sambatui/internal/lifecycle"
@@ -88,13 +87,15 @@ func (model *Model) openForm(
 	write bool,
 	accept func([]string) tea.Cmd,
 ) {
-	// Form shape is a programmer invariant, not untrusted input. A malformed
-	// form must fail here, before cursor arithmetic can divide by zero.
 	if len(fields) == 0 {
 		panic("form requires at least one field")
 	}
 	invariant.Require(len(fields) <= formFieldsMax, "form has too many fields")
 	invariant.Require(accept != nil, "form requires an accept callback")
+	if err := validateViewText(context); err != nil {
+		model.rejectFlow(err)
+		return
+	}
 	for index := range fields {
 		if len(fields[index].text()) > formFieldBytesMax {
 			model.rejectFlow(errors.New("form field exceeds 1 MiB; refine the target"))
@@ -112,7 +113,11 @@ func (model *Model) openForm(
 		return accept(values)
 	}
 	model.form = &form{Title: title, Context: context, Fields: fields, Write: write, Accept: submit}
-	model.status = "Tab/Enter next · Ctrl+S submit · Ctrl+U clear field · Esc cancel"
+	if write {
+		invariant.Require(model.flow != nil, "write form requires a reservation")
+		model.form.Owner = model.flow
+	}
+	model.status = ""
 }
 
 func (model *Model) closeForm() {
@@ -121,7 +126,7 @@ func (model *Model) closeForm() {
 		model.flow = nil
 	}
 	model.form = nil
-	model.status = "Form cancelled; no write dispatched."
+	model.status = ""
 }
 
 const formFieldBytesMax = 1 << 20
@@ -136,47 +141,63 @@ func (model *Model) updateForm(message tea.KeyMsg) tea.Cmd {
 func (model *Model) updateFormField(message tea.KeyMsg) tea.Cmd {
 	currentForm := model.form
 	currentForm.assertValid()
+	indices := currentForm.fieldIndices()
+	position := currentForm.cursorPosition(indices)
 	switch message.String() {
-	case "pgdown":
-		currentForm.ContextOffset = min(
-			len(currentForm.Context), currentForm.ContextOffset+max(1, (model.height-12)/2),
-		)
-		return nil
-	case "pgup":
-		currentForm.ContextOffset = max(0, currentForm.ContextOffset-max(1, (model.height-12)/2))
+	case "pgdown", "pgup":
+		height := model.bodyHeight()
+		width, _ := model.modalContentSize(height)
+		_, contextHeight := formGeometry(currentForm, width, height)
+		page := wrappedPage(currentForm.Context, width, 0, max(1, contextHeight))
+		last := max(0, page.totalRows-max(1, contextHeight))
+		delta := max(1, contextHeight)
+		if message.String() == "pgup" {
+			delta = -delta
+		}
+		currentForm.ContextOffset = max(0, min(last, min(currentForm.ContextOffset, last)+delta))
 		return nil
 	case "esc":
 		model.closeForm()
 		return nil
 	case "ctrl+s":
 		return model.submitForm()
-	case "tab", "enter":
-		currentForm.Cursor = (currentForm.Cursor + 1) % len(currentForm.Fields)
-	case "shift+tab":
-		count := len(currentForm.Fields)
-		currentForm.Cursor = (currentForm.Cursor + count - 1) % count
-	case "ctrl+u":
-		currentForm.Fields[currentForm.Cursor].setText("")
-	case "backspace", "ctrl+h":
-		characters := []rune(currentForm.Fields[currentForm.Cursor].text())
-		if len(characters) > 0 {
-			currentForm.Fields[currentForm.Cursor].setText(string(characters[:len(characters)-1]))
+	case "enter":
+		if currentForm.EnterSubmits {
+			return model.submitForm()
 		}
+		fallthrough
+	case "tab", "down":
+		currentForm.Cursor = indices[(position+1)%len(indices)]
+	case "shift+tab", "up":
+		currentForm.Cursor = indices[(position+len(indices)-1)%len(indices)]
 	default:
-		if message.Type == tea.KeyRunes {
-			value, err := formInput(currentForm.Fields[currentForm.Cursor], message.Runes)
-			if err != nil {
-				model.error(err)
-				return nil
-			}
-			currentForm.Fields[currentForm.Cursor].setText(value)
+		if len(currentForm.Choices[currentForm.Cursor]) > 0 {
+			currentForm.updateChoice(message)
+		} else {
+			model.editFormField(message)
 		}
 	}
 	return nil
 }
 
-// Batch each input message into one copy. Repeated string concatenation made
-// a large paste quadratic, and a partial paste must never change a confirmation.
+func (model *Model) submitForm() tea.Cmd {
+	current := model.form
+	current.assertValid()
+	width, _ := model.modalContentSize(model.bodyHeight())
+	_, contextHeight := formGeometry(current, width, model.bodyHeight())
+	if current.Context != "" && (contextHeight == 0 || model.width < 20) {
+		model.status = "Resize to review the preview"
+		return nil
+	}
+	values := make([]string, len(current.Fields))
+	for index, field := range current.Fields {
+		values[index] = field.text()
+	}
+	model.form = nil
+	return current.Accept(values)
+}
+
+// Reject pastes atomically; never partially change a confirmation.
 func formInput(current field, input []rune) (string, error) {
 	if len(input) > formFieldBytesMax {
 		return "", errors.New("form input exceeds 1 MiB")
@@ -200,63 +221,4 @@ func formInput(current field, input []rune) (string, error) {
 		}
 	}
 	return value.String(), nil
-}
-
-func (model *Model) formView() string {
-	currentForm := model.form
-	var output strings.Builder
-	output.WriteString(Literal(currentForm.Title))
-	output.WriteByte('\n')
-	wrapped := []string{}
-	for _, line := range strings.Split(currentForm.Context, "\n") {
-		wrapped = append(wrapped, ansi.Wrap(Literal(line), max(20, model.width-2), " "))
-	}
-	lines := strings.Split(strings.Join(wrapped, "\n"), "\n")
-	page := max(2, model.height-14)
-	offset := min(currentForm.ContextOffset, max(0, len(lines)-page))
-	for _, line := range lines[offset:min(len(lines), offset+page)] {
-		output.WriteString(line)
-		output.WriteByte('\n')
-	}
-	if len(lines) > page {
-		fmt.Fprintf(
-			&output,
-			"Context lines %d–%d/%d · PgUp/PgDn scroll complete preview\n",
-			offset+1,
-			min(len(lines), offset+page),
-			len(lines),
-		)
-	}
-	start := max(0, currentForm.Cursor-5)
-	for index := start; index < min(len(currentForm.Fields), start+6); index++ {
-		field := currentForm.Fields[index]
-		mark := "  "
-		if index == currentForm.Cursor {
-			mark = "> "
-		}
-		var value string
-		if field.Secret {
-			value = strings.Repeat("•", utf8.RuneCountInString(field.text()))
-		} else {
-			value = Literal(field.text())
-		}
-		output.WriteString(mark)
-		output.WriteString(Literal(field.Label))
-		output.WriteString(": ")
-		output.WriteString(value)
-		output.WriteByte('\n')
-	}
-	output.WriteString("Tab/Enter next · Ctrl+S submit · Ctrl+U clear · Esc cancel")
-	return output.String()
-}
-
-func (model *Model) submitForm() tea.Cmd {
-	current := model.form
-	current.assertValid()
-	values := make([]string, 0, len(current.Fields))
-	for _, field := range current.Fields {
-		values = append(values, field.text())
-	}
-	model.form = nil
-	return current.Accept(values)
 }
